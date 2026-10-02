@@ -215,7 +215,7 @@ async def test_connection(request: Request):
         return {"success": False, "error": install_hint("ffprobe", "FFPROBE_EXE")}
     try:
         out = subprocess.run(
-            [ffprobe, "-v", "error", "-rtsp_transport", "tcp", "-rw_timeout", "5000000",
+            [ffprobe, "-v", "error", "-rtsp_transport", "tcp", "-timeout", "5000000",
              "-show_entries", "stream=codec_name,width,height", "-of", "json", rtsp],
             capture_output=True, text=True, timeout=7,
         )
