@@ -85,7 +85,20 @@ async function connectSession(cfg: IpCamConfig) {
       } else {
         throw new Error('HLS not supported in this browser');
       }
-      await video.play();
+      // hls.js / MSE can replace the media source while play() is pending.
+      // Chromium then rejects play() with AbortError ("interrupted by a new
+      // load request") even though the HLS stream is healthy. Treat only that
+      // specific race as transient; real playback failures still surface.
+      try {
+        await video.play();
+      } catch (err) {
+        const name = err instanceof DOMException ? err.name : '';
+        const msg = err instanceof Error ? err.message : String(err);
+        const transient = name === 'AbortError'
+          || /play\(\) request was interrupted by a new load request/i.test(msg);
+        if (!transient) throw err;
+        console.debug('[IpCamera] transient play() interruption; waiting for HLS media to settle');
+      }
 
       // Wait for real video dimensions before capturing, otherwise the
       // resulting track is a black 0x0 / not-yet-decoded surface.
