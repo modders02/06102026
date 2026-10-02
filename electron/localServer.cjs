@@ -250,9 +250,14 @@ async function waitForReady(totalMs = 30000, intervalMs = 1000) {
  *    local:dev / start_server.bat manually never gets a second instance)
  */
 function shouldManage() {
+  // Auto-manage the local camera stack in BOTH development and packaged builds.
+  // The startup path probes /status first, so an already-running manual bridge
+  // is reused instead of creating a duplicate instance.
+  //
+  // Set MSDS_MANAGE_LOCAL_SERVER=0 only when you explicitly want to run
+  // local-server\\start_server.bat yourself.
   if (process.env.MSDS_MANAGE_LOCAL_SERVER === '0') return false;
-  if (process.env.MSDS_MANAGE_LOCAL_SERVER === '1') return true;
-  return app.isPackaged;
+  return true;
 }
 
 /**
