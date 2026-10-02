@@ -31,7 +31,7 @@ def probe_streams(rtsp: str, transport: str = "tcp", timeout: int = 20) -> dict:
     if not ffprobe:
         return {"ok": False, "streams": [], "error": install_hint("ffprobe", "FFPROBE_EXE")}
     cmd = [
-        ffprobe, "-v", "error", "-rtsp_transport", transport, "-rw_timeout", "15000000",
+        ffprobe, "-v", "error", "-rtsp_transport", transport, "-timeout", "15000000",
         "-show_entries", "stream=index,codec_type,codec_name,sample_rate,channels",
         "-of", "json", rtsp,
     ]
@@ -203,7 +203,7 @@ class Camera:
         return [
             ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "warning",
             "-rtsp_transport", cand["transport"],
-            "-rw_timeout", "15000000",
+            "-timeout", "15000000",
             "-use_wallclock_as_timestamps", "1",
             "-fflags", "+genpts+discardcorrupt",
             "-i", cand["url"],
@@ -474,7 +474,7 @@ class Camera:
                 try:
                     out = subprocess.run(
                         [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
-                         "-rtsp_transport", cand["transport"], "-rw_timeout", "15000000",
+                         "-rtsp_transport", cand["transport"], "-timeout", "15000000",
                          "-i", cand["url"], "-vn", "-map", "0:a:0",
                          "-acodec", "pcm_s16le", "-ac", "1", "-ar", "16000",
                          "-t", "5", "-f", "wav", "-y", wav],
