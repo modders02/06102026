@@ -20,6 +20,7 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
+import json
 import zipfile
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -32,13 +33,16 @@ FFMPEG_URLS = {
     "darwin-ffprobe": "https://evermeet.cx/ffprobe/getrelease/zip",
 }
 
-MEDIAMTX_BASE = "https://github.com/bluenviron/mediamtx/releases/latest/download"
-MEDIAMTX_ASSETS = {
-    ("windows", "amd64"): "mediamtx_v1.15.1_windows_amd64.zip",
-    ("linux", "amd64"): "mediamtx_v1.15.1_linux_amd64.tar.gz",
-    ("linux", "arm64"): "mediamtx_v1.15.1_linux_arm64v8.tar.gz",
-    ("darwin", "amd64"): "mediamtx_v1.15.1_darwin_amd64.tar.gz",
-    ("darwin", "arm64"): "mediamtx_v1.15.1_darwin_arm64.tar.gz",
+MEDIAMTX_RELEASE_API = "https://api.github.com/repos/bluenviron/mediamtx/releases/latest"
+
+# MediaMTX asset names include the release version. Resolve the current release
+# dynamically instead of combining /latest/ with a stale hard-coded version.
+MEDIAMTX_SUFFIXES = {
+    ("windows", "amd64"): "windows_amd64.zip",
+    ("linux", "amd64"): "linux_amd64.tar.gz",
+    ("linux", "arm64"): "linux_arm64v8.tar.gz",
+    ("darwin", "amd64"): "darwin_amd64.tar.gz",
+    ("darwin", "arm64"): "darwin_arm64.tar.gz",
 }
 
 
@@ -115,16 +119,50 @@ def fetch_ffmpeg() -> None:
         extract_tar(download(FFMPEG_URLS["linux"]), ["ffmpeg", "ffprobe"], "r:xz")
 
 
+def latest_mediamtx_asset() -> tuple[str, str] | None:
+    suffix = MEDIAMTX_SUFFIXES.get((osname(), arch()))
+    if not suffix:
+        return None
+
+    print("Resolving latest MediaMTX release…")
+    raw = download(MEDIAMTX_RELEASE_API)
+    release = json.loads(raw.decode("utf-8"))
+    tag = str(release.get("tag_name") or "").strip()
+    assets = release.get("assets") or []
+
+    expected = f"mediamtx_{tag}_{suffix}" if tag else ""
+    for item in assets:
+        name = str(item.get("name") or "")
+        url = str(item.get("browser_download_url") or "")
+        if name == expected and url:
+            return name, url
+
+    # Be tolerant of future tag/name formatting changes.
+    for item in assets:
+        name = str(item.get("name") or "")
+        url = str(item.get("browser_download_url") or "")
+        if name.startswith("mediamtx_") and name.endswith("_" + suffix) and url:
+            return name, url
+
+    raise RuntimeError(
+        f"MediaMTX latest release {tag or '(unknown)'} has no asset for "
+        f"{osname()}/{arch()} ({suffix})"
+    )
+
+
 def fetch_mediamtx() -> None:
     if have("mediamtx"):
         print("mediamtx already present in bin/ — skipping")
         return
-    asset = MEDIAMTX_ASSETS.get((osname(), arch()))
-    if not asset:
+
+    resolved = latest_mediamtx_asset()
+    if not resolved:
         print(f"No MediaMTX build for {osname()}/{arch()} — download it manually into bin/")
         return
-    print("Fetching MediaMTX…")
-    data = download(f"{MEDIAMTX_BASE}/{asset}")
+
+    asset, url = resolved
+    print(f"Fetching MediaMTX ({asset})…")
+    data = download(url)
     if asset.endswith(".zip"):
         extract_zip(data, ["mediamtx"])
     else:
