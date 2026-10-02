@@ -23,6 +23,7 @@ import {
   slotRtspMasked,
   slotRtspWithPort,
   AUTO_RTSP_PORTS,
+  AUTO_RTSP_PATHS,
   loadServerHost,
   serverUrlFor,
   DEFAULT_RTSP_PORT,
@@ -177,19 +178,54 @@ function SlotCard({
     if (!slot.ip.trim()) { setError('Enter the camera IP address first.'); return; }
     setBusy('start'); setError(''); setMessage(`Connecting ${slot.name}…`);
     try {
-      // Auto port: find a port this camera actually answers on, then remember it.
+      // Auto-discover the full RTSP endpoint, not just the port. Different
+      // camera brands expose video under different paths (/stream1,
+      // /live/ch00_1, /Streaming/Channels/101, ...).
       let active = slot;
-      if (!(Number(slot.port) > 0)) {
-        setMessage(`Looking for the right port on ${slot.ip}…`);
-        for (const port of AUTO_RTSP_PORTS) {
+      const preferredPort = Number(slot.port) > 0 ? Number(slot.port) : null;
+      const ports = [
+        ...(preferredPort ? [preferredPort] : []),
+        ...AUTO_RTSP_PORTS.filter(p => p !== preferredPort),
+      ];
+      const preferredPath = (slot.streamPath || DEFAULT_STREAM_PATH).trim() || DEFAULT_STREAM_PATH;
+      const paths = [
+        preferredPath,
+        ...AUTO_RTSP_PATHS.filter(p => p !== preferredPath),
+      ];
+
+      setMessage(`Finding the RTSP stream on ${slot.ip}…`);
+      let found = false;
+      let lastProbeError = '';
+      for (const port of ports) {
+        for (const streamPath of paths) {
           try {
-            const probe = await testCamera(server, slotRtspWithPort(slot, port));
-            if (probe.success) { active = { ...slot, port }; onPatch({ port }); break; }
-          } catch { /* try the next port */ }
+            const candidate = { ...slot, port, streamPath };
+            const probe = await testCamera(server, slotRtsp(candidate));
+            if (probe.success) {
+              active = candidate;
+              onPatch({ port, streamPath });
+              found = true;
+              break;
+            }
+            lastProbeError = probe.error || lastProbeError;
+          } catch (err) {
+            lastProbeError = err instanceof Error ? err.message : String(err);
+          }
         }
-        if (!(Number(active.port) > 0)) active = { ...slot, port: DEFAULT_RTSP_PORT };
-        setMessage(`Connecting ${slot.name} on port ${active.port}…`);
+        if (found) break;
       }
+
+      if (!found) {
+        const authHint = !slot.username.trim()
+          ? ' If the camera requires login, expand the camera details and enter its username and password.'
+          : '';
+        setError(
+          `No working RTSP stream was found on ${slot.ip}.${authHint}` +
+          (lastProbeError ? ` Last error: ${lastProbeError}` : ''),
+        );
+        return;
+      }
+      setMessage(`Connecting ${slot.name} at ${active.ip}:${active.port}${active.streamPath}…`);
 
       // Sync EVERY configured camera, otherwise the backend drops the others.
       const configured = allSlots.filter(s => s.ip.trim());
