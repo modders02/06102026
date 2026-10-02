@@ -4,12 +4,14 @@ from __future__ import annotations
 import glob
 import json
 import os
+import queue
 import shutil
 import subprocess
 import tempfile
 import threading
 import time
 import urllib.request
+import wave
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -199,22 +201,25 @@ class Camera:
             self.has_audio_track = None
         return last_result
 
-    def _segmenter_cmd(self, ffmpeg: str, cand: dict, pattern: str) -> List[str]:
+    def _audio_pcm_cmd(self, ffmpeg: str, cand: dict) -> List[str]:
+        """Decode RTSP audio to a continuous 16 kHz mono PCM pipe.
+
+        Do not use FFmpeg's segment muxer here. Some CCTV / MediaMTX streams
+        have incomplete or irregular packet timestamps, which can leave the
+        segment muxer running forever without closing a WAV file. Raw PCM is
+        timestamp-independent; Python creates deterministic fixed-size WAV
+        chunks for Whisper instead.
+        """
         return [
             ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "warning",
             "-rtsp_transport", cand["transport"],
             "-timeout", "15000000",
-            "-use_wallclock_as_timestamps", "1",
-            "-fflags", "+genpts+discardcorrupt",
             "-i", cand["url"],
             "-vn", "-sn", "-dn",
             # `a:0` picks the first audio stream whatever its index is.
             "-map", "0:a:0",
-            "-af", "aresample=async=1",
             "-acodec", "pcm_s16le", "-ac", "1", "-ar", "16000",
-            "-f", "segment", "-segment_time", str(AUDIO_CHUNK_SECONDS),
-            "-reset_timestamps", "1",
-            "-y", pattern,
+            "-f", "s16le", "pipe:1",
         ]
 
 
@@ -230,6 +235,32 @@ class Camera:
                 self.audio_ffmpeg_error = line[-500:]
         except Exception:
             pass
+
+    def _pump_audio_stdout(self, proc: subprocess.Popen, out: "queue.Queue[bytes]") -> None:
+        """Move FFmpeg PCM stdout into a queue without blocking the audio loop."""
+        if not proc.stdout:
+            return
+        try:
+            while not self.stop_flag.is_set():
+                data = proc.stdout.read(4096)
+                if not data:
+                    break
+                try:
+                    out.put(data, timeout=0.5)
+                except queue.Full:
+                    # Whisper is temporarily slower than real time. Drop the
+                    # oldest buffered block rather than deadlocking FFmpeg.
+                    try:
+                        out.get_nowait()
+                    except queue.Empty:
+                        pass
+                    try:
+                        out.put_nowait(data)
+                    except queue.Full:
+                        pass
+        except Exception as exc:
+            if not self.stop_flag.is_set():
+                self.audio_error = f"Audio PCM reader failed: {exc}"
 
     def _handle_chunk(self, wav: str):
         size = os.path.getsize(wav)
@@ -281,20 +312,22 @@ class Camera:
         print(f"[Audio {self.id}] transcript: {transcript}", flush=True)
 
     def _audio_loop(self):
-        """Continuous RTSP audio capture.
+        """Continuous RTSP audio capture -> raw PCM -> fixed WAV chunks -> Whisper.
 
-        A long-lived ffmpeg segmenter writes WAV segments that are transcribed
-        as soon as they close. If a source never produces a chunk we rotate to
-        the next candidate (MediaMTX republish -> camera TCP -> camera UDP) so a
-        camera that only allows one RTSP session still gets transcribed.
+        The FFmpeg process remains open for each candidate source. Python reads
+        its raw 16 kHz mono PCM stream and creates one WAV every
+        AUDIO_CHUNK_SECONDS seconds. This avoids depending on RTSP timestamps
+        for segment boundaries.
         """
         tmpdir = tempfile.mkdtemp(prefix=f"msd-audio-{self.path}-")
-        pattern = os.path.join(tmpdir, "chunk-%05d.wav")
+        wav_path = os.path.join(tmpdir, "live-chunk.wav")
         last_probe = 0.0
         cand_index = 0
+        bytes_per_second = 16000 * 2  # mono s16le
+        chunk_bytes = bytes_per_second * AUDIO_CHUNK_SECONDS
+        no_pcm_timeout = max(12.0, AUDIO_CHUNK_SECONDS * 3.0)
 
-        # Load Whisper once up-front so the failure is visible immediately
-        # instead of only after the first chunk.
+        # Load Whisper once up-front so the failure is visible immediately.
         if WHISPER.available:
             try:
                 WHISPER.load()
@@ -303,9 +336,24 @@ class Camera:
         else:
             self.audio_error = WHISPER.error or "Whisper is unavailable"
 
+        def transcribe_pcm(data: bytes) -> None:
+            if len(data) < 16000:  # less than ~0.5 s
+                return
+            with wave.open(wav_path, "wb") as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(2)
+                wav.setframerate(16000)
+                wav.writeframes(data)
+            print(
+                f"[Audio {self.id}] PCM chunk {len(data)} bytes "
+                f"(~{len(data) / bytes_per_second:.1f}s) -> Whisper",
+                flush=True,
+            )
+            self._handle_chunk(wav_path)
+
         try:
             while not self.stop_flag.is_set():
-                # 1. Is there an audio track at all?
+                # 1. Confirm whether an audio track exists when possible.
                 if self.has_audio_track is not True and time.time() - last_probe > 45:
                     last_probe = time.time()
                     self.probe_audio()
@@ -315,11 +363,12 @@ class Camera:
                     self.stop_flag.wait(30)
                     continue
                 if self.has_audio_track is None and self.audio_probe_error:
-                    # Probe failed; still try to capture — some cameras refuse ffprobe.
-                    self.audio_error = (f"Could not inspect the camera's audio track "
-                                        f"({self.audio_probe_error}); trying anyway.")
+                    self.audio_error = (
+                        f"Could not inspect the camera's audio track "
+                        f"({self.audio_probe_error}); trying anyway."
+                    )
 
-                # 2. Pick the next audio source to try.
+                # 2. Pick the next audio source.
                 candidates = self._audio_candidates()
                 if not candidates:
                     self.audio_connected = False
@@ -337,22 +386,20 @@ class Camera:
                     self.stop_flag.wait(10)
                     continue
 
-                for stale in glob.glob(os.path.join(tmpdir, "chunk-*.wav")):
-                    try:
-                        os.remove(stale)
-                    except OSError:
-                        pass
-
                 try:
                     self.audio_proc = subprocess.Popen(
-                        self._segmenter_cmd(ffmpeg, cand, pattern),
-                        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                        self._audio_pcm_cmd(ffmpeg, cand),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        bufsize=0,
                         creationflags=no_window_flags(),
                     )
                 except (OSError, subprocess.SubprocessError) as exc:
                     self.audio_connected = False
-                    self.audio_error = (f"Could not start FFmpeg audio capture: {exc}. "
-                                        f"{install_hint('ffmpeg', 'FFMPEG_EXE')}")
+                    self.audio_error = (
+                        f"Could not start FFmpeg audio capture: {exc}. "
+                        f"{install_hint('ffmpeg', 'FFMPEG_EXE')}"
+                    )
                     self.error = self.audio_error
                     self.stop_flag.wait(10)
                     continue
@@ -361,32 +408,72 @@ class Camera:
                 self.audio_source = cand["label"]
                 if cand["label"] not in self.audio_sources_tried:
                     self.audio_sources_tried.append(cand["label"])
-                print(f"[Audio {self.id}] capturing from {cand['label']} ({cand['url']})",
-                      flush=True)
+                print(
+                    f"[Audio {self.id}] capturing PCM from {cand['label']} ({cand['url']})",
+                    flush=True,
+                )
                 chunks_before = self.audio_chunks
-                threading.Thread(target=self._drain_audio_stderr,
-                                 args=(self.audio_proc,), daemon=True).start()
 
-                # 3. Consume closed segments while ffmpeg keeps running.
+                threading.Thread(
+                    target=self._drain_audio_stderr,
+                    args=(self.audio_proc,),
+                    daemon=True,
+                ).start()
+
+                pcm_queue: "queue.Queue[bytes]" = queue.Queue(maxsize=256)
+                threading.Thread(
+                    target=self._pump_audio_stdout,
+                    args=(self.audio_proc, pcm_queue),
+                    daemon=True,
+                ).start()
+
+                pcm = bytearray()
+                last_pcm_at = time.time()
+
+                # 3. Build deterministic fixed-size chunks from raw PCM.
                 while not self.stop_flag.is_set() and self.audio_proc.poll() is None:
-                    files = sorted(glob.glob(os.path.join(tmpdir, "chunk-*.wav")))
-                    # the newest file is still being written to
-                    for wav in files[:-1]:
-                        if self.stop_flag.is_set():
-                            break
+                    try:
+                        block = pcm_queue.get(timeout=0.5)
+                        if block:
+                            pcm.extend(block)
+                            last_pcm_at = time.time()
+                    except queue.Empty:
+                        pass
+
+                    while len(pcm) >= chunk_bytes and not self.stop_flag.is_set():
+                        chunk = bytes(pcm[:chunk_bytes])
+                        del pcm[:chunk_bytes]
                         try:
-                            self._handle_chunk(wav)
-                        except Exception as exc:  # keep this camera alive
+                            transcribe_pcm(chunk)
+                            self.audio_error = None
+                        except Exception as exc:
                             self.audio_error = f"Audio chunk failed: {exc}"
-                        finally:
-                            try:
-                                os.remove(wav)
-                            except OSError:
-                                pass
-                    self.stop_flag.wait(0.5)
+
+                    # FFmpeg can remain connected to an RTSP stream that contains
+                    # no audio packets. Rotate sources instead of waiting forever.
+                    if (
+                        self.audio_chunks == chunks_before
+                        and time.time() - last_pcm_at > no_pcm_timeout
+                    ):
+                        self.audio_ffmpeg_error = (
+                            self.audio_ffmpeg_error
+                            or f"no PCM audio received for {int(no_pcm_timeout)} seconds"
+                        )
+                        try:
+                            self.audio_proc.terminate()
+                        except Exception:
+                            pass
+                        break
 
                 if self.stop_flag.is_set():
                     break
+
+                # Process a useful final partial chunk before switching sources.
+                if len(pcm) >= 16000:
+                    try:
+                        transcribe_pcm(bytes(pcm))
+                    except Exception as exc:
+                        self.audio_error = f"Audio chunk failed: {exc}"
 
                 code = self.audio_proc.poll()
                 produced = self.audio_chunks > chunks_before
@@ -394,7 +481,6 @@ class Camera:
                 self.audio_restarts += 1
                 detail = self.audio_ffmpeg_error or "no details"
                 if not produced:
-                    # This source never delivered sound — try the next one.
                     cand_index += 1
                     nxt = candidates[cand_index % len(candidates)]["label"]
                     self.audio_error = (
@@ -402,15 +488,16 @@ class Camera:
                         f"Trying {nxt}…"
                     )
                 elif code not in (0, None):
-                    self.audio_error = (f"FFmpeg audio capture stopped (exit {code}): {detail}. "
-                                        "Reconnecting…")
+                    self.audio_error = (
+                        f"FFmpeg audio capture stopped (exit {code}): {detail}. "
+                        "Reconnecting…"
+                    )
                 else:
                     self.audio_error = "Camera audio stream ended; reconnecting…"
-                # force a re-probe on the next round
-                self.has_audio_track = None
 
+                self.has_audio_track = None
                 last_probe = 0.0
-                self.stop_flag.wait(3)
+                self.stop_flag.wait(2)
         finally:
             self.audio_connected = False
             if self.audio_proc and self.audio_proc.poll() is None:
