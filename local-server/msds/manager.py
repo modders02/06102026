@@ -84,9 +84,24 @@ def stop_all_cameras() -> None:
 
 
 def watchdog() -> None:
-    """Restart only the camera that died — never touch the others."""
+    """Keep MediaMTX and every enabled camera pipeline alive.
+
+    MediaMTX is a long-running service and must be restarted if it exits.
+    FFmpeg is intentionally per-camera and is restarted independently below.
+    FFprobe is an on-demand diagnostic executable, not a background service.
+    """
     while True:
         time.sleep(5)
+
+        # MediaMTX owns the RTSP publish target and HLS server.  If it dies,
+        # FFmpeg may still appear alive briefly but HLS manifests disappear,
+        # producing hls.js manifestLoadError in the renderer.
+        if not mediamtx_running():
+            try:
+                start_mediamtx()
+            except Exception as exc:
+                print(f"[MediaMTX watchdog] restart failed: {exc}", flush=True)
+
         for cam in snapshot():
             if not cam.enabled or cam.stop_flag.is_set():
                 continue
