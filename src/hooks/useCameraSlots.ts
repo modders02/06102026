@@ -31,6 +31,17 @@ export const DEFAULT_RTSP_PORT = 554;
 export const DEFAULT_STREAM_PATH = '/stream1';
 /** Ports tried automatically when the slot is left on "Auto" (port = 0). */
 export const AUTO_RTSP_PORTS = [554, 8554, 88, 10554, 8080];
+/** Common RTSP stream paths tried automatically during Connect. */
+export const AUTO_RTSP_PATHS = [
+  '/stream1',
+  '/live/ch00_1',
+  '/Streaming/Channels/101',
+  '/cam/realmonitor?channel=1&subtype=0',
+  '/h264Preview_01_main',
+  '/11',
+  '/0',
+  '/live',
+];
 
 const KEY = 'msd-camera-slots-v1';
 const EVT = 'msd-camera-slots-changed';
