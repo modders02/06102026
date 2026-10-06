@@ -9,6 +9,15 @@ const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 const SEVERITY_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+const MAX_SNAPSHOT_BASE64_CHARS = 2_800_000;
+
+function parseSnapshotAttachment(value: unknown) {
+  if (typeof value !== 'string' || value.length > MAX_SNAPSHOT_BASE64_CHARS + 100) return null;
+  const match = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(value);
+  if (!match || match[2].length > MAX_SNAPSHOT_BASE64_CHARS) return null;
+  const extension = match[1] === 'jpeg' ? 'jpg' : match[1];
+  return { content: match[2], name: `msds-verification.${extension}` };
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -54,6 +63,7 @@ Deno.serve(async (req) => {
       : new Date();
     const confidence = Number((raw as any).confidence);
     const saliencyScore = Number((raw as any).saliencyScore);
+    const snapshotAttachment = parseSnapshotAttachment((raw as any).snapshotDataUrl);
     const rawDetails = (raw as any).details;
     const details: [string, string][] =
       rawDetails && typeof rawDetails === 'object' && !Array.isArray(rawDetails)
@@ -161,6 +171,7 @@ Deno.serve(async (req) => {
             <p style="margin:4px 0 0;color:${accent};font-weight:700;letter-spacing:.04em">${escapeHtml(severity.toUpperCase())} PRIORITY ALERT</p>
           </div>
           <p style="margin:0 0 16px;padding:14px;background:#f1f5f9;border-radius:10px;font-size:17px">${escapeHtml(message)}</p>
+          ${snapshotAttachment ? '<p style="margin:0 0 14px;color:#475569"><strong>Verification image:</strong> a camera frame captured at the verified multimodal alert is attached to this email.</p>' : ''}
           <table style="border-collapse:collapse;width:100%;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;font-size:15px">
             ${rowsHtml}
           </table>
@@ -179,6 +190,7 @@ Deno.serve(async (req) => {
         to,
         subject: subject.slice(0, 200),
         htmlContent,
+        attachment: snapshotAttachment ? [snapshotAttachment] : undefined,
       }),
     });
 
