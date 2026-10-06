@@ -1,8 +1,8 @@
 export const MULTIMODAL_FUSION_WINDOW_MS = 10_000;
 export const DISTRESS_FACE_MIN_CONFIDENCE = 0.55;
 
-export type DistressFaceLabel = 'Angry' | 'Frightened';
-export type DistressKeyword = 'help' | 'tulong';
+export type DistressFaceLabel = 'Angry' | 'Frightened' | 'Sad';
+export type DistressKeyword = 'help' | 'tulong' | 'scream';
 
 export interface DistressFaceSignal {
   label: DistressFaceLabel;
@@ -27,7 +27,8 @@ export interface VerifiedMultimodalDistress {
 export function isMultimodalDistressExpression(expression: string | null | undefined) {
   const normalized = (expression ?? '').trim().toLowerCase();
   return normalized === 'angry' || normalized === 'anger'
-    || normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened';
+    || normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
+    || normalized === 'sad';
 }
 
 export function makeDistressFaceSignal(
@@ -42,6 +43,9 @@ export function makeDistressFaceSignal(
   }
   if (normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened') {
     return { label: 'Frightened', confidence, at };
+  }
+  if (normalized === 'sad') {
+    return { label: 'Sad', confidence, at };
   }
   return null;
 }
@@ -69,12 +73,36 @@ export function makeDistressSpeechSignal(
   };
 }
 
+export function makeDistressSoundSignal(
+  sound: string | null | undefined,
+  confidence = 1,
+  at = Date.now(),
+): DistressSpeechSignal | null {
+  const normalized = (sound ?? '').trim().toLowerCase();
+  if (normalized !== 'scream' && normalized !== 'screaming') return null;
+  return {
+    keyword: 'scream',
+    transcript: '',
+    confidence: Math.max(0, Math.min(1, Number.isFinite(confidence) ? confidence : 0)),
+    at,
+  };
+}
+
 export function fuseDistressSignals(
   face: DistressFaceSignal | null | undefined,
   speech: DistressSpeechSignal | null | undefined,
   windowMs = MULTIMODAL_FUSION_WINDOW_MS,
 ): VerifiedMultimodalDistress | null {
   if (!face || !speech || Math.abs(face.at - speech.at) > windowMs) return null;
+
+  const compatible =
+    ((speech.keyword === 'help' || speech.keyword === 'tulong')
+      && (face.label === 'Angry' || face.label === 'Frightened'))
+    || (speech.keyword === 'scream'
+      && (face.label === 'Frightened' || face.label === 'Sad'));
+
+  if (!compatible) return null;
+
   return {
     face,
     speech,
@@ -84,5 +112,6 @@ export function fuseDistressSignals(
 }
 
 export function multimodalDistressLabel(result: VerifiedMultimodalDistress) {
-  return `Verified distress: ${result.face.label} + "${result.speech.keyword}"`;
+  const cue = result.speech.keyword === 'scream' ? 'screaming' : `"${result.speech.keyword}"`;
+  return `Verified distress: ${result.face.label} + ${cue}`;
 }
