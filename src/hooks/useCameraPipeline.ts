@@ -707,10 +707,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         const fresh = events ?? [];
         if (fresh.length) {
           lastAudioRef.current = fresh[fresh.length - 1].timestamp;
-          const spoken = fresh.map(e => e.transcript).filter(Boolean).join(' ').trim();
-          if (spoken && spoken !== lastShownRef.current) {
-            lastShownRef.current = spoken;
-            showTranscript(spoken);
+          const newestSpeech = [...fresh].reverse().find(e => e.transcript?.trim())?.transcript?.trim() ?? '';
+          if (newestSpeech && newestSpeech !== lastShownRef.current) {
+            lastShownRef.current = newestSpeech;
+            showTranscript(newestSpeech);
           }
           for (const e of fresh) {
             // Backend keyword list OR the full Tagalog/English safety library.
@@ -773,7 +773,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       }
     };
 
-    const id = window.setInterval(poll, 1500);
+    const id = window.setInterval(poll, 400);
     void poll();
     return () => { stopped = true; window.clearInterval(id); patch({ audioListening: false }); };
   }, [camera.enabled, camera.id, sourceStream, settings.pythonServer, settings.audioThreshold, patch, emit, maybeEmitVerifiedDistress, maybeEmitVerifiedFire, showTranscript]);
