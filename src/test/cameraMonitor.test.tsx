@@ -20,7 +20,7 @@ const mocked = vi.hoisted(() => ({
   analyzeFace: vi.fn(async () => {}), loadDetector: vi.fn(async () => {}), detectObjects: vi.fn(),
   computeSaliency: vi.fn(), detectFire: vi.fn(),
   openCameraWebRtc: vi.fn(), rtc: [] as MockRtc[],
-  distress: { hasFace: false, expression: null as string | null, distressScore: 0, distressLevel: 'none' as 'none' | 'mild' | 'severe' },
+  distress: { hasFace: false, expression: null as string | null, probability: 0, distressScore: 0, distressLevel: 'none' as 'none' | 'mild' | 'severe' },
 }));
 vi.mock('@/lib/cameraWebRtc', () => ({ openCameraWebRtc: mocked.openCameraWebRtc }));
 vi.mock('hls.js', () => ({
@@ -68,7 +68,7 @@ beforeEach(() => {
   mocked.loadDetector.mockClear();
   mocked.detectObjects.mockReset().mockResolvedValue([]);
   mocked.analyzeFace.mockReset().mockResolvedValue(undefined);
-  mocked.distress = { hasFace: false, expression: null, distressScore: 0, distressLevel: 'none' };
+  mocked.distress = { hasFace: false, expression: null, probability: 0, distressScore: 0, distressLevel: 'none' };
   mocked.computeSaliency.mockClear();
   mocked.detectFire.mockReset().mockReturnValue({ fireDetected: false, smokeEmergency: false, confidence: 0, smokeRatio: 0 });
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
@@ -362,10 +362,33 @@ describe('camera snapshots and page-scoped playback', () => {
     await act(async () => {});
     expect(mocked.analyzeFace).toHaveBeenCalledOnce();
     rerender(<CameraMonitor slot={slot} monitoring={false} playbackEnabled={false} onEvent={onEvent} />);
-    mocked.distress = { hasFace: true, expression: 'fearful', distressScore: 99, distressLevel: 'severe' };
+    mocked.distress = { hasFace: true, expression: 'fearful', probability: 0.99, distressScore: 99, distressLevel: 'severe' };
     rerender(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => { finishFace(); });
     expect(onEvent).not.toHaveBeenCalled();
+    expect(getCameraSession('slot-1').runtime?.faceDistress.detected).toBe(false);
+  });
+
+  it.each([
+    ['happy', 'Happy'],
+    ['sad', 'Sad'],
+    ['surprised', 'Shock'],
+  ] as const)('records %s as a non-alert emotion event', async (expression, label) => {
+    mocked.analyzeFace.mockImplementationOnce(async () => {
+      mocked.distress = { hasFace: true, expression, probability: 0.94, distressScore: expression === 'sad' ? 94 : 0, distressLevel: expression === 'sad' ? 'severe' : 'none' };
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'emotion',
+      label,
+      confidence: 0.94,
+      cameraId: 'slot-1',
+    }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress' }));
     expect(getCameraSession('slot-1').runtime?.faceDistress.detected).toBe(false);
   });
 
