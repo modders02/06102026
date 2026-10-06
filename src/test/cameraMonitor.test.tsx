@@ -88,7 +88,8 @@ beforeEach(() => {
   localStorage.clear();
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-const safetyEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'help me', keyword: 'help', confidence: 0.99 };
+const helpSafetyEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'help me', keyword: 'help', confidence: 0.99 };
+const standaloneSafetyEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'call police', keyword: 'police', confidence: 0.99 };
 
 describe('camera snapshots and page-scoped playback', () => {
   it.each([1, 2])('uses stills for camera %s on Dashboard while visual and audio triggers continue', async index => {
@@ -114,7 +115,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(session.runtime?.frameHeight).toBe(180);
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'object', cameraId: `slot-${index}` }));
     expect(closeBitmap).toHaveBeenCalledOnce();
-    mocked.getAudioEvents.mockResolvedValueOnce({ events: [safetyEvent], status: null });
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [standaloneSafetyEvent], status: null });
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
       cameraId: `slot-${index}`, type: 'audio-distress', snapshot: 'data:image/jpeg;base64,preview',
@@ -132,7 +133,7 @@ describe('camera snapshots and page-scoped playback', () => {
   it('starts and removes playback on page changes without restarting audio or replaying its events', async () => {
     vi.stubGlobal('RTCPeerConnection', class {});
     const slot = { ...makeSlot(2), ip: '192.168.1.2', connected: true };
-    mocked.getAudioEvents.mockResolvedValueOnce({ events: [safetyEvent], status: null });
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [standaloneSafetyEvent], status: null });
     const onEvent = vi.fn();
     const { rerender } = render(<CameraMonitor slot={slot} monitoring={false} playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
@@ -148,7 +149,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce();
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(1);
-    expect(mocked.getAudioEvents).toHaveBeenLastCalledWith(expect.any(String), 'slot-2', safetyEvent.timestamp);
+    expect(mocked.getAudioEvents).toHaveBeenLastCalledWith(expect.any(String), 'slot-2', standaloneSafetyEvent.timestamp);
     expect(onEvent).toHaveBeenCalledOnce();
     rerender(<CameraMonitor slot={slot} monitoring={false} playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
@@ -179,7 +180,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(mocked.openCameraWebRtc).toHaveBeenCalledOnce();
     expect(mocked.getAudioEvents).toHaveBeenCalledTimes(1);
     expect(mocked.getCameraSnapshot).not.toHaveBeenCalled();
-    mocked.getAudioEvents.mockResolvedValueOnce({ events: [safetyEvent], status: null });
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [standaloneSafetyEvent], status: null });
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(latestHandler).toHaveBeenCalledWith(expect.objectContaining({ cameraId: 'slot-2', type: 'audio-distress' }));
     expect(firstHandler).not.toHaveBeenCalled();
@@ -444,7 +445,7 @@ describe('camera snapshots and page-scoped playback', () => {
   });
 
   it('does not alarm on help without Angry or Frightened', async () => {
-    mocked.getAudioEvents.mockResolvedValueOnce({ events: [safetyEvent], status: null });
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     const onEvent = vi.fn();
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
@@ -655,7 +656,7 @@ describe('camera snapshots and page-scoped playback', () => {
 
   it('closes realtime playback on leaving Cameras while preserving the last frame and backend audio cursor', async () => {
     vi.stubGlobal('RTCPeerConnection', class {});
-    mocked.getAudioEvents.mockResolvedValueOnce({ events: [safetyEvent], status: null });
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [standaloneSafetyEvent], status: null });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     const onEvent = vi.fn();
     const { rerender } = render(<CameraMonitor slot={slot} monitoring={false} playbackEnabled={false} onEvent={onEvent} />);
@@ -688,7 +689,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(mocked.players).toHaveLength(0);
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(mocked.getAudioEvents).toHaveBeenCalledTimes(3);
-    expect(mocked.getAudioEvents).toHaveBeenLastCalledWith(expect.any(String), 'slot-1', safetyEvent.timestamp);
+    expect(mocked.getAudioEvents).toHaveBeenLastCalledWith(expect.any(String), 'slot-1', standaloneSafetyEvent.timestamp);
     expect(onEvent).toHaveBeenCalledOnce();
     expect(mocked.openCameraWebRtc).toHaveBeenCalledOnce();
   });
