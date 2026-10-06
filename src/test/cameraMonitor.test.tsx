@@ -118,12 +118,12 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'object', cameraId: `slot-${index}` }));
     expect(closeBitmap).toHaveBeenCalledOnce();
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [standaloneSafetyEvent], status: null });
-    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
       cameraId: `slot-${index}`, type: 'audio-distress', snapshot: 'data:image/jpeg;base64,preview',
     }));
     expect(getCameraSession(`slot-${index}`).runtime?.audioListening).toBe(true);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1499); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2599); });
     expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(2);
@@ -149,7 +149,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(mocked.getAudioEvents).toHaveBeenCalledTimes(1);
     act(() => mocked.rtc[0].callbacks.onStream({ getTracks: () => [] } as unknown as MediaStream));
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce();
-    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
     expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(1);
     expect(mocked.getAudioEvents).toHaveBeenLastCalledWith(expect.any(String), 'slot-2', standaloneSafetyEvent.timestamp);
     expect(onEvent).toHaveBeenCalledOnce();
@@ -183,7 +183,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(mocked.getAudioEvents).toHaveBeenCalledTimes(1);
     expect(mocked.getCameraSnapshot).not.toHaveBeenCalled();
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [standaloneSafetyEvent], status: null });
-    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     expect(latestHandler).toHaveBeenCalledWith(expect.objectContaining({ cameraId: 'slot-2', type: 'audio-distress' }));
     expect(firstHandler).not.toHaveBeenCalled();
     unmount();
@@ -804,7 +804,7 @@ describe('camera snapshots and page-scoped playback', () => {
       readyState: { value: 2, configurable: true }, videoWidth: { value: 640 }, videoHeight: { value: 480 },
     });
     act(() => video.dispatchEvent(new Event('loadeddata')));
-    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     expect(mocked.getAudioEvents).toHaveBeenCalledTimes(2);
     vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValueOnce('data:image/jpeg;base64,final').mockReturnValue('data:image/jpeg;base64,background');
     rerender(<CameraMonitor slot={slot} monitoring={false} playbackEnabled={false} onEvent={onEvent} />);
@@ -821,7 +821,7 @@ describe('camera snapshots and page-scoped playback', () => {
     });
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(playCount);
     expect(mocked.players).toHaveLength(0);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     expect(mocked.getAudioEvents).toHaveBeenCalledTimes(3);
     expect(mocked.getAudioEvents).toHaveBeenLastCalledWith(expect.any(String), 'slot-1', standaloneSafetyEvent.timestamp);
     expect(onEvent).toHaveBeenCalledOnce();
