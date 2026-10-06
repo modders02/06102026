@@ -418,6 +418,18 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
   });
 
+  it('does not fall back to a facial alarm for weak Angry/Frightened candidates', async () => {
+    mocked.analyzeFace.mockImplementationOnce(async () => {
+      mocked.distress = { hasFace: true, expression: 'fearful', probability: 0.4, distressScore: 90, distressLevel: 'severe' };
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress' }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
+  });
+
   it('does not alarm on Angry without help or tulong', async () => {
     mocked.analyzeFace.mockImplementationOnce(async () => {
       mocked.distress = { hasFace: true, expression: 'angry', probability: 0.95, distressScore: 90, distressLevel: 'severe' };
