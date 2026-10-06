@@ -116,8 +116,7 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
                 {alert.clipError && <p className="text-xs text-destructive">{alert.clipError}</p>}
               </div>
             </div>
-            );
-          })}
+          ))}
         </div>
       </div>
 
@@ -146,7 +145,8 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
                 {event.clipError && <p className="text-xs text-destructive">{event.clipError}</p>}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
       <Dialog open={!!viewingEvent?.snapshot} onOpenChange={open => { if (!open) setViewingId(null); }}>
