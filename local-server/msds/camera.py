@@ -831,6 +831,8 @@ class Camera:
             "whisper_available": WHISPER.available,
             "whisper_state": WHISPER.state,
             "whisper_model": WHISPER.model_name,
+            "whisper_package_version": WHISPER.package_version,
+            "whisper_av_version": WHISPER.av_version,
             "whisper_device": WHISPER.device,
             "whisper_compute_type": WHISPER.compute_type,
             "whisper_backend_note": WHISPER.backend_note,
