@@ -227,7 +227,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const emit = useCallback(
     (type: DetectionEvent['type'], label: string, confidence: number) => {
       const now = Date.now();
-      const key = `${type}:${label}`;
+      const key = type === 'fire' ? 'fire' : `${type}:${label}`;
       if (cooldownRef.current[key] && now - cooldownRef.current[key] < 15000) return;
       cooldownRef.current[key] = now;
       runtimeRef.current.alerts += 1;
