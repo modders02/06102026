@@ -48,7 +48,6 @@ export type DetectionType =
   | 'smoke'
   | 'face-distress'
   | 'audio-distress'
-  | 'emotion'
   | 'saliency';
 
 export interface DetectionEvent {
