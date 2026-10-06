@@ -81,9 +81,9 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
     },
     {
       selector: '#tour-live-transcription', placement: 'bottom', title: 'Safety phrase matching',
-      body: 'The complete sentence stays visible. Separately, the safety library checks phrases such as “help me”, “call police”, “tulong”, and “tumawag kayo ng pulis” for alert logic.',
+      body: 'The complete sentence stays visible. “Help” and “tulong” are verified against a recent Angry/Frightened face on the same camera before alerting; other urgent safety phrases keep their existing alert rules.',
       implementation: 'src/lib/safetyLexicon.ts',
-      code: `const safetyMatch = matchWakeWord(fullTranscript);`,
+      code: `if (angryOrFrightened && hasHelpOrTulong && within10Seconds) raiseVerifiedAlert();`,
     },
   ],
   audio: [
