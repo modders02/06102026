@@ -7,10 +7,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { clipFolderSupported, getClipFolderLabel, getClipSeconds, pickClipFolder, restoreClipFolder, setClipSeconds } from '@/lib/clipRecorder';
 import { CAMERA_HISTORY_LIMIT } from '@/lib/cameraRegistry';
 import type { DetectionEvent, DetectionType } from '@/types/multicam';
+import { historyEmotionMeta } from '@/lib/emotionEvents';
 
 const typeIcon: Record<DetectionType, string> = {
   fire: '🔥', smoke: '💨', human: '🧍', object: '📦',
-  'face-distress': '😨', 'audio-distress': '🗣', saliency: '✨',
+  'face-distress': '😨', 'audio-distress': '🗣', emotion: '🙂', saliency: '✨',
 };
 const EMERGENCY_TYPES = new Set<DetectionType>(['fire', 'smoke', 'face-distress', 'audio-distress']);
 
@@ -115,7 +116,8 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
                 {alert.clipError && <p className="text-xs text-destructive">{alert.clipError}</p>}
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -123,8 +125,10 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
         <div className="flex items-center gap-2 border-b border-border px-4 py-3"><Film className="h-4 w-4 text-primary" /><h3 className="text-sm font-bold">Event history</h3><span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{filtered.length}</span></div>
         <div className="max-h-[420px] divide-y divide-border overflow-y-auto">
           {filtered.length === 0 && <p className="p-4 text-sm text-muted-foreground">No events recorded for {filter === 'all' ? 'your cameras' : 'this camera'}.</p>}
-          {filtered.slice(0, CAMERA_HISTORY_LIMIT).map(event => (
-            <div key={event.id} className="flex items-start gap-3 p-3">
+          {filtered.slice(0, CAMERA_HISTORY_LIMIT).map(event => {
+            const emotion = event.type === 'emotion' ? historyEmotionMeta(event.label) : null;
+            return (
+            <div key={event.id} className={`flex items-start gap-3 p-3 ${emotion?.rowClass ?? ''}`}>
               {event.clipUrl ? (
                 <video src={event.clipUrl} controls preload="none" poster={event.snapshot} aria-label={`${event.label} recording from ${event.cameraName}`} className="h-16 w-24 shrink-0 rounded-lg border border-border bg-background" />
               ) : event.snapshot ? (
@@ -133,7 +137,9 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
                 <div className="flex h-14 w-20 shrink-0 items-center justify-center rounded-lg bg-muted text-lg" aria-hidden="true">{typeIcon[event.type]}</div>
               )}
               <div className="min-w-0 space-y-0.5">
-                <p className="truncate text-sm font-semibold">{event.label}</p>
+                <p className={`truncate text-sm font-semibold ${emotion?.labelClass ?? ''}`}>
+                  {emotion ? `${emotion.icon} ${emotion.label}` : event.label}
+                </p>
                 <p className="truncate text-xs text-muted-foreground">{event.cameraName}{event.location ? ` · ${event.location}` : ''} · {(event.confidence * 100).toFixed(0)}%</p>
                 <p className="text-xs text-muted-foreground">{new Date(event.timestamp).toLocaleString()}</p>
                 {event.clipFile && <p className="flex items-center gap-1 truncate text-xs text-primary"><Film className="h-3.5 w-3.5 shrink-0" /> {event.clipFile}</p>}
