@@ -4,6 +4,7 @@ import {
   MULTIMODAL_FUSION_WINDOW_MS,
   fuseDistressSignals,
   makeDistressFaceSignal,
+  makeDistressSoundSignal,
   makeDistressSpeechSignal,
   multimodalDistressLabel,
 } from '@/lib/multimodalDistress';
@@ -13,6 +14,7 @@ describe('multimodal distress fusion', () => {
     ['angry', 'Angry'],
     ['fearful', 'Frightened'],
     ['frightened', 'Frightened'],
+    ['sad', 'Sad'],
   ] as const)('accepts a reliable %s face', (expression, label) => {
     expect(makeDistressFaceSignal(expression, 0.9, 1000)).toEqual({
       label,
@@ -24,7 +26,8 @@ describe('multimodal distress fusion', () => {
   it('rejects weak or unrelated facial expressions', () => {
     expect(makeDistressFaceSignal('angry', DISTRESS_FACE_MIN_CONFIDENCE - 0.01, 1000)).toBeNull();
     expect(makeDistressFaceSignal('happy', 0.99, 1000)).toBeNull();
-    expect(makeDistressFaceSignal('sad', 0.99, 1000)).toBeNull();
+    expect(makeDistressFaceSignal('neutral', 0.99, 1000)).toBeNull();
+    expect(makeDistressFaceSignal('disgusted', 0.99, 1000)).toBeNull();
   });
 
   it.each([
@@ -43,6 +46,36 @@ describe('multimodal distress fusion', () => {
   it('does not treat unrelated safety speech as the fusion keyword', () => {
     expect(makeDistressSpeechSignal('call the police', 1, 2000)).toBeNull();
     expect(makeDistressSpeechSignal('fire in the kitchen', 1, 2000)).toBeNull();
+  });
+
+  it('recognizes scream audio separately from speech', () => {
+    expect(makeDistressSoundSignal('scream', 0.9, 2500)).toEqual({
+      keyword: 'scream',
+      transcript: '',
+      confidence: 0.9,
+      at: 2500,
+    });
+    expect(makeDistressSoundSignal('screaming', 0.8, 2500)?.keyword).toBe('scream');
+    expect(makeDistressSoundSignal('bang', 1, 2500)).toBeNull();
+  });
+
+  it.each([
+    ['fearful', 'Frightened'],
+    ['sad', 'Sad'],
+  ] as const)('verifies screaming with %s', (expression, label) => {
+    const face = makeDistressFaceSignal(expression, 0.92, 5000)!;
+    const scream = makeDistressSoundSignal('scream', 0.95, 7000)!;
+    const result = fuseDistressSignals(face, scream);
+    expect(result?.face.label).toBe(label);
+    expect(result?.confidence).toBe(0.92);
+    expect(multimodalDistressLabel(result!)).toBe(`Verified distress: ${label} + screaming`);
+  });
+
+  it('rejects incompatible face/audio combinations', () => {
+    const sad = makeDistressFaceSignal('sad', 0.9, 1000)!;
+    const angry = makeDistressFaceSignal('angry', 0.9, 1000)!;
+    expect(fuseDistressSignals(sad, makeDistressSpeechSignal('help', 0.9, 1000)!)).toBeNull();
+    expect(fuseDistressSignals(angry, makeDistressSoundSignal('scream', 0.9, 1000)!)).toBeNull();
   });
 
   it('verifies either ordering inside the ten-second same-camera window', () => {
