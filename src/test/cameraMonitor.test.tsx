@@ -459,6 +459,7 @@ describe('camera snapshots and page-scoped playback', () => {
   });
 
   it.each([
+    ['angry', 'Angry'],
     ['fearful', 'Frightened'],
     ['sad', 'Sad'],
   ] as const)('verifies screaming + %s as one multimodal alert', async (expression, faceLabel) => {
