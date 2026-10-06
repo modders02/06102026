@@ -23,8 +23,13 @@ VIDEO_THREADS = max(1, min(4, int(os.environ.get("MSD_VIDEO_THREADS", 2))))
 VIDEO_GOP = max(1, VIDEO_FPS // 2)
 
 MAX_CAMERAS = 16
-# Length of each WAV segment fed to Whisper. Shorter = more responsive UI.
-AUDIO_CHUNK_SECONDS = max(2, int(os.environ.get("MSD_AUDIO_CHUNK_SECONDS", 4)))
+# Low-latency rolling Whisper windows. The first transcript can be produced
+# after ~1.5 s of audio, then refreshed every ~1 s while retaining overlap so
+# words at a chunk boundary are not lost.
+AUDIO_WINDOW_SECONDS = max(1.0, float(os.environ.get("MSD_AUDIO_WINDOW_SECONDS", 1.5)))
+AUDIO_STEP_SECONDS = max(0.5, min(AUDIO_WINDOW_SECONDS, float(os.environ.get("MSD_AUDIO_STEP_SECONDS", 1.0))))
+# Backward-compatible status/config name used by older diagnostics.
+AUDIO_CHUNK_SECONDS = AUDIO_WINDOW_SECONDS
 WHISPER_MODEL = os.environ.get("MSD_WHISPER_MODEL", "base")
 
 
