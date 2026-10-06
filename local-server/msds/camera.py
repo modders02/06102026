@@ -639,6 +639,10 @@ class Camera:
             "whisper": {
                 "available": WHISPER.available,
                 "state": WHISPER.state,
+                "model": WHISPER.model_name,
+                "device": WHISPER.device,
+                "compute_type": WHISPER.compute_type,
+                "backend_note": WHISPER.backend_note,
                 "error": WHISPER.error,
             },
             "transcript": "",
@@ -714,7 +718,14 @@ class Camera:
                 report["error"] = WHISPER.error or "Whisper is unavailable"
                 return report
             report["transcript"] = WHISPER.transcribe(good_wav)
-            report["whisper"]["state"] = WHISPER.state
+            report["whisper"].update({
+                "state": WHISPER.state,
+                "model": WHISPER.model_name,
+                "device": WHISPER.device,
+                "compute_type": WHISPER.compute_type,
+                "backend_note": WHISPER.backend_note,
+                "error": WHISPER.error,
+            })
             report["success"] = True
         except Exception as exc:
             report["error"] = str(exc)
