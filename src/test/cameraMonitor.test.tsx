@@ -90,6 +90,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const helpSafetyEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'help me', keyword: 'help', confidence: 0.99 };
 const standaloneSafetyEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'call police', keyword: 'police', confidence: 0.99 };
+const screamAudioEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: '', keyword: 'scream', confidence: 0.93 };
 
 describe('camera snapshots and page-scoped playback', () => {
   it.each([1, 2])('uses stills for camera %s on Dashboard while visual and audio triggers continue', async index => {
@@ -374,9 +375,12 @@ describe('camera snapshots and page-scoped playback', () => {
     ['happy', 'Happy'],
     ['sad', 'Sad'],
     ['surprised', 'Shock'],
+    ['neutral', 'Neutral'],
+    ['disgusted', 'Disgust'],
   ] as const)('records %s as a non-alert emotion event', async (expression, label) => {
     mocked.analyzeFace.mockImplementationOnce(async () => {
-      mocked.distress = { hasFace: true, expression, probability: 0.94, distressScore: expression === 'sad' ? 94 : 0, distressLevel: expression === 'sad' ? 'severe' : 'none' };
+      const severeCarryover = ['sad', 'neutral', 'disgusted'].includes(expression);
+      mocked.distress = { hasFace: true, expression, probability: 0.94, distressScore: severeCarryover ? 94 : 0, distressLevel: severeCarryover ? 'severe' : 'none' };
     });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     const onEvent = vi.fn();
@@ -454,15 +458,49 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
   });
 
-  it('keeps other severe facial distress on its existing standalone path', async () => {
+  it.each([
+    ['fearful', 'Frightened'],
+    ['sad', 'Sad'],
+  ] as const)('verifies screaming + %s as one multimodal alert', async (expression, faceLabel) => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [screamAudioEvent], status: null });
     mocked.analyzeFace.mockImplementationOnce(async () => {
-      mocked.distress = { hasFace: true, expression: 'disgusted', probability: 0.9, distressScore: 90, distressLevel: 'severe' };
+      mocked.distress = { hasFace: true, expression, probability: 0.94, distressScore: 90, distressLevel: 'severe' };
     });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     const onEvent = vi.fn();
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
-    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress', label: 'disgusted' }));
+
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'multimodal-distress',
+      label: `Verified distress: ${faceLabel} + screaming`,
+      confidence: 0.93,
+      snapshot: 'data:image/jpeg;base64,preview',
+    }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress' }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
+  });
+
+  it('does not alarm on screaming without Frightened or Sad', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [screamAudioEvent], status: null });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
+  });
+
+  it.each(['neutral', 'disgusted'] as const)('never promotes severe %s carryover to a facial alarm', async expression => {
+    mocked.analyzeFace.mockImplementationOnce(async () => {
+      mocked.distress = { hasFace: true, expression, probability: 0.95, distressScore: 95, distressLevel: 'severe' };
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress' }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
   });
 
   it('preserves actual analysis dimensions for small source images', async () => {
