@@ -132,7 +132,8 @@ class WhisperEngine:
                 from faster_whisper import WhisperModel
                 self.state = "loading"
                 try:
-                    # CPU-only, int8: works on every laptop, no GPU required.
+                    # CPU int8 remains the compatibility default. Low-latency
+                    # decoding below avoids expensive multi-pass beam fallback.
                     self.model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
                     self.error = None
                     self.state = "ready"
@@ -163,17 +164,22 @@ class WhisperEngine:
                 task="transcribe",          # never translate — keep "tulong" as "tulong"
                 vad_filter=True,
                 vad_parameters={
-                    "min_silence_duration_ms": 300,
+                    "min_silence_duration_ms": 180,
                     "threshold": 0.35,       # permissive: CCTV mics are quiet
-                    "min_speech_duration_ms": 200,
-                    "speech_pad_ms": 250,
+                    "min_speech_duration_ms": 120,
+                    "speech_pad_ms": 120,
                 },
                 condition_on_previous_text=False,  # stops repeat/echo hallucinations
                 no_speech_threshold=0.8,
                 log_prob_threshold=-1.6,   # quiet CCTV mics give low-confidence real speech
-                temperature=[0.0, 0.2, 0.4],
-                beam_size=5,
-                initial_prompt="Tagalog at English na usapan sa bahay. Help, tulong, saklolo, sunog.",
+                # One deterministic greedy pass returns much faster than the
+                # old beam-5 + temperature fallback sequence.
+                temperature=0.0,
+                beam_size=1,
+                without_timestamps=True,
+                # Do not prime safety words: prompting them can hallucinate
+                # "help", "tulong" or "sunog" from noisy CCTV audio.
+                initial_prompt=None,
             )
             lang = getattr(info, "language", "") or ""
             lang_prob = getattr(info, "language_probability", 1.0) or 0.0
