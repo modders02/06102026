@@ -99,7 +99,7 @@ export function fuseDistressSignals(
     ((speech.keyword === 'help' || speech.keyword === 'tulong')
       && (face.label === 'Angry' || face.label === 'Frightened'))
     || (speech.keyword === 'scream'
-      && (face.label === 'Frightened' || face.label === 'Sad'));
+      && (face.label === 'Angry' || face.label === 'Frightened' || face.label === 'Sad'));
 
   if (!compatible) return null;
 
