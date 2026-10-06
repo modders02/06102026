@@ -180,6 +180,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     if (!camera.enabled || !camera.aiEnabled) {
       prevFrameRef.current = null;
       fireStateRef.current = createFireState();
+      recentDistressFaceRef.current = null;
       patch({
         objects: [], humanCount: 0, saliencyScore: 0, attentionScore: 0,
         fire: { detected: false, confidence: 0 },
@@ -609,6 +610,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       return;
     }
     if (!camera.enabled) {
+      recentDistressSpeechRef.current = null;
       patch({
         audioListening: false,
         audioMessage: 'Connect this camera to start listening.',
