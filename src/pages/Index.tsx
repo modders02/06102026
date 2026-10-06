@@ -73,7 +73,7 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   face: [
     {
       selector: '#tour-face-distress', placement: 'top', title: 'Facial distress',
-      body: 'TinyFaceDetector finds the nearest face. Expressions are smoothed for stability, but facial expressions never alarm by themselves. Angry/Frightened can verify help or tulong, while Frightened/Sad can verify screaming.',
+      body: 'TinyFaceDetector finds the nearest face. Expressions are smoothed for stability, but facial expressions never alarm by themselves. Angry/Frightened can verify help or tulong, while Angry/Frightened/Sad can verify screaming.',
       implementation: 'src/hooks/useFaceDistress.ts',
       code: `distress = sad + 1.4*fearful + 0.8*angry;\nalert = fuse(face, speechOrScream, 10_000);`,
     },
@@ -87,7 +87,7 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
     },
     {
       selector: '#tour-live-transcription', placement: 'bottom', title: 'Safety phrase matching',
-      body: 'The complete sentence stays visible. “Help” and “tulong” are verified against a recent Angry/Frightened face on the same camera before alerting; other urgent safety phrases keep their existing alert rules.',
+      body: 'The complete sentence stays visible. “Help” and “tulong” require a recent Angry/Frightened face; “sunog” requires a recent visual fire candidate. Other urgent safety phrases keep their existing alert rules.',
       implementation: 'src/lib/safetyLexicon.ts',
       code: `if (angryOrFrightened && hasHelpOrTulong && within10Seconds) raiseVerifiedAlert();`,
     },
