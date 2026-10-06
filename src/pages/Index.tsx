@@ -29,6 +29,8 @@ import { announce } from '@/lib/voiceGuide';
 import { sendAlertEmail } from '@/lib/alertEmail';
 import { stopAll as stopAllCameras, stopCamera } from '@/lib/multiCamServer';
 import { matchWakeWord } from '@/lib/safetyLexicon';
+import { makeDistressFaceSignal, makeDistressSpeechSignal, multimodalDistressLabel, fuseDistressSignals } from '@/lib/multimodalDistress';
+import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import { getCameraSession } from '@/lib/cameraSessions';
 import { clipFileName, recordClip, saveClip } from '@/lib/clipRecorder';
 import { CAMERA_HISTORY_LIMIT } from '@/lib/cameraRegistry';
@@ -37,7 +39,7 @@ import type { Alert, QualityMode } from '@/types/dashboard';
 import { DEFAULT_PRIORITY_OBJECTS } from '@/types/dashboard';
 
 const monitoringSession = { running: false };
-const EMERGENCY_TYPES = new Set<DetectionEvent['type']>(['fire', 'smoke', 'face-distress', 'audio-distress']);
+const EMERGENCY_TYPES = new Set<DetectionEvent['type']>(['fire', 'smoke', 'face-distress', 'audio-distress', 'multimodal-distress']);
 
 const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   vision: [
@@ -267,6 +269,7 @@ export default function Index() {
         householdId, alertId: id, alertType: event.type, message: `${event.cameraName}: ${event.label}`,
         severity, cameraLabel: event.cameraName, occurredAt: event.timestamp, confidence: event.confidence,
         trigger: event.label, details: { Location: event.location || undefined },
+        snapshotDataUrl: event.type === 'multimodal-distress' ? event.snapshot : undefined,
       }).then(result => {
         if (result.reason === 'error') {
           toast.error('Alert email could not be sent. Open Household → Notifications and send a test email to check the setup.', { id: 'camera-alert-email' });
@@ -290,6 +293,9 @@ export default function Index() {
 
   const handleMetrics = useCallback((index: number, runtime: CameraRuntime) => {
     setRuntimes(previous => previous[index] === runtime ? previous : { ...previous, [index]: runtime });
+    // CCTV help/tulong is reserved for the same-camera multimodal fusion inside
+    // useCameraPipeline. Do not independently promote it as a wake-word alert.
+    if (runtime.transcript && makeDistressSpeechSignal(runtime.transcript)) return;
     const match = runtime.transcript ? checkForWakeWord(runtime.transcript) : null;
     if (!match?.matched) return;
     const previous = householdMatches.current.get(index);
@@ -308,6 +314,28 @@ export default function Index() {
   useEffect(() => {
     if (!running || !localCameras.length || connected.length) return;
     const text = `${speech.transcript} ${speech.interimTranscript}`.trim();
+    const fusionSpeech = makeDistressSpeechSignal(text);
+    if (fusionSpeech) {
+      const runtime = runtimes[1];
+      const fusionFace = runtime
+        ? makeDistressFaceSignal(runtime.faceDistress.label, runtime.faceDistress.confidence)
+        : null;
+      const verified = fuseDistressSignals(fusionFace, fusionSpeech);
+      if (!verified) return;
+      const slot = slots[0];
+      raiseAlert({
+        cameraId: 'slot-1',
+        cameraName: slot.name,
+        location: 'Local webcam',
+        type: 'multimodal-distress',
+        label: multimodalDistressLabel(verified),
+        confidence: verified.confidence,
+        timestamp: new Date(verified.at).toISOString(),
+        snapshot: captureCameraEventSnapshot('slot-1'),
+      }, 'critical');
+      return;
+    }
+
     const household = checkForWakeWord(text);
     const safety = matchWakeWord(text);
     if (!household.matched && !safety.matched) return;
@@ -318,7 +346,7 @@ export default function Index() {
       label: `Wake word: "${phrase}"`, confidence: household.matched ? 1 : safety.confidence,
       timestamp: new Date().toISOString(),
     }, emergency ? 'critical' : 'high');
-  }, [running, localCameras.length, connected.length, speech.transcript, speech.interimTranscript, checkForWakeWord, slots, raiseAlert]);
+  }, [running, localCameras.length, connected.length, speech.transcript, speech.interimTranscript, checkForWakeWord, slots, raiseAlert, runtimes]);
 
   useEffect(() => {
     if (!running || !localCameras.length || connected.length || !['scream', 'bang'].includes(audioFeatures.audioEvent)) return;
