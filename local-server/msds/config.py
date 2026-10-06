@@ -25,7 +25,17 @@ VIDEO_GOP = max(1, VIDEO_FPS // 2)
 MAX_CAMERAS = 16
 # Length of each WAV segment fed to Whisper. Shorter = more responsive UI.
 AUDIO_CHUNK_SECONDS = max(2, int(os.environ.get("MSD_AUDIO_CHUNK_SECONDS", 4)))
-WHISPER_MODEL = os.environ.get("MSD_WHISPER_MODEL", "base")
+
+# SYSTRAN/faster-whisper configuration. "small" is more accurate than the
+# previous "base" default while remaining practical on a 4 GB GTX 1650.
+WHISPER_MODEL = os.environ.get("MSD_WHISPER_MODEL", "small").strip() or "small"
+WHISPER_DEVICE = os.environ.get("MSD_WHISPER_DEVICE", "auto").strip().lower() or "auto"
+if WHISPER_DEVICE not in {"auto", "cuda", "cpu"}:
+    WHISPER_DEVICE = "auto"
+WHISPER_COMPUTE_TYPE = os.environ.get("MSD_WHISPER_COMPUTE_TYPE", "").strip()
+# Optional faster-whisper hotwords. Keep empty by default so safety words are
+# not hallucinated from noise; set explicitly only if a deployment needs hints.
+WHISPER_HOTWORDS = os.environ.get("MSD_WHISPER_HOTWORDS", "").strip()
 
 
 # How long a positive HLS probe stays valid (seconds). Avoids one HTTP request
