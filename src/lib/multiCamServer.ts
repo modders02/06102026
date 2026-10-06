@@ -71,6 +71,9 @@ export interface CctvAudioStatus {
   whisper_available?: boolean;
   whisper_state?: string;
   whisper_model?: string;
+  whisper_device?: string;
+  whisper_compute_type?: string;
+  whisper_backend_note?: string | null;
   whisper_error?: string | null;
   error: string | null;
   ffmpeg_error: string | null;
