@@ -35,8 +35,8 @@ NO_AUDIO_MESSAGE = (
 def detect_scream_pcm(data: bytes) -> float:
     """Return a conservative 0..1 scream confidence from 16 kHz mono s16 PCM.
 
-    This is intentionally lightweight: it gates on sustained loudness plus a
-    high-frequency/rapid-zero-crossing signature. A positive result is never an
+    The chunk is scanned in overlapping 0.5 s windows so a short scream is not
+    diluted by several seconds of quiet audio. A positive result is never an
     alarm by itself; the renderer still requires a Frightened or Sad face from
     the same camera within the multimodal fusion window.
     """
@@ -47,51 +47,61 @@ def detect_scream_pcm(data: bytes) -> float:
     samples.frombytes(data[:usable])
     if sys.byteorder != "little":
         samples.byteswap()
-    if len(samples) < 8000:
-        return 0.0
 
-    peak = 0
-    sum_sq = 0.0
-    diff_sq = 0.0
-    crossings = 0
-    previous = int(samples[0])
-    for raw in samples:
-        sample = int(raw)
-        absolute = abs(sample)
-        if absolute > peak:
-            peak = absolute
-        sum_sq += sample * sample
-        delta = sample - previous
-        diff_sq += delta * delta
-        if (sample >= 0) != (previous >= 0):
-            crossings += 1
-        previous = sample
-
-    scale = 32768.0
-    count = float(len(samples))
-    rms = math.sqrt(sum_sq / count) / scale
-    peak_norm = peak / scale
-    diff_rms = math.sqrt(diff_sq / max(1.0, count - 1.0)) / scale
-    zcr = crossings / max(1.0, count - 1.0)
-    brightness = diff_rms / max(rms, 1e-6)
-
-    # Ordinary speech can be loud, so require both rapid crossings and strong
-    # high-frequency change before publishing a scream candidate.
-    if rms < 0.08 or peak_norm < 0.30 or zcr < 0.10 or brightness < 0.55:
+    window_size = 8000  # 0.5 s at 16 kHz
+    if len(samples) < window_size:
         return 0.0
 
     def unit(value: float, low: float, span: float) -> float:
         return max(0.0, min(1.0, (value - low) / span))
 
-    confidence = (
-        0.62
-        + 0.12 * unit(rms, 0.08, 0.28)
-        + 0.10 * unit(peak_norm, 0.30, 0.55)
-        + 0.08 * unit(zcr, 0.10, 0.24)
-        + 0.08 * unit(brightness, 0.55, 0.75)
-    )
-    return round(min(0.99, confidence), 3)
+    def score_window(window) -> float:
+        peak = 0
+        sum_sq = 0.0
+        diff_sq = 0.0
+        crossings = 0
+        previous = int(window[0])
+        for raw in window:
+            sample = int(raw)
+            absolute = abs(sample)
+            if absolute > peak:
+                peak = absolute
+            sum_sq += sample * sample
+            delta = sample - previous
+            diff_sq += delta * delta
+            if (sample >= 0) != (previous >= 0):
+                crossings += 1
+            previous = sample
 
+        scale = 32768.0
+        count = float(len(window))
+        rms = math.sqrt(sum_sq / count) / scale
+        peak_norm = peak / scale
+        diff_rms = math.sqrt(diff_sq / max(1.0, count - 1.0)) / scale
+        zcr = crossings / max(1.0, count - 1.0)
+        brightness = diff_rms / max(rms, 1e-6)
+
+        # Ordinary speech can be loud, so require both rapid crossings and
+        # strong high-frequency change before publishing a scream candidate.
+        if rms < 0.08 or peak_norm < 0.30 or zcr < 0.10 or brightness < 0.55:
+            return 0.0
+
+        confidence = (
+            0.62
+            + 0.12 * unit(rms, 0.08, 0.28)
+            + 0.10 * unit(peak_norm, 0.30, 0.55)
+            + 0.08 * unit(zcr, 0.10, 0.24)
+            + 0.08 * unit(brightness, 0.55, 0.75)
+        )
+        return round(min(0.99, confidence), 3)
+
+    best = 0.0
+    hop = window_size // 2
+    for offset in range(0, len(samples) - window_size + 1, hop):
+        best = max(best, score_window(samples[offset:offset + window_size]))
+        if best >= 0.95:
+            break
+    return best
 
 def probe_streams(rtsp: str, transport: str = "tcp", timeout: int = 20) -> dict:
     """ffprobe an RTSP URL and return {ok, streams, error}."""
