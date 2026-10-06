@@ -21,13 +21,20 @@ credential belongs in the function's server secrets. It is not a Vite setting.
 4. In the app, open **Household > Notifications**, turn on **Email Alerts**, and
    add the email addresses that should receive alerts. Account and household
    member email addresses are not automatically added as notification recipients.
-5. Click **Send test email**. A successful result means Brevo accepted the request;
-   check the inbox, spam folder, and Brevo delivery logs to confirm delivery.
+5. Click **Send test email + image**. A successful result means Brevo accepted
+   both the message and the attachment payload. Confirm that the email contains
+   the attached `msds-verification.jpg` (or PNG fallback), then check Brevo
+   delivery logs if the message does not arrive.
+6. Trigger one controlled high/critical camera event. When that event has a
+   captured camera snapshot, the automatic alert email now attaches the same
+   frame that is retained with the alert in MSDS.
 
 The signed-in account must belong to the household. Automatic alerts send at high
 or critical severity and respect the household's email enablement and severity
 threshold. Successful sends are grouped per camera and alert type for five minutes;
 failed or skipped sends can retry immediately after the setup is corrected.
+Verification images are accepted only as JPEG, PNG, or WebP data URLs and are
+bounded in size by the Edge Function before they are forwarded to Brevo.
 
 References: [Brevo API authentication](https://developers.brevo.com/docs/api-key-authentication)
 and [Supabase function secrets](https://supabase.com/docs/guides/functions/secrets).
