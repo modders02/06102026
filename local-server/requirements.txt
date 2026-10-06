@@ -7,11 +7,11 @@ uvicorn>=0.27
 python-multipart>=0.0.9
 psutil>=5.9
 
-# CCTV microphone -> wake-word transcription.
-# The Whisper model itself is downloaded on first use (needs internet once).
-faster-whisper>=1.0.0
+# CCTV microphone -> transcription via SYSTRAN/faster-whisper.
+# Pin the tested upstream release so inference behavior is reproducible.
+# The selected Whisper model is downloaded on first use (needs internet once).
+faster-whisper==1.2.1
 
-# faster-whisper currently calls av.open(..., metadata_errors="ignore").
-# PyAV 19 removed that keyword, which breaks every transcription at runtime.
-# Keep PyAV on the compatible series until faster-whisper adopts the new API.
-av>=11,<19
+# faster-whisper 1.2.1 supports PyAV 19+ by omitting the removed
+# metadata_errors argument when needed.
+av>=11
