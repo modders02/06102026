@@ -392,16 +392,64 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(getCameraSession('slot-1').runtime?.faceDistress.detected).toBe(false);
   });
 
-  it('still publishes severe facial distress from current analysis', async () => {
+  it.each([
+    ['angry', 'help me', 'help', 'Angry'],
+    ['fearful', 'tulong po', 'tulong', 'Frightened'],
+  ] as const)('verifies %s + %s as one multimodal alert', async (expression, transcript, keyword, faceLabel) => {
+    mocked.getAudioEvents.mockResolvedValueOnce({
+      events: [{ timestamp: '2026-10-02T00:00:01Z', transcript, keyword, confidence: 0.96 }],
+      status: null,
+    });
     mocked.analyzeFace.mockImplementationOnce(async () => {
-      mocked.distress = { hasFace: true, expression: 'fearful', distressScore: 99, distressLevel: 'severe' };
+      mocked.distress = { hasFace: true, expression, probability: 0.94, distressScore: 90, distressLevel: 'severe' };
     });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     const onEvent = vi.fn();
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
-    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress', label: 'fearful' }));
-    expect(getCameraSession('slot-1').runtime?.faceDistress.detected).toBe(true);
+
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'multimodal-distress',
+      label: `Verified distress: ${faceLabel} + "${keyword}"`,
+      confidence: 0.94,
+      snapshot: 'data:image/jpeg;base64,preview',
+    }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress' }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
+  });
+
+  it('does not alarm on Angry without help or tulong', async () => {
+    mocked.analyzeFace.mockImplementationOnce(async () => {
+      mocked.distress = { hasFace: true, expression: 'angry', probability: 0.95, distressScore: 90, distressLevel: 'severe' };
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress' }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
+    expect(getCameraSession('slot-1').runtime?.faceDistress).toMatchObject({ detected: true, label: 'Angry' });
+  });
+
+  it('does not alarm on help without Angry or Frightened', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [safetyEvent], status: null });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
+  });
+
+  it('keeps other severe facial distress on its existing standalone path', async () => {
+    mocked.analyzeFace.mockImplementationOnce(async () => {
+      mocked.distress = { hasFace: true, expression: 'disgusted', probability: 0.9, distressScore: 90, distressLevel: 'severe' };
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress', label: 'disgusted' }));
   });
 
   it('preserves actual analysis dimensions for small source images', async () => {
