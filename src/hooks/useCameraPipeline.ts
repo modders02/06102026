@@ -11,6 +11,7 @@ import { matchWakeWord } from '@/lib/safetyLexicon';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
 import {
   fuseDistressSignals,
+  isMultimodalDistressExpression,
   makeDistressFaceSignal,
   makeDistressSpeechSignal,
   multimodalDistressLabel,
@@ -560,6 +561,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     if (!camera.enabled || !camera.aiEnabled || faceAnalysisRevisionRef.current !== analysisRevisionRef.current) return;
     const d = face.distress;
     const emotion = historyEmotionMeta(d.expression);
+    const fusionExpression = d.hasFace && isMultimodalDistressExpression(d.expression);
     const distressFace = d.hasFace ? makeDistressFaceSignal(d.expression, d.probability) : null;
     const detected = !!distressFace || (d.hasFace && d.distressLevel !== 'none' && !emotion);
 
@@ -577,9 +579,15 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       return;
     }
 
-    if (distressFace) {
-      recentDistressFaceRef.current = distressFace;
-      maybeEmitVerifiedDistress();
+    if (fusionExpression) {
+      if (distressFace) {
+        recentDistressFaceRef.current = distressFace;
+        maybeEmitVerifiedDistress();
+      } else {
+        // Weak Angry/Frightened observations do not qualify for fusion and
+        // still must not fall through to the standalone facial alarm.
+        recentDistressFaceRef.current = null;
+      }
       return;
     }
 
