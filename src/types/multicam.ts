@@ -87,7 +87,18 @@ export interface CameraRuntime {
   frameWidth?: number;
   frameHeight?: number;
   humanCount: number;
-  fire: { detected: boolean; confidence: number; bbox?: [number, number, number, number] };
+  fire: {
+    detected: boolean;
+    /** Looser visual candidate used only for corroborated fire fusion. */
+    candidate?: boolean;
+    confidence: number;
+    candidateConfidence?: number;
+    firePixelRatio?: number;
+    smokeRatio?: number;
+    visibility?: number;
+    candidateAt?: number;
+    bbox?: [number, number, number, number];
+  };
   smoke: { detected: boolean; confidence: number };
   faceDistress: { detected: boolean; label: string; confidence: number };
   audioDistress: { detected: boolean; keyword: string; confidence: number; transcript: string };
