@@ -10,6 +10,17 @@ import { useFaceDistress } from '@/hooks/useFaceDistress';
 import { matchWakeWord } from '@/lib/safetyLexicon';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
 import {
+  SMOKE_REGION_MIN_RATIO,
+  fireSmokeLabel,
+  fireSpeechLabel,
+  fuseFireWithSunog,
+  isImmediateFireSmoke,
+  makeFireVisualSignal,
+  makeSunogSignal,
+  type FireVisualSignal,
+  type SunogSignal,
+} from '@/lib/fireFusion';
+import {
   fuseDistressSignals,
   isMultimodalDistressExpression,
   makeDistressFaceSignal,
@@ -127,6 +138,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const clearTimerRef = useRef<number | undefined>(undefined);
   const recentDistressFaceRef = useRef<DistressFaceSignal | null>(null);
   const recentDistressSpeechRef = useRef<DistressSpeechSignal | null>(null);
+  const recentFireVisualRef = useRef<FireVisualSignal | null>(null);
+  const recentSunogRef = useRef<SunogSignal | null>(null);
 
   const cooldownRef = useRef<Record<string, number>>({});
   const retryRef = useRef(0);
@@ -182,9 +195,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       prevFrameRef.current = null;
       fireStateRef.current = createFireState();
       recentDistressFaceRef.current = null;
+      recentFireVisualRef.current = null;
       patch({
         objects: [], humanCount: 0, saliencyScore: 0, attentionScore: 0,
-        fire: { detected: false, confidence: 0 },
+        fire: { detected: false, candidate: false, confidence: 0 },
         smoke: { detected: false, confidence: 0 },
         faceDistress: { detected: false, label: '', confidence: 0 },
       });
@@ -239,6 +253,15 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     recentDistressFaceRef.current = null;
     recentDistressSpeechRef.current = null;
     emit('multimodal-distress', multimodalDistressLabel(verified), verified.confidence);
+    return true;
+  }, [emit]);
+
+  const maybeEmitVerifiedFire = useCallback(() => {
+    const verified = fuseFireWithSunog(recentFireVisualRef.current, recentSunogRef.current);
+    if (!verified) return false;
+    recentFireVisualRef.current = null;
+    recentSunogRef.current = null;
+    emit('fire', fireSpeechLabel(), verified.confidence);
     return true;
   }, [emit]);
 
@@ -431,19 +454,51 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         0.5 * saliencyScore + 0.3 * objectScore + 0.2 * audioScore,
       ));
       const fire = detectFire(frame, fireStateRef.current, objects);
+      const fireObservedAt = Date.now();
+      const fireVisual = makeFireVisualSignal(
+        fire.fireCandidate,
+        fire.confidence,
+        fire.firePixelRatio,
+        fire.smokeRatio,
+        fire.visibility,
+        fireObservedAt,
+      );
+      if (fireVisual) recentFireVisualRef.current = fireVisual;
+      const immediateFireSmoke = isImmediateFireSmoke(fireVisual);
+      let verifiedFireSpeech = false;
+      if (immediateFireSmoke && fireVisual) {
+        // Vision already supplied both corroborating cues; avoid producing a
+        // second alert from a pending "sunog" phrase for the same event.
+        recentSunogRef.current = null;
+        recentFireVisualRef.current = null;
+        emit('fire', fireSmokeLabel(fireVisual), fireVisual.confidence);
+      } else if (fireVisual) {
+        verifiedFireSpeech = maybeEmitVerifiedFire();
+      }
+
       faceAnalysisRevisionRef.current = revision;
       await analyzeFace(canvas);
       if (cancelled()) return;
 
+      const previousFire = runtimeRef.current.fire;
       patch({
         objects, humanCount, saliencyScore, attentionScore,
         frameWidth: canvas.width, frameHeight: canvas.height,
         fire: {
-          detected: fire.fireDetected && fire.confidence >= settings.fireThreshold,
+          detected: immediateFireSmoke || verifiedFireSpeech
+            || (fire.fireDetected && fire.confidence >= settings.fireThreshold),
+          candidate: !!fireVisual,
           confidence: fire.confidence,
+          candidateConfidence: fireVisual?.confidence ?? previousFire.candidateConfidence,
+          firePixelRatio: fire.firePixelRatio,
+          smokeRatio: fire.smokeRatio,
+          visibility: fire.visibility,
+          candidateAt: fireVisual?.at ?? previousFire.candidateAt,
           bbox: fire.smoothedBbox,
         },
-        smoke: { detected: fire.smokeEmergency, confidence: fire.smokeRatio },
+        // Smoke can be displayed as a visual condition, but smoke by itself no
+        // longer emits an emergency alert. It must corroborate a fire candidate.
+        smoke: { detected: fire.smokeRatio >= SMOKE_REGION_MIN_RATIO, confidence: fire.smokeRatio },
         lastDetectionAt: new Date().toISOString(),
         detections: runtimeRef.current.detections + objects.length,
         latencyMs: Math.round(performance.now() - started),
@@ -454,8 +509,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         : objects;
       for (const object of historyObjects) emit('object', object.label, object.confidence);
       if (humanCount > 0) emit('human', `${humanCount} person(s)`, 0.9);
-      if (fire.fireDetected && fire.confidence >= settings.fireThreshold) emit('fire', 'Fire detected', fire.confidence);
-      if (fire.smokeEmergency) emit('smoke', 'Smoke / low visibility', fire.smokeRatio);
+      if (!immediateFireSmoke && !verifiedFireSpeech
+          && fire.fireDetected && fire.confidence >= settings.fireThreshold) {
+        emit('fire', 'Fire detected', fire.confidence);
+      }
       if (saliencyScore > 70) emit('saliency', `High saliency (${saliencyScore})`, saliencyScore / 100);
       if (attentionScore > 70) emit('saliency', `High attention (${attentionScore})`, attentionScore / 100);
     } catch {
@@ -463,7 +520,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     } finally {
       busyRef.current = false;
     }
-  }, [camera.enabled, camera.aiEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.priorityObjects, analyzeFace, drawWorkFrame, patch, emit]);
+  }, [camera.enabled, camera.aiEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.priorityObjects, analyzeFace, drawWorkFrame, patch, emit, maybeEmitVerifiedFire]);
   const analyzeFrameRef = useRef(analyzeFrame);
   analyzeFrameRef.current = analyzeFrame;
 
@@ -613,6 +670,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     }
     if (!camera.enabled) {
       recentDistressSpeechRef.current = null;
+      recentSunogRef.current = null;
       patch({
         audioListening: false,
         audioMessage: 'Connect this camera to start listening.',
@@ -667,19 +725,27 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             // Hold them briefly so either speech-first or face-first ordering can
             // verify the same-camera Angry/Frightened + help/tulong combination.
             const spokenAt = Number.isNaN(Date.parse(e.timestamp)) ? Date.now() : Date.parse(e.timestamp);
-            const distressSpeech = makeDistressSpeechSignal(
-              `${e.transcript || ''} ${e.keyword || ''}`,
-              confidence,
-              spokenAt,
-            );
+            const sourceText = `${e.transcript || ''} ${e.keyword || ''}`;
+            let reservedForFusion = false;
+
+            const sunog = makeSunogSignal(sourceText, confidence, spokenAt);
+            if (sunog) {
+              reservedForFusion = true;
+              recentSunogRef.current = sunog;
+              maybeEmitVerifiedFire();
+            }
+
+            const distressSpeech = makeDistressSpeechSignal(sourceText, confidence, spokenAt);
             const distressSound = makeDistressSoundSignal(keyword, confidence, spokenAt);
             const fusionAudio = distressSpeech ?? distressSound;
             if (fusionAudio) {
+              reservedForFusion = true;
               recentDistressSpeechRef.current = fusionAudio;
               maybeEmitVerifiedDistress();
-              continue;
             }
 
+            // Reserved fusion cues never become standalone audio alarms.
+            if (reservedForFusion) continue;
             emit('audio-distress', `Safety word: "${keyword}"`, confidence);
           }
         } else if (
@@ -707,7 +773,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     const id = window.setInterval(poll, 1500);
     void poll();
     return () => { stopped = true; window.clearInterval(id); patch({ audioListening: false }); };
-  }, [camera.enabled, camera.id, sourceStream, settings.pythonServer, settings.audioThreshold, patch, emit, maybeEmitVerifiedDistress, showTranscript]);
+  }, [camera.enabled, camera.id, sourceStream, settings.pythonServer, settings.audioThreshold, patch, emit, maybeEmitVerifiedDistress, maybeEmitVerifiedFire, showTranscript]);
 
 
   const reconnect = useCallback(() => {
