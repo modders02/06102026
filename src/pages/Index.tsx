@@ -29,6 +29,12 @@ import { announce } from '@/lib/voiceGuide';
 import { sendAlertEmail } from '@/lib/alertEmail';
 import { stopAll as stopAllCameras, stopCamera } from '@/lib/multiCamServer';
 import { matchWakeWord } from '@/lib/safetyLexicon';
+import {
+  fireSpeechLabel,
+  fuseFireWithSunog,
+  makeFireVisualSignal,
+  makeSunogSignal,
+} from '@/lib/fireFusion';
 import { makeDistressFaceSignal, makeDistressSoundSignal, makeDistressSpeechSignal, multimodalDistressLabel, fuseDistressSignals } from '@/lib/multimodalDistress';
 import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import { getCameraSession } from '@/lib/cameraSessions';
@@ -293,9 +299,13 @@ export default function Index() {
 
   const handleMetrics = useCallback((index: number, runtime: CameraRuntime) => {
     setRuntimes(previous => previous[index] === runtime ? previous : { ...previous, [index]: runtime });
-    // CCTV help/tulong is reserved for the same-camera multimodal fusion inside
-    // useCameraPipeline. Do not independently promote it as a wake-word alert.
-    if (runtime.transcript && makeDistressSpeechSignal(runtime.transcript)) return;
+    // CCTV help/tulong and sunog are reserved for same-camera multimodal
+    // verification inside useCameraPipeline. Never promote them as speech-only
+    // wake-word alerts here.
+    if (runtime.transcript && (
+      makeDistressSpeechSignal(runtime.transcript)
+      || makeSunogSignal(runtime.transcript)
+    )) return;
     const match = runtime.transcript ? checkForWakeWord(runtime.transcript) : null;
     if (!match?.matched) return;
     const previous = householdMatches.current.get(index);
@@ -314,9 +324,42 @@ export default function Index() {
   useEffect(() => {
     if (!running || !localCameras.length || connected.length) return;
     const text = `${speech.transcript} ${speech.interimTranscript}`.trim();
+    const runtime = runtimes[1];
+
+    const sunog = makeSunogSignal(text);
+    if (sunog) {
+      const fireState = runtime?.fire;
+      const candidateAt = fireState?.candidateAt ?? 0;
+      const recentCandidate = candidateAt > 0 && Date.now() - candidateAt <= 10_000;
+      const fireVisual = fireState ? makeFireVisualSignal(
+        recentCandidate,
+        fireState.candidateConfidence ?? fireState.confidence,
+        fireState.firePixelRatio ?? 0,
+        fireState.smokeRatio ?? 0,
+        fireState.visibility ?? 100,
+        candidateAt || Date.now(),
+      ) : null;
+      const verifiedFire = fuseFireWithSunog(fireVisual, sunog);
+      if (verifiedFire) {
+        const slot = slots[0];
+        raiseAlert({
+          cameraId: 'slot-1',
+          cameraName: slot.name,
+          location: 'Local webcam',
+          type: 'fire',
+          label: fireSpeechLabel(),
+          confidence: verifiedFire.confidence,
+          timestamp: new Date(verifiedFire.at).toISOString(),
+          snapshot: captureCameraEventSnapshot('slot-1'),
+        }, 'critical');
+      }
+      // "sunog" is reserved for fire verification and must never continue to
+      // the generic wake-word path when visual fire is absent.
+      return;
+    }
+
     const fusionSpeech = makeDistressSpeechSignal(text);
     if (fusionSpeech) {
-      const runtime = runtimes[1];
       const fusionFace = runtime
         ? makeDistressFaceSignal(runtime.faceDistress.label, runtime.faceDistress.confidence)
         : null;
