@@ -279,7 +279,12 @@ export default function Index() {
   }, [storeEvent, logAlert, householdId]);
 
   const handleEvent = useCallback((event: Omit<DetectionEvent, 'id'>) => {
-    if (event.type === 'object' || event.type === 'human') { storeEvent(event); return; }
+    // Informational detections belong in Event History only.
+    // Emotion events must never enter the alarm, announcement, email, or emergency path.
+    if (event.type === 'object' || event.type === 'human' || event.type === 'emotion') {
+      storeEvent(event);
+      return;
+    }
     raiseAlert(event, event.type === 'fire' || event.type === 'smoke' ? 'critical' : 'high');
   }, [storeEvent, raiseAlert]);
 
