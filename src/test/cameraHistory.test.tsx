@@ -138,6 +138,22 @@ describe('bounded camera event histories', () => {
   });
 });
 
+describe('verified multimodal alert history', () => {
+  it('retains verified multimodal distress in camera alerts with its snapshot', () => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => registry.result.current.addEvent(event(1, 'multimodal-distress', {
+      label: 'Verified distress: Frightened + "help"',
+      snapshot: 'data:image/jpeg;base64,verified',
+    })));
+
+    expect(registry.result.current.events[0]).toMatchObject({ type: 'multimodal-distress' });
+    expect(registry.result.current.alertEvents[0]).toMatchObject({
+      type: 'multimodal-distress',
+      snapshot: 'data:image/jpeg;base64,verified',
+    });
+  });
+});
+
 describe('informational emotion history', () => {
   it.each([
     ['Happy', 0.96],
