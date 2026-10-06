@@ -138,6 +138,20 @@ describe('bounded camera event histories', () => {
   });
 });
 
+describe('informational emotion history', () => {
+  it.each([
+    ['Happy', 0.96],
+    ['Sad', 0.91],
+    ['Shock', 0.93],
+  ] as const)('stores %s in event history without promoting it to camera alerts', (label, confidence) => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => registry.result.current.addEvent(event(1, 'emotion', { label, confidence })));
+
+    expect(registry.result.current.events[0]).toMatchObject({ type: 'emotion', label, confidence });
+    expect(registry.result.current.alertEvents).toEqual([]);
+  });
+});
+
 describe('camera event snapshot fallback', () => {
   it('uses the matching camera still and preserves a supplied event frame', () => {
     publishCameraSession('history-source', { preview: 'data:image/jpeg;base64,source', previewTimestamp: 1000 });
