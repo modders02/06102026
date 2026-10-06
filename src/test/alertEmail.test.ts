@@ -66,6 +66,24 @@ describe('alert email delivery guards', () => {
     expect(mocks.invoke).toHaveBeenCalledTimes(2);
   });
 
+  it('forwards the verified camera snapshot to the email function', async () => {
+    const { sendAlertEmail } = await import('@/lib/alertEmail');
+    const snapshotDataUrl = 'data:image/jpeg;base64,dmVyaWZpZWQ=';
+
+    expect(await sendAlertEmail({
+      ...input,
+      alertType: 'multimodal-distress',
+      snapshotDataUrl,
+    })).toEqual({ sent: true });
+
+    expect(mocks.invoke).toHaveBeenCalledWith('send-alert-email', {
+      body: expect.objectContaining({
+        alertType: 'multimodal-distress',
+        snapshotDataUrl,
+      }),
+    });
+  });
+
   it('suppresses repeats after success until the cooldown expires', async () => {
     const { sendAlertEmail } = await import('@/lib/alertEmail');
     expect(await sendAlertEmail(input)).toEqual({ sent: true });
