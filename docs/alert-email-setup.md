@@ -8,12 +8,12 @@ credential belongs in the function's server secrets. It is not a Vite setting.
    in Brevo, or set `BREVO_SENDER_EMAIL` to an already verified sender.
 2. Copy `supabase/functions/.env.example` to `supabase/functions/.env` and fill
    in `BREVO_API_KEY`. The `.env` file is ignored by Git.
-3. Sign in to the project's Supabase account and set the secrets:
+3. Sign in to the MSDS Supabase account, link project `czdlvkthssvocicmidzj`, and set the secrets:
 
    ```powershell
    npx.cmd supabase login
-   npx.cmd supabase secrets set --env-file supabase/functions/.env --project-ref nwksvvwlwacauysiqqkh
-   npx.cmd supabase functions deploy send-alert-email --project-ref nwksvvwlwacauysiqqkh --use-api
+   npx.cmd supabase secrets set --env-file supabase/functions/.env --project-ref czdlvkthssvocicmidzj
+   npx.cmd supabase functions deploy send-alert-email --project-ref czdlvkthssvocicmidzj --use-api
    ```
 
    Alternatively, enter `BREVO_API_KEY` in the project's **Edge Functions > Secrets**
