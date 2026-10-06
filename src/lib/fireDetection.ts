@@ -29,6 +29,8 @@ export interface SaliencyBreakdown {
 
 export interface FireDetectionResult {
   detected: boolean;             // real fire OR smoke-induced low-visibility emergency
+  /** Raw visual flame candidate used only when another modality corroborates it. */
+  fireCandidate: boolean;
   fireDetected: boolean;         // real fire signature confirmed
   smokeEmergency: boolean;       // smoke + low visibility
   confidence: number;            // 0..1 fused
@@ -238,7 +240,10 @@ export function detectFire(
     suppressionLabel,
   });
 
+  const fireCandidate = ratio > 0 && !!bbox;
+
   const baseResult = {
+    fireCandidate,
     firePixelRatio: ratio,
     flickerScore: variance,
     smokeRatio,
@@ -303,6 +308,7 @@ export function detectFire(
         return {
           ...baseResult,
           detected: false,
+          fireCandidate: false,
           fireDetected: false,
           smokeEmergency: false,
           confidence: 0,
@@ -318,6 +324,7 @@ export function detectFire(
       return {
         ...baseResult,
         detected: false,
+        fireCandidate: false,
         fireDetected: false,
         smokeEmergency: false,
         confidence: 0.15,
