@@ -17,8 +17,11 @@ export interface CameraSlot {
   aiEnabled: boolean;
   /** HLS URL reported by the backend after Connect. */
   streamUrl?: string;
+  webrtcUrl?: string;
   /** True once the backend confirmed ffmpeg + HLS for this slot. */
   connected?: boolean;
+  /** Restore an explicitly connected camera after the local bridge restarts. */
+  autoConnect?: boolean;
 }
 
 interface SlotState {
@@ -57,6 +60,7 @@ export const makeSlot = (index: number): CameraSlot => ({
   aiEnabled: true,
   streamUrl: '',
   connected: false,
+  autoConnect: false,
 });
 
 const normalize = (state: Partial<SlotState>): SlotState => {
@@ -64,11 +68,17 @@ const normalize = (state: Partial<SlotState>): SlotState => {
     ? (state.count as SlotCount)
     : 1;
   const existing = Array.isArray(state.slots) ? state.slots : [];
-  const slots = Array.from({ length: 4 }, (_, i) => ({
-    ...makeSlot(i + 1),
-    ...(existing.find(s => s?.index === i + 1) ?? {}),
-    index: i + 1,
-  }));
+  const slots = Array.from({ length: 4 }, (_, i) => {
+    const saved = existing.find(s => s?.index === i + 1);
+    return {
+      ...makeSlot(i + 1),
+      ...saved,
+      index: i + 1,
+      // Older installations only persisted readiness. Migrate that intent
+      // before a startup status request can clear the transient live flag.
+      autoConnect: saved?.autoConnect ?? !!saved?.connected,
+    };
+  });
   return { count, slots };
 };
 
@@ -131,6 +141,7 @@ export const slotCamera = (slot: CameraSlot): CameraConfig => ({
   location: slot.ip ? `Camera IP ${slot.ip}` : '',
   rtspUrl: slotRtsp(slot),
   streamUrl: slot.streamUrl || '',
+  webrtcUrl: slot.webrtcUrl || '',
   enabled: !!slot.ip.trim() && !!slot.connected,
   aiEnabled: slot.aiEnabled,
   recording: false,

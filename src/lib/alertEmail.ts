@@ -5,6 +5,14 @@ export type AlertSeverityLevel = 'low' | 'medium' | 'high' | 'critical';
 const lastSent = new Map<string, number>();
 const inFlight = new Set<string>();
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000;
+const SEND_ERROR_MESSAGE = 'Could not send the alert email. Check email settings and try again.';
+
+export interface AlertEmailResult {
+  sent: boolean;
+  reason?: string;
+  /** Safe for display; never includes raw provider errors or credentials. */
+  message?: string;
+}
 
 export interface AlertEmailInput {
   householdId: string;
@@ -36,15 +44,15 @@ export interface AlertEmailInput {
  *  1. an in-flight guard per event key (same tick / concurrent calls)
  *  2. a cooldown window per event key (default 5 minutes)
  */
-export async function sendAlertEmail(input: AlertEmailInput): Promise<{ sent: boolean; reason?: string }> {
+export async function sendAlertEmail(input: AlertEmailInput): Promise<AlertEmailResult> {
   if (!input.householdId) return { sent: false, reason: 'no_household' };
 
   const key = `${input.householdId}:${input.alertType}:${input.cameraLabel ?? ''}`;
   const cooldown = input.cooldownMs ?? DEFAULT_COOLDOWN_MS;
   const now = Date.now();
   if (inFlight.has(key)) return { sent: false, reason: 'in_flight' };
-  if (now - (lastSent.get(key) ?? 0) < cooldown) return { sent: false, reason: 'cooldown' };
-  lastSent.set(key, now);
+  const previousSent = lastSent.get(key);
+  if (previousSent !== undefined && now - previousSent < cooldown) return { sent: false, reason: 'cooldown' };
   inFlight.add(key);
 
   const payload = {
@@ -70,16 +78,21 @@ export async function sendAlertEmail(input: AlertEmailInput): Promise<{ sent: bo
   try {
     const { data, error } = await supabase.functions.invoke('send-alert-email', { body: payload });
     if (error) {
-      console.warn('[alertEmail] failed:', error.message);
-      // allow a retry sooner when the send itself failed
-      lastSent.delete(key);
-      return { sent: false, reason: 'error' };
+      console.warn('[alertEmail] Alert email request failed.');
+      return { sent: false, reason: 'error', message: SEND_ERROR_MESSAGE };
     }
-    return { sent: Boolean((data as { sent?: boolean } | null)?.sent), reason: (data as { reason?: string } | null)?.reason };
-  } catch (e) {
-    console.warn('[alertEmail] unexpected failure:', e instanceof Error ? e.message : String(e));
-    lastSent.delete(key);
-    return { sent: false, reason: 'error' };
+    const result = data as { sent?: unknown; reason?: string; error?: unknown } | null;
+    if (result?.sent === true) {
+      lastSent.set(key, Date.now());
+      return { sent: true };
+    }
+    if (!result?.error && ['email_disabled', 'below_threshold', 'no_recipients', 'cooldown'].includes(result?.reason ?? '')) {
+      return { sent: false, reason: result!.reason };
+    }
+    return { sent: false, reason: 'error', message: SEND_ERROR_MESSAGE };
+  } catch {
+    console.warn('[alertEmail] Alert email request failed.');
+    return { sent: false, reason: 'error', message: SEND_ERROR_MESSAGE };
   } finally {
     inFlight.delete(key);
   }

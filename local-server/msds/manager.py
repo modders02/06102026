@@ -32,9 +32,13 @@ def start_mediamtx() -> None:
     cmd = [exe]
     if os.path.isfile(MEDIAMTX_CONFIG):
         cmd.append(MEDIAMTX_CONFIG)
+    # Packaged Electron binaries live in read-only installation resources.
+    # MediaMTX can generate auto.key/auto.crt (MoQ), so use the writable runtime
+    # selected by its supervisor rather than the executable's directory.
+    runtime_dir = os.environ.get("MSDS_RUNTIME_DIR") or os.path.dirname(exe) or None
     MEDIAMTX = subprocess.Popen(
         cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        cwd=os.path.dirname(exe) or None, creationflags=no_window_flags(),
+        cwd=runtime_dir, creationflags=no_window_flags(),
     )
     time.sleep(1.5)
 

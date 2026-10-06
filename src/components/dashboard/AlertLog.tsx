@@ -3,6 +3,7 @@ import type { Alert } from '@/types/dashboard';
 
 interface Snapshot {
   id: string;
+  cameraId?: number;
   timestamp: Date;
   dataUrl: string;
   reason: string;
@@ -16,7 +17,7 @@ interface AlertLogProps {
 }
 
 export default function AlertLog({ alerts, visible, snapshots = [], onAlertClick }: AlertLogProps) {
-  const [viewingSnapshot, setViewingSnapshot] = useState<Snapshot | null>(null);
+  const [viewingAlertId, setViewingAlertId] = useState<string | null>(null);
 
   if (!visible) return null;
 
@@ -36,6 +37,7 @@ export default function AlertLog({ alerts, visible, snapshots = [], onAlertClick
     let best: Snapshot | undefined;
     let bestDist = Infinity;
     for (const snap of snapshots) {
+      if (snap.cameraId !== undefined && snap.cameraId !== alert.cameraId) continue;
       const dist = Math.abs(snap.timestamp.getTime() - alertTime);
       if (dist < 5000 && dist < bestDist) {
         bestDist = dist;
@@ -44,6 +46,9 @@ export default function AlertLog({ alerts, visible, snapshots = [], onAlertClick
     }
     return best;
   };
+
+  const viewingAlert = alerts.find(alert => alert.id === viewingAlertId);
+  const viewingSnapshot = viewingAlert ? findSnapshot(viewingAlert) : undefined;
 
   return (
     <div className="bg-card rounded-md border border-border panel-glow p-3 space-y-2">
@@ -66,7 +71,7 @@ export default function AlertLog({ alerts, visible, snapshots = [], onAlertClick
               📸 {viewingSnapshot.timestamp.toLocaleTimeString()}
             </span>
             <button
-              onClick={() => setViewingSnapshot(null)}
+              onClick={() => setViewingAlertId(null)}
               className="text-[9px] font-mono text-muted-foreground hover:text-destructive"
             >
               ✕ Close
@@ -91,7 +96,7 @@ export default function AlertLog({ alerts, visible, snapshots = [], onAlertClick
               <div
                 key={alert.id}
                 onClick={() => {
-                  if (snap) setViewingSnapshot(snap);
+                  if (snap) setViewingAlertId(alert.id);
                   onAlertClick?.(alert);
                 }}
                 className={`text-[10px] font-mono px-2 py-1.5 bg-secondary/50 rounded-sm border-l-2 fade-in-up ${severityStyles[alert.severity]} ${
@@ -100,7 +105,7 @@ export default function AlertLog({ alerts, visible, snapshots = [], onAlertClick
               >
                 <div className="flex justify-between items-start gap-2">
                   <span className="opacity-90 flex items-center gap-1">
-                    {snap && <span title="Click to view snapshot">📸</span>}
+                    {snap && <button type="button" aria-label={`View snapshot for ${alert.message}`} onClick={event => { event.stopPropagation(); setViewingAlertId(alert.id); }} className="shrink-0 rounded border border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"><img src={snap.dataUrl} alt={`Snapshot for ${alert.message}`} loading="lazy" className="h-10 w-14 rounded object-cover" /></button>}
                     {alert.message}
                   </span>
                   <span className="text-muted-foreground whitespace-nowrap">

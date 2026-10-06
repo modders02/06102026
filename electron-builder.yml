@@ -19,6 +19,10 @@ extraResources:
       - "!.venv/**"
       - "!__pycache__"
       - "!**/__pycache__/**"
+      - "!tests/**"
+      - "!**/*.log"
+      - "!bin/auto.crt"
+      - "!bin/auto.key"
 win:
   target: [nsis]
   artifactName: MSDS-System-Setup.exe

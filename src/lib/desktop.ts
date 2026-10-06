@@ -41,6 +41,10 @@ interface MsdsBridge {
   getEnv(): Promise<MsdsDesktopEnv>;
   getLocalServerStatus(): Promise<LocalServerStatus>;
   openExternal(url: string): Promise<void>;
+  getClipFolder(): Promise<{ selected: boolean }>;
+  pickClipFolder(): Promise<{ selected: boolean; cancelled?: boolean; error?: string }>;
+  forgetClipFolder(): Promise<void>;
+  saveClip(filename: string, bytes: Uint8Array): Promise<{ ok: boolean; error?: string }>;
 }
 
 declare global {

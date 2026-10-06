@@ -20,8 +20,11 @@ Deno.serve(async (req) => {
     });
 
   try {
-    const apiKey = Deno.env.get('BREVO_API_KEY');
-    if (!apiKey) return respond({ error: 'Email provider not configured' }, 503);
+    const apiKey = Deno.env.get('BREVO_API_KEY')?.trim();
+    if (!apiKey) return respond({ error: 'Email provider not configured. Set BREVO_API_KEY in Supabase Edge Function Secrets.' }, 503);
+    if (apiKey.startsWith('xsmtpsib-')) {
+      return respond({ error: 'An SMTP key was configured. Set BREVO_API_KEY to a Brevo API key from SMTP & API > API Keys.' }, 503);
+    }
 
     const authHeader = req.headers.get('Authorization') ?? '';
     const backendUrl = Deno.env.get('SUPABASE_URL');
@@ -76,11 +79,13 @@ Deno.serve(async (req) => {
       return respond({ sent: false, reason: 'below_threshold' });
     }
 
-    const { data: recipients } = await supabase
+    const { data: recipients, error: recipientsErr } = await supabase
       .from('notification_recipients')
       .select('email')
       .eq('household_id', householdId)
       .eq('enabled', true);
+
+    if (recipientsErr) return respond({ error: 'Could not load email recipients.' }, 500);
 
     const to = (recipients ?? [])
       .map((r) => String(r.email).trim())

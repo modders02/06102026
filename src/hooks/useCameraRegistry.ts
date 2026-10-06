@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  loadCameras, saveCameras, loadSettings, saveSettings, loadEvents, saveEvents, makeCamera,
+  loadCameras, saveCameras, loadSettings, saveSettings, loadEventHistory, saveEventHistory,
+  isCameraAlert, makeCamera, revokeUnusedEventClips, type CameraEventHistory,
 } from '@/lib/cameraRegistry';
+import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import type { CameraConfig, DetectionEvent, MultiCamSettings } from '@/types/multicam';
 
 const CAMERAS_EVT = 'msd-cameras-changed';
@@ -11,18 +13,19 @@ const EVENTS_EVT = 'msd-events-changed';
 export function useCameraRegistry() {
   const [cameras, setCameras] = useState<CameraConfig[]>(loadCameras);
   const [settings, setSettings] = useState<MultiCamSettings>(loadSettings);
-  const [events, setEvents] = useState<DetectionEvent[]>(loadEvents);
+  const [history, setHistory] = useState<CameraEventHistory>(loadEventHistory);
 
   useEffect(() => {
     const sync = () => { setCameras(loadCameras()); setSettings(loadSettings()); };
-    const syncEvents = () => setEvents(loadEvents());
+    const syncEvents = () => setHistory(loadEventHistory());
+    const syncStorage = () => { sync(); syncEvents(); };
     window.addEventListener(CAMERAS_EVT, sync);
     window.addEventListener(EVENTS_EVT, syncEvents);
-    window.addEventListener('storage', sync);
+    window.addEventListener('storage', syncStorage);
     return () => {
       window.removeEventListener(CAMERAS_EVT, sync);
       window.removeEventListener(EVENTS_EVT, syncEvents);
-      window.removeEventListener('storage', sync);
+      window.removeEventListener('storage', syncStorage);
     };
   }, []);
 
@@ -58,28 +61,41 @@ export function useCameraRegistry() {
     window.dispatchEvent(new Event(CAMERAS_EVT));
   }, []);
 
-  const addEvent = useCallback((evt: DetectionEvent) => {
-    const next = [evt, ...loadEvents()];
-    saveEvents(next);
-    setEvents(next.slice(0, 500));
+  const commitHistory = useCallback((next: CameraEventHistory) => {
+    setHistory(saveEventHistory(next));
     window.dispatchEvent(new Event(EVENTS_EVT));
   }, []);
+
+  const addEvent = useCallback((evt: DetectionEvent) => {
+    const current = loadEventHistory();
+    const captured = { ...evt, snapshot: evt.snapshot || captureCameraEventSnapshot(evt.cameraId) };
+    commitHistory({
+      events: [captured, ...current.events.filter(event => event.id !== evt.id)],
+      alertEvents: isCameraAlert(captured)
+        ? [captured, ...current.alertEvents.filter(event => event.id !== evt.id)]
+        : current.alertEvents,
+    });
+  }, [commitHistory]);
 
   const updateEvent = useCallback((id: string, patch: Partial<DetectionEvent>) => {
-    const next = loadEvents().map(e => (e.id === id ? { ...e, ...patch } : e));
-    saveEvents(next);
-    setEvents(next.slice(0, 500));
-    window.dispatchEvent(new Event(EVENTS_EVT));
-  }, []);
+    const current = loadEventHistory();
+    if (![...current.events, ...current.alertEvents].some(event => event.id === id)) {
+      // A recording may finish after both histories have evicted its event.
+      revokeUnusedEventClips([patch], [...current.events, ...current.alertEvents]);
+      return;
+    }
+    commitHistory({
+      events: current.events.map(event => event.id === id ? { ...event, ...patch } : event),
+      alertEvents: current.alertEvents.map(event => event.id === id ? { ...event, ...patch } : event),
+    });
+  }, [commitHistory]);
 
   const clearEvents = useCallback(() => {
-    saveEvents([]);
-    setEvents([]);
-    window.dispatchEvent(new Event(EVENTS_EVT));
-  }, []);
+    commitHistory({ events: [], alertEvents: [] });
+  }, [commitHistory]);
 
   return {
-    cameras, settings, events,
+    cameras, settings, events: history.events, alertEvents: history.alertEvents,
     addCamera, updateCamera, deleteCamera, updateSettings, addEvent, updateEvent, clearEvents,
   };
 }

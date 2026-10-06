@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { emailFailureMessage, emailSkipMessage } from '@/lib/emailFeedback';
 import { Bell, Mail, Plus, X, Check, ShieldCheck } from 'lucide-react';
 
 interface Settings {
@@ -36,6 +37,7 @@ export default function NotificationSettings({ householdId }: { householdId: str
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const [testResult, setTestResult] = useState('');
+  const [sendingTest, setSendingTest] = useState(false);
 
   const load = useCallback(async () => {
     const [sRes, rRes] = await Promise.all([
@@ -72,26 +74,31 @@ export default function NotificationSettings({ householdId }: { householdId: str
   };
 
   const sendTest = async () => {
+    if (sendingTest) return;
+    setSendingTest(true);
     setTestResult('Sending…');
     setError('');
-    const { data, error: err } = await supabase.functions.invoke('send-alert-email', {
-      body: {
-        householdId,
-        severity: 'critical',
-        alertType: 'Test alert',
-        message: 'This is a test alert from your MSDS dashboard.',
-        trigger: 'Manual test',
-      },
-    });
-    if (err) {
-      const detail = (err as { context?: { text?: () => Promise<string> } }).context?.text
-        ? await (err as { context: { text: () => Promise<string> } }).context.text()
-        : err.message;
-      setTestResult(`Failed: ${detail}`);
-      return;
+    try {
+      const { data, error: err } = await supabase.functions.invoke('send-alert-email', {
+        body: {
+          householdId,
+          severity: 'critical',
+          alertType: 'Test alert',
+          message: 'This is a test alert from your MSDS dashboard.',
+          trigger: 'Manual test',
+        },
+      });
+      if (err) {
+        setTestResult(await emailFailureMessage(err));
+        return;
+      }
+      const res = data as { sent?: boolean; reason?: string; recipients?: number } | null;
+      setTestResult(res?.sent === true ? `Sent to ${res.recipients} recipient(s). Check your inbox and spam folder.` : emailSkipMessage(res?.reason));
+    } catch (err) {
+      setTestResult(await emailFailureMessage(err));
+    } finally {
+      setSendingTest(false);
     }
-    const res = data as { sent?: boolean; reason?: string; recipients?: number } | null;
-    setTestResult(res?.sent ? `Sent to ${res.recipients} recipient(s). Check your inbox and spam folder.` : `Not sent (${res?.reason ?? 'unknown'})`);
   };
 
   const removeRecipient = async (id: string) => {
@@ -193,11 +200,12 @@ export default function NotificationSettings({ householdId }: { householdId: str
         <button
           type="button"
           onClick={sendTest}
-          className="w-full px-4 py-3 rounded-lg border border-primary text-primary text-base font-semibold hover:bg-primary/10"
+          disabled={sendingTest}
+          className="w-full px-4 py-3 rounded-lg border border-primary text-primary text-base font-semibold hover:bg-primary/10 disabled:cursor-wait disabled:opacity-60"
         >
           Send test email
         </button>
-        {testResult && <p className="text-sm text-foreground break-words">{testResult}</p>}
+        {testResult && <p role="status" className="text-sm text-foreground break-words">{testResult}</p>}
       </div>
 
       <div className="flex items-start gap-2 text-sm text-muted-foreground border-t border-border pt-4">

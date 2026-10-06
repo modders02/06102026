@@ -1,5 +1,6 @@
 import type { DetectedObject } from '@/types/dashboard';
 import type { CctvAudioStatus } from '@/lib/multiCamServer';
+import { cameraPlaybackUrl } from '@/lib/cameraStreamEndpoints';
 
 
 export type CameraStatus = 'offline' | 'connecting' | 'online' | 'error';
@@ -16,6 +17,8 @@ export interface CameraConfig {
   rtspUrl: string;
   /** HLS URL returned by the backend (authoritative). */
   streamUrl?: string;
+  /** WHEP endpoint reported by the bridge for realtime playback. */
+  webrtcUrl?: string;
   enabled: boolean;
   /** AI detection on/off for this camera (independent pipeline). */
   aiEnabled: boolean;
@@ -26,8 +29,12 @@ export interface CameraConfig {
 export interface MultiCamSettings {
   mediamtxHost: string;   // e.g. http://127.0.0.1:8888
   pythonServer: string;   // e.g. http://127.0.0.1:5000
+  webrtcHost?: string;    // optional override for a custom WebRTC listener
   fireThreshold: number;      // 0..1
   objectThreshold: number;    // 0..1
+  saliencyThreshold?: number; // image edge threshold, default 40
+  /** Limit object history to these labels; people are always included. */
+  priorityObjects?: string[];
   audioThreshold: number;     // 0..1
   maxCameras: number;
   gridLayout: GridLayout;
@@ -57,6 +64,8 @@ export interface DetectionEvent {
   clipUrl?: string;
   /** File name of the clip saved on the user's computer. */
   clipFile?: string;
+  /** Recording or saving failure shown with the event. */
+  clipError?: string;
 }
 
 /** Live, per-camera pipeline state. Never shared between cameras. */
@@ -66,10 +75,15 @@ export interface CameraRuntime {
   error: string | null;
   fps: number;
   latencyMs: number;
+  transport?: 'webrtc' | 'hls' | 'local';
+  playbackWarning?: string | null;
   saliencyScore: number;
   /** Per-camera multimodal score: visual saliency + objects + CCTV audio distress. */
   attentionScore: number;
   objects: DetectedObject[];
+  /** Coordinate system used for detection boxes. */
+  frameWidth?: number;
+  frameHeight?: number;
   humanCount: number;
   fire: { detected: boolean; confidence: number; bbox?: [number, number, number, number] };
   smoke: { detected: boolean; confidence: number };
@@ -105,7 +119,17 @@ export const DEFAULT_SETTINGS: MultiCamSettings = {
 
 export function hlsUrlFor(camera: CameraConfig, settings: MultiCamSettings) {
   // Always prefer the HLS URL the backend reported for this camera.
-  if (camera.streamUrl?.trim()) return camera.streamUrl.trim();
+  if (camera.streamUrl?.trim()) return cameraPlaybackUrl(camera.streamUrl, settings.pythonServer);
   const host = settings.mediamtxHost.trim().replace(/\/+$/, '');
-  return `${host}/${camera.path.replace(/^\/+|\/+$/g, '')}/index.m3u8`;
+  return cameraPlaybackUrl(`${host}/${camera.path.replace(/^\/+|\/+$/g, '')}/index.m3u8`, settings.pythonServer);
+}
+
+export function webrtcUrlFor(camera: CameraConfig, settings: MultiCamSettings) {
+  if (camera.webrtcUrl?.trim()) return cameraPlaybackUrl(camera.webrtcUrl, settings.pythonServer);
+  if (settings.webrtcHost?.trim()) return cameraPlaybackUrl(`${settings.webrtcHost.trim().replace(/\/+$/, '')}/${camera.path.replace(/^\/+|\/+$/g, '')}/whep`, settings.pythonServer);
+  const url = new URL(hlsUrlFor(camera, settings));
+  url.port = '8889';
+  url.pathname = `/${camera.path.replace(/^\/+|\/+$/g, '')}/whep`;
+  url.search = '';
+  return url.href;
 }

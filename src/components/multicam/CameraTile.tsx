@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Maximize2, RefreshCw, Video, VideoOff, Flame, Cloud, User, Brain, Mic, MicOff,
   Circle, Volume2, VolumeX,
 } from 'lucide-react';
 import { useCameraPipeline } from '@/hooks/useCameraPipeline';
 import { useCctvTalk } from '@/hooks/useCctvTalk';
-import { clipFileName, recordClip, saveClip } from '@/lib/clipRecorder';
+import { clipFileName, getClipSeconds, recordClip, saveClip } from '@/lib/clipRecorder';
 import type { CameraConfig, DetectionEvent, MultiCamSettings } from '@/types/multicam';
 
 interface Props {
@@ -40,27 +40,29 @@ export default function CameraTile({
   const [speaker, setSpeaker] = useState(false);
   const [clipNote, setClipNote] = useState('');
 
-  const handleEvent = useCallback((evt: Omit<DetectionEvent, 'id'>) => {
+  const handleEvent = (evt: Omit<DetectionEvent, 'id'>) => {
     const id = onEvent(evt);
     if (!EMERGENCY_TYPES.has(evt.type) || recordingRef.current) return id;
     const video = videoRef.current;
     if (!video || typeof id !== 'string') return id;
     recordingRef.current = true;
-    setClipNote('Recording a 10 second clip…');
-    void recordClip(video)
+    const seconds = getClipSeconds();
+    setClipNote(`Recording a ${seconds} second clip…`);
+    void recordClip(video, seconds)
       .then(async blob => {
         if (!blob) { setClipNote('Could not record a clip from this camera.'); return; }
         const name = clipFileName(camera.name, evt.type);
-        const where = await saveClip(blob, name);
-        onClip?.(id, name, URL.createObjectURL(blob));
-        setClipNote(`Clip saved to ${where}`);
+        await saveClip(blob, name);
+        if (onClip) onClip(id, name, URL.createObjectURL(blob));
+        setClipNote('Clip saved.');
       })
+      .catch(error => setClipNote(error instanceof Error ? error.message : 'Could not save the clip.'))
       .finally(() => {
         recordingRef.current = false;
         window.setTimeout(() => setClipNote(''), 6000);
       });
     return id;
-  }, [camera.name, onClip, onEvent]);
+  };
 
   const { videoRef, runtime, reconnect } = useCameraPipeline({ camera, settings, onEvent: handleEvent });
   const talk = useCctvTalk(settings.pythonServer, camera.id);

@@ -13,8 +13,8 @@
     "test:watch": "vitest",
     "electron:dev": "concurrently -k \"npm run dev\" \"wait-on http://localhost:8080 && npm run electron:start\"",
     "electron:start": "electron .",
-    "electron:build": "ELECTRON=1 vite build && electron-builder --win nsis --config electron-builder.yml",
-    "electron:package": "ELECTRON=1 vite build && electron-builder --dir --config electron-builder.yml",
+    "electron:build": "vite build --base=./ && electron-builder --win nsis --config electron-builder.yml",
+    "electron:package": "vite build --base=./ && electron-builder --dir --config electron-builder.yml",
     "cf:dev": "npm --prefix cloudflare run dev",
     "cf:deploy": "npm --prefix cloudflare run deploy",
     "local:dev": "npm --prefix local-service run dev",
@@ -92,6 +92,9 @@
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react-swc": "^3.11.0",
     "autoprefixer": "^10.4.21",
+    "concurrently": "^10.0.5",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.32.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
@@ -103,7 +106,8 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
     "vite": "^5.4.19",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "wait-on": "^9.5.1"
   },
   "main": "electron/main.cjs"
 }

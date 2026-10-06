@@ -11,9 +11,14 @@
  *
  * NOTE: written in CommonJS (.cjs) because package.json sets "type": "module".
  */
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell, protocol, net } = require('electron');
 const path = require('path');
 const { startLocalServer, stopLocalServer, getBootstrapStatus } = require('./localServer.cjs');
+const { createClipStorage } = require('./clipStorage.cjs');
+const { APP_URL, STORAGE_URL, registerAppScheme, registerAppProtocol } = require('./rendererProtocol.cjs');
+const { migrateRendererStorage } = require('./rendererStorage.cjs');
+
+registerAppScheme(protocol);
 
 const isDev = !app.isPackaged || process.env.MSDS_ELECTRON_DEV === '1';
 const DEV_URL = process.env.MSDS_DEV_URL || 'http://localhost:8080';
@@ -27,9 +32,18 @@ let mainWindow = null;
 /** Last result of the local-server startup attempt, surfaced to the renderer. */
 let localServerStatus = { managed: false, running: false, error: null };
 
+const clipStorage = createClipStorage({
+  getConfigPath: () => path.join(app.getPath('userData'), 'clip-folder.json'),
+  pickDirectory: async () => {
+    const options = { title: 'Choose recording folder', properties: ['openDirectory', 'createDirectory'] };
+    const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+    return result.canceled ? null : result.filePaths[0] || null;
+  },
+});
 
-function createWindow() {
-  mainWindow = new BrowserWindow({
+
+async function createWindow() {
+  const window = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 1024,
@@ -41,26 +55,33 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Camera playback and health timers must keep running when the desktop
+      // window loses focus or is minimized during monitoring.
+      backgroundThrottling: false,
     },
   });
+  mainWindow = window;
 
-  if (isDev) {
-    mainWindow.loadURL(DEV_URL);
-  } else {
-    // Requires vite build with base: './' (see vite.config.ts, ELECTRON=1).
-    mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
-  }
-
-  // Open external links in the OS browser, never inside the shell.
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  // Install handlers before navigation and storage migration can yield.
+  window.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
+  window.on('closed', () => { if (mainWindow === window) mainWindow = null; });
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  if (isDev) {
+    await window.loadURL(DEV_URL);
+  } else {
+    try {
+      await migrateRendererStorage(window, path.join(__dirname, 'storageMigration.html'), STORAGE_URL);
+    } catch (error) {
+      console.error('[msds] renderer storage migration failed:', error);
+    }
+    if (!window.isDestroyed()) await window.loadURL(APP_URL);
+  }
 }
 
-// --- IPC bridge (renderer -> main). Read-only environment info only. ---
+// --- IPC bridge (renderer -> main). ---
 ipcMain.handle('msds:env', () => ({
   isElectron: true,
   isDev,
@@ -80,10 +101,16 @@ ipcMain.handle('msds:openExternal', (_evt, url) => {
   if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url);
 });
 
+ipcMain.handle('msds:getClipFolder', () => clipStorage.getClipFolder());
+ipcMain.handle('msds:pickClipFolder', () => clipStorage.pickClipFolder());
+ipcMain.handle('msds:forgetClipFolder', () => clipStorage.forgetClipFolder());
+ipcMain.handle('msds:saveClip', (_evt, filename, bytes) => clipStorage.saveClip(filename, bytes));
+
 app.whenReady().then(() => {
+  registerAppProtocol({ protocol, net, rootDir: path.join(__dirname, '..', 'dist') });
   // Open the window immediately — the local bridge boots in parallel so a slow
   // or failing Python start never blocks the UI.
-  createWindow();
+  void createWindow().catch(error => console.error('[msds] could not load desktop window:', error));
   startLocalServer()
     .then((status) => {
       localServerStatus = status;
@@ -108,6 +135,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  if (BrowserWindow.getAllWindows().length === 0) {
+    void createWindow().catch(error => console.error('[msds] could not load desktop window:', error));
+  }
 });
-

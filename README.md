@@ -61,6 +61,9 @@ Local: `MSDS_LOCAL_PORT`, `MSDS_FFMPEG_PATH`, `MSDS_FFPROBE_PATH`, `MSDS_WHISPER
 
 Cloud (`cloudflare/.dev.vars`, never committed): `MSDS_DEVICE_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `DATA_BACKEND`.
 
+Alert email: configure `BREVO_API_KEY` in Supabase Edge Function Secrets, then add
+recipients in Household > Notifications. See [Brevo alert email setup](docs/alert-email-setup.md).
+
 ## Must run locally in VS Code
 
 Electron and packaging cannot run inside the web preview. Install the native tooling once:
@@ -70,5 +73,28 @@ npm i -D electron electron-builder concurrently wait-on
 npm run electron:build
 ```
 
-No installer is produced or published by this repository yet — the workflow in
-`.github/workflows/electron-windows.yml` builds it on demand.
+The installer is written to `release/MSDS-System-Setup.exe`. The workflow in
+`.github/workflows/electron-windows.yml` also builds it on demand.
+
+Desktop builds use relative asset paths and work with Windows command shells.
+The installed app needs Python 3.10+ on the destination PC. On first launch it
+creates its Python environment and downloads missing camera tools under the
+current user's app-data directory (`camera-runtime`), so a protected install
+folder does not prevent the camera service from starting. First-run dependency
+installation needs internet access and can take a few minutes. Later launches
+reuse the environment.
+
+For a camera bridge running on this PC, use the default server host
+`127.0.0.1`. For a bridge running on another PC, use that PC's LAN IP; playback
+uses the remote bridge's stream addresses. Camera IP is the CCTV device's
+address and is separate from the bridge host. Keep the destination PC on the
+camera network.
+
+The Cameras page uses WebRTC for realtime playback, measures video frames
+independently of AI processing, and retries the WebRTC connection if the stream
+stops advancing. Realtime playback requires a reachable WebRTC/WHEP endpoint.
+
+The installed dashboard loads from `msds://app` so MediaMTX can accept its
+playback requests. Existing desktop settings are migrated automatically from
+the previous file origin. Previously connected cameras reconnect after the app
+or camera service restarts; Disconnect and Stop disable automatic reconnection.
