@@ -24,6 +24,9 @@ export interface BackendStatus {
   /** "package_missing" | "model_error" | "ready" | "idle" */
   whisper_state?: string;
   whisper_model?: string;
+  whisper_device?: string;
+  whisper_compute_type?: string;
+  whisper_backend_note?: string | null;
   whisper_error?: string | null;
   /** Interpreter running camera_server.py (for install hints). */
   python_exe?: string;
