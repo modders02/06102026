@@ -23,7 +23,7 @@ afterEach(cleanup);
 async function openSettings() {
   render(<NotificationSettings householdId="household" />);
   await screen.findByText('recipient@example.com');
-  return screen.getByRole('button', { name: 'Send test email' });
+  return screen.getByRole('button', { name: 'Send test email + image' });
 }
 
 describe('notification test email', () => {
@@ -38,7 +38,29 @@ describe('notification test email', () => {
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Brevo rejected the server API key.'));
     expect(screen.getByRole('status')).not.toHaveTextContent('details');
     expect(button).toBeEnabled();
-    expect(mocks.invoke).toHaveBeenCalledWith('send-alert-email', expect.objectContaining({ body: expect.objectContaining({ householdId: 'household', severity: 'critical' }) }));
+    expect(mocks.invoke).toHaveBeenCalledWith('send-alert-email', expect.objectContaining({
+      body: expect.objectContaining({
+        householdId: 'household',
+        severity: 'critical',
+        snapshotDataUrl: expect.stringMatching(/^data:image\/(jpeg|png);base64,/),
+      }),
+    }));
+  });
+
+  it('sends a verification image attachment in the manual test payload', async () => {
+    mocks.invoke.mockResolvedValue({ data: { sent: true, recipients: 1 }, error: null });
+    const button = await openSettings();
+    fireEvent.click(button);
+
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledOnce());
+    expect(mocks.invoke).toHaveBeenCalledWith('send-alert-email', {
+      body: expect.objectContaining({
+        alertType: 'Test alert',
+        trigger: 'Manual test with verification image',
+        snapshotDataUrl: expect.stringMatching(/^data:image\/(jpeg|png);base64,/),
+        details: { Attachment: 'MSDS verification image test' },
+      }),
+    });
   });
 
   it('prevents duplicate test emails while waiting and restores the button after success', async () => {
@@ -51,7 +73,7 @@ describe('notification test email', () => {
     expect(mocks.invoke).toHaveBeenCalledTimes(1);
     finish({ data: { sent: true, recipients: 1 }, error: null });
 
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Sent to 1 recipient(s).'));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Sent to 1 recipient(s) with a verification image.'));
     expect(button).toBeEnabled();
   });
 
@@ -63,7 +85,7 @@ describe('notification test email', () => {
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('The test email could not be sent.'));
     expect(button).toBeEnabled();
     fireEvent.click(button);
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Sent to 1 recipient(s).'));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Sent to 1 recipient(s) with a verification image.'));
     expect(mocks.invoke).toHaveBeenCalledTimes(2);
   });
 });
