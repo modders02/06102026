@@ -3,15 +3,18 @@ from __future__ import annotations
 
 import glob
 import json
+import math
 import os
 import queue
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 import urllib.request
 import wave
+from array import array
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -27,6 +30,67 @@ NO_AUDIO_MESSAGE = (
     "nothing to transcribe. Enable the microphone in the camera's own settings "
     "(or use an RTSP sub-stream that carries audio)."
 )
+
+
+def detect_scream_pcm(data: bytes) -> float:
+    """Return a conservative 0..1 scream confidence from 16 kHz mono s16 PCM.
+
+    This is intentionally lightweight: it gates on sustained loudness plus a
+    high-frequency/rapid-zero-crossing signature. A positive result is never an
+    alarm by itself; the renderer still requires a Frightened or Sad face from
+    the same camera within the multimodal fusion window.
+    """
+    if len(data) < 16000:
+        return 0.0
+    usable = len(data) - (len(data) % 2)
+    samples = array("h")
+    samples.frombytes(data[:usable])
+    if sys.byteorder != "little":
+        samples.byteswap()
+    if len(samples) < 8000:
+        return 0.0
+
+    peak = 0
+    sum_sq = 0.0
+    diff_sq = 0.0
+    crossings = 0
+    previous = int(samples[0])
+    for raw in samples:
+        sample = int(raw)
+        absolute = abs(sample)
+        if absolute > peak:
+            peak = absolute
+        sum_sq += sample * sample
+        delta = sample - previous
+        diff_sq += delta * delta
+        if (sample >= 0) != (previous >= 0):
+            crossings += 1
+        previous = sample
+
+    scale = 32768.0
+    count = float(len(samples))
+    rms = math.sqrt(sum_sq / count) / scale
+    peak_norm = peak / scale
+    diff_rms = math.sqrt(diff_sq / max(1.0, count - 1.0)) / scale
+    zcr = crossings / max(1.0, count - 1.0)
+    brightness = diff_rms / max(rms, 1e-6)
+
+    # Ordinary speech can be loud, so require both rapid crossings and strong
+    # high-frequency change before publishing a scream candidate.
+    if rms < 0.08 or peak_norm < 0.30 or zcr < 0.10 or brightness < 0.55:
+        return 0.0
+
+    def unit(value: float, low: float, span: float) -> float:
+        return max(0.0, min(1.0, (value - low) / span))
+
+    confidence = (
+        0.62
+        + 0.12 * unit(rms, 0.08, 0.28)
+        + 0.10 * unit(peak_norm, 0.30, 0.55)
+        + 0.08 * unit(zcr, 0.10, 0.24)
+        + 0.08 * unit(brightness, 0.55, 0.75)
+    )
+    return round(min(0.99, confidence), 3)
 
 
 def probe_streams(rtsp: str, transport: str = "tcp", timeout: int = 20) -> dict:
@@ -284,6 +348,26 @@ class Camera:
             if not self.stop_flag.is_set():
                 self.audio_error = f"Audio PCM reader failed: {exc}"
 
+    def _publish_scream_if_detected(self, pcm: bytes) -> None:
+        confidence = detect_scream_pcm(pcm)
+        if confidence <= 0:
+            return
+        now_ts = time.time()
+        if now_ts - getattr(self, "_last_scream_publish_ts", 0.0) < 6.0:
+            return
+        self._last_scream_publish_ts = now_ts
+        timestamp = now_iso()
+        with self.lock:
+            self.events.append({
+                "camera_id": self.id,
+                "timestamp": timestamp,
+                "transcript": "",
+                "keyword": "scream",
+                "confidence": confidence,
+            })
+            self.events = self.events[-200:]
+        print(f"[Audio {self.id}] scream candidate: {confidence:.2f}", flush=True)
+
     def _handle_chunk(self, wav: str):
         size = os.path.getsize(wav)
         # 16 kHz mono s16 == 32 000 bytes/s; require ~0.5 s of real PCM.
@@ -361,6 +445,7 @@ class Camera:
         def transcribe_pcm(data: bytes) -> None:
             if len(data) < 16000:  # less than ~0.5 s
                 return
+            self._publish_scream_if_detected(data)
             with wave.open(wav_path, "wb") as wav:
                 wav.setnchannels(1)
                 wav.setsampwidth(2)
