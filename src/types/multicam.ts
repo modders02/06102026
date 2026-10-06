@@ -48,6 +48,7 @@ export type DetectionType =
   | 'smoke'
   | 'face-distress'
   | 'audio-distress'
+  | 'multimodal-distress'
   | 'emotion'
   | 'saliency';
 
