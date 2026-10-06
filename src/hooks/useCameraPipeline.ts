@@ -196,6 +196,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       fireStateRef.current = createFireState();
       recentDistressFaceRef.current = null;
       recentFireVisualRef.current = null;
+      recentSunogRef.current = null;
       patch({
         objects: [], humanCount: 0, saliencyScore: 0, attentionScore: 0,
         fire: { detected: false, candidate: false, confidence: 0 },
