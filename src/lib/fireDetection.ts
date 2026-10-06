@@ -10,8 +10,9 @@
 //                               static red surfaces (low flicker),
 //                               planar uniform regions (posters/wallpapers)
 //
-// Decision: real fire requires color + flicker. Smoke-only emergencies fire
-// when smoke coverage is high AND visibility drops below threshold.
+// Decision: standalone visual fire still requires color + flicker. Broader
+// smoke/low-visibility evidence is exposed for corroboration with a visual
+// fire candidate; the camera pipeline does not alert on smoke alone.
 
 import type { DetectedObject } from '@/types/dashboard';
 
@@ -73,7 +74,7 @@ const SCREEN_LABELS = new Set(['tv', 'cell phone', 'laptop', 'monitor']);
 const MIN_FIRE_RATIO = 0.004;
 const LIGHTER_AREA_RATIO = 0.002;
 const MIN_FLICKER = 0.000002;
-// Smoke emergency: smoke must cover meaningful area AND drop visibility.
+// Legacy smoke-emergency score; the camera pipeline uses smoke as corroboration.
 const SMOKE_COVERAGE_HIGH = 0.18;     // ≥18% of frame
 const VISIBILITY_LOW = 45;            // visibility score (0..100)
 // Poster/wallpaper guard: fire bbox sitting in a very flat, low-edge region.
