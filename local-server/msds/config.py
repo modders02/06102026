@@ -26,7 +26,10 @@ MAX_CAMERAS = 16
 # Low-latency rolling Whisper windows. The first transcript can be produced
 # after ~1.5 s of audio, then refreshed every ~1 s while retaining overlap so
 # words at a chunk boundary are not lost.
-AUDIO_WINDOW_SECONDS = max(1.0, float(os.environ.get("MSD_AUDIO_WINDOW_SECONDS", 1.5)))
+AUDIO_WINDOW_SECONDS = max(
+    1.0,
+    float(os.environ.get("MSD_AUDIO_WINDOW_SECONDS", os.environ.get("MSD_AUDIO_CHUNK_SECONDS", "1.5"))),
+)
 AUDIO_STEP_SECONDS = max(0.5, min(AUDIO_WINDOW_SECONDS, float(os.environ.get("MSD_AUDIO_STEP_SECONDS", 1.0))))
 # Backward-compatible status/config name used by older diagnostics.
 AUDIO_CHUNK_SECONDS = AUDIO_WINDOW_SECONDS
