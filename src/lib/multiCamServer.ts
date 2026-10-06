@@ -24,6 +24,8 @@ export interface BackendStatus {
   /** "package_missing" | "model_error" | "ready" | "idle" */
   whisper_state?: string;
   whisper_model?: string;
+  whisper_package_version?: string;
+  whisper_av_version?: string;
   whisper_device?: string;
   whisper_compute_type?: string;
   whisper_backend_note?: string | null;
@@ -71,6 +73,8 @@ export interface CctvAudioStatus {
   whisper_available?: boolean;
   whisper_state?: string;
   whisper_model?: string;
+  whisper_package_version?: string;
+  whisper_av_version?: string;
   whisper_device?: string;
   whisper_compute_type?: string;
   whisper_backend_note?: string | null;
