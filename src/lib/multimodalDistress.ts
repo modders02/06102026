@@ -24,6 +24,12 @@ export interface VerifiedMultimodalDistress {
   at: number;
 }
 
+export function isMultimodalDistressExpression(expression: string | null | undefined) {
+  const normalized = (expression ?? '').trim().toLowerCase();
+  return normalized === 'angry' || normalized === 'anger'
+    || normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened';
+}
+
 export function makeDistressFaceSignal(
   expression: string | null | undefined,
   confidence: number,
