@@ -70,7 +70,7 @@ beforeEach(() => {
   mocked.analyzeFace.mockReset().mockResolvedValue(undefined);
   mocked.distress = { hasFace: false, expression: null, probability: 0, distressScore: 0, distressLevel: 'none' };
   mocked.computeSaliency.mockClear();
-  mocked.detectFire.mockReset().mockReturnValue({ fireDetected: false, smokeEmergency: false, confidence: 0, smokeRatio: 0 });
+  mocked.detectFire.mockReset().mockReturnValue({ fireCandidate: false, fireDetected: false, smokeEmergency: false, confidence: 0, firePixelRatio: 0, smokeRatio: 0, visibility: 100 });
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
   vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
@@ -91,6 +91,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstub
 const helpSafetyEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'help me', keyword: 'help', confidence: 0.99 };
 const standaloneSafetyEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'call police', keyword: 'police', confidence: 0.99 };
 const screamAudioEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: '', keyword: 'scream', confidence: 0.93 };
+const sunogAudioEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'may sunog', keyword: 'sunog', confidence: 0.98 };
 
 describe('camera snapshots and page-scoped playback', () => {
   it.each([1, 2])('uses stills for camera %s on Dashboard while visual and audio triggers continue', async index => {
@@ -456,6 +457,100 @@ describe('camera snapshots and page-scoped playback', () => {
     await act(async () => {});
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
+  });
+
+  it('does not alarm on sunog without a visual fire candidate', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [sunogAudioEvent], status: null });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
+  });
+
+  it('verifies a small visual fire candidate plus sunog immediately', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [sunogAudioEvent], status: null });
+    mocked.detectFire.mockReturnValueOnce({
+      fireCandidate: true,
+      fireDetected: false,
+      smokeEmergency: false,
+      confidence: 0.2,
+      firePixelRatio: 0.001,
+      smokeRatio: 0.02,
+      visibility: 88,
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'fire',
+      label: 'Verified fire: visual fire + "sunog"',
+      cameraId: 'slot-1',
+      snapshot: 'data:image/jpeg;base64,preview',
+    }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
+  });
+
+  it('immediately alerts when a visual fire candidate overlaps a smoke region', async () => {
+    mocked.detectFire.mockReturnValueOnce({
+      fireCandidate: true,
+      fireDetected: false,
+      smokeEmergency: false,
+      confidence: 0.3,
+      firePixelRatio: 0.002,
+      smokeRatio: 0.24,
+      visibility: 70,
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'fire',
+      label: 'Verified fire: fire + smoke region (24%)',
+      cameraId: 'slot-1',
+    }));
+  });
+
+  it('immediately alerts on visual fire plus low visibility', async () => {
+    mocked.detectFire.mockReturnValueOnce({
+      fireCandidate: true,
+      fireDetected: false,
+      smokeEmergency: false,
+      confidence: 0.32,
+      firePixelRatio: 0.002,
+      smokeRatio: 0.08,
+      visibility: 40,
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'fire',
+      label: 'Verified fire: fire + low visibility (40/100)',
+      cameraId: 'slot-1',
+    }));
+  });
+
+  it('does not alarm on smoke region alone without a visual fire candidate', async () => {
+    mocked.detectFire.mockReturnValueOnce({
+      fireCandidate: false,
+      fireDetected: false,
+      smokeEmergency: true,
+      confidence: 0.7,
+      firePixelRatio: 0,
+      smokeRatio: 0.3,
+      visibility: 35,
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'smoke' }));
   });
 
   it.each([
