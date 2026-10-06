@@ -12,6 +12,8 @@ psutil>=5.9
 # The selected Whisper model is downloaded on first use (needs internet once).
 faster-whisper==1.2.1
 
-# faster-whisper 1.2.1 supports PyAV 19+ by omitting the removed
-# metadata_errors argument when needed.
-av>=11
+# Keep PyAV below 19 for maximum compatibility with Windows environments that
+# may still have an older faster-whisper module cached/loaded. PyAV 19 removed
+# av.open(..., metadata_errors=...), which causes the exact runtime failure:
+# "open() got an unexpected keyword argument 'metadata_errors'".
+av>=11,<19
