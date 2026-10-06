@@ -32,6 +32,8 @@ export interface AlertEmailInput {
   trigger?: string;
   /** Extra key/value detection details rendered as a table in the email. */
   details?: Record<string, string | number | boolean | null | undefined>;
+  /** Camera verification frame attached only for verified multimodal distress. */
+  snapshotDataUrl?: string;
   cooldownMs?: number;
 }
 
@@ -66,6 +68,7 @@ export async function sendAlertEmail(input: AlertEmailInput): Promise<AlertEmail
     confidence: typeof input.confidence === 'number' ? Math.round(input.confidence * 100) / 100 : undefined,
     saliencyScore: input.saliencyScore,
     trigger: input.trigger,
+    snapshotDataUrl: input.snapshotDataUrl,
     details: input.details
       ? Object.fromEntries(
           Object.entries(input.details)
