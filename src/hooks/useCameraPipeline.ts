@@ -9,6 +9,14 @@ import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/mu
 import { useFaceDistress } from '@/hooks/useFaceDistress';
 import { matchWakeWord } from '@/lib/safetyLexicon';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
+import {
+  fuseDistressSignals,
+  makeDistressFaceSignal,
+  makeDistressSpeechSignal,
+  multimodalDistressLabel,
+  type DistressFaceSignal,
+  type DistressSpeechSignal,
+} from '@/lib/multimodalDistress';
 import type {
   CameraConfig, CameraRuntime, DetectionEvent, MultiCamSettings,
 } from '@/types/multicam';
@@ -115,6 +123,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const lastAudioRef = useRef<string | undefined>(undefined);
   const lastShownRef = useRef<string>('');
   const clearTimerRef = useRef<number | undefined>(undefined);
+  const recentDistressFaceRef = useRef<DistressFaceSignal | null>(null);
+  const recentDistressSpeechRef = useRef<DistressSpeechSignal | null>(null);
 
   const cooldownRef = useRef<Record<string, number>>({});
   const retryRef = useRef(0);
@@ -217,6 +227,17 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     },
     [camera.id, camera.name, camera.location, snapshot],
   );
+
+  const maybeEmitVerifiedDistress = useCallback(() => {
+    const verified = fuseDistressSignals(recentDistressFaceRef.current, recentDistressSpeechRef.current);
+    if (!verified) return false;
+    // Consume both signals so one spoken phrase cannot repeatedly combine with
+    // subsequent face frames. The normal event cooldown adds a second guard.
+    recentDistressFaceRef.current = null;
+    recentDistressSpeechRef.current = null;
+    emit('multimodal-distress', multimodalDistressLabel(verified), verified.confidence);
+    return true;
+  }, [emit]);
 
   // Keep camera playback realtime; retry WebRTC rather than downgrading to HLS.
   const whepUrl = webrtcUrlFor(camera, settings);
@@ -533,29 +554,43 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
 
   // Facial expression tracking.
   // Happy, sad, and surprised/shock are informational history events only.
-  // They must never be promoted to face-distress alerts.
+  // Angry/Frightened are held as one half of the multimodal safety rule and
+  // never create a standalone facial alarm.
   useEffect(() => {
     if (!camera.enabled || !camera.aiEnabled || faceAnalysisRevisionRef.current !== analysisRevisionRef.current) return;
     const d = face.distress;
     const emotion = historyEmotionMeta(d.expression);
-    const detected = d.hasFace && d.distressLevel !== 'none' && !emotion;
+    const distressFace = d.hasFace ? makeDistressFaceSignal(d.expression, d.probability) : null;
+    const detected = !!distressFace || (d.hasFace && d.distressLevel !== 'none' && !emotion);
+
     patch({
       faceDistress: {
         detected,
-        label: d.expression ?? '',
-        confidence: emotion ? d.probability : d.distressScore / 100,
+        label: distressFace?.label ?? d.expression ?? '',
+        confidence: distressFace?.confidence ?? (emotion ? d.probability : d.distressScore / 100),
       },
     });
 
     if (d.hasFace && emotion && d.probability >= 0.55) {
+      recentDistressFaceRef.current = null;
       emit('emotion', emotion.label, d.probability);
       return;
     }
 
+    if (distressFace) {
+      recentDistressFaceRef.current = distressFace;
+      maybeEmitVerifiedDistress();
+      return;
+    }
+
+    // A clearly observed non-distress face invalidates an older pending
+    // Angry/Frightened candidate. Temporary no-face frames do not.
+    if (d.hasFace) recentDistressFaceRef.current = null;
+
     if (d.distressLevel === 'severe') {
       emit('face-distress', d.expression || 'distress', d.distressScore / 100);
     }
-  }, [camera.enabled, camera.aiEnabled, face.distress, patch, emit]);
+  }, [camera.enabled, camera.aiEnabled, face.distress, patch, emit, maybeEmitVerifiedDistress]);
 
   // ---- Audio: RTSP audio -> ffmpeg -> Whisper on the backend ---------------
   // The browser never opens a microphone. Listening runs whenever the camera is
@@ -615,6 +650,22 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                 detected: true, keyword, confidence, transcript: e.transcript,
               },
             });
+
+            // "help" and "tulong" are intentionally not standalone alarms.
+            // Hold them briefly so either speech-first or face-first ordering can
+            // verify the same-camera Angry/Frightened + help/tulong combination.
+            const spokenAt = Number.isNaN(Date.parse(e.timestamp)) ? Date.now() : Date.parse(e.timestamp);
+            const distressSpeech = makeDistressSpeechSignal(
+              `${e.transcript || ''} ${e.keyword || ''}`,
+              confidence,
+              spokenAt,
+            );
+            if (distressSpeech) {
+              recentDistressSpeechRef.current = distressSpeech;
+              maybeEmitVerifiedDistress();
+              continue;
+            }
+
             emit('audio-distress', `Safety word: "${keyword}"`, confidence);
           }
         } else if (
@@ -642,7 +693,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     const id = window.setInterval(poll, 1500);
     void poll();
     return () => { stopped = true; window.clearInterval(id); patch({ audioListening: false }); };
-  }, [camera.enabled, camera.id, sourceStream, settings.pythonServer, settings.audioThreshold, patch, emit, showTranscript]);
+  }, [camera.enabled, camera.id, sourceStream, settings.pythonServer, settings.audioThreshold, patch, emit, maybeEmitVerifiedDistress, showTranscript]);
 
 
   const reconnect = useCallback(() => {
