@@ -288,7 +288,7 @@ export default function Index() {
       storeEvent(event);
       return;
     }
-    raiseAlert(event, event.type === 'fire' || event.type === 'smoke' ? 'critical' : 'high');
+    raiseAlert(event, event.type === 'fire' || event.type === 'smoke' || event.type === 'multimodal-distress' ? 'critical' : 'high');
   }, [storeEvent, raiseAlert]);
 
   const handleMetrics = useCallback((index: number, runtime: CameraRuntime) => {
