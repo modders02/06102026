@@ -41,7 +41,11 @@ export function useFaceDistress(active: boolean) {
   const historyRef = useRef<number[]>([]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      historyRef.current = [];
+      setDistress(EMPTY);
+      return;
+    }
     let cancelled = false;
     loadModels()
       .then(() => { if (!cancelled) setReady(true); })
