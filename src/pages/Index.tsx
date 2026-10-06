@@ -65,9 +65,9 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   fire: [
     {
       selector: '#tour-fire-analysis', placement: 'top', title: 'Fire and smoke analysis',
-      body: 'The system combines fire-colored pixels, movement over recent frames, smoke color, and visibility. TV, phone, laptop, poster, and static-red false alarms are rejected.',
+      body: 'The system combines visual fire candidates, smoke-region coverage, visibility, and speech corroboration. “Sunog” alone never alarms; a visual fire candidate + “sunog”, or visual fire + a smoke region/low visibility, triggers immediately.',
       implementation: 'src/lib/fireDetection.ts',
-      code: `confidence = fireColor + flicker + smoke + lowVisibility;\nif (insideScreen || staticRedObject) rejectCandidate();`,
+      code: `if (visualFire && sunogWithin10s) alert();\nif (visualFire && (smokeRegion || lowVisibility)) alert();`,
     },
   ],
   face: [
