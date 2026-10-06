@@ -463,22 +463,24 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         fire.visibility,
         fireObservedAt,
       );
+
+      faceAnalysisRevisionRef.current = revision;
+      await analyzeFace(canvas);
+      if (cancelled()) return;
+
+      // Publish fusion only after this frame is still confirmed current. Speech
+      // may have arrived while face analysis was running; storing it first and
+      // checking here makes either signal order work without stale-frame alerts.
       if (fireVisual) recentFireVisualRef.current = fireVisual;
       const immediateFireSmoke = isImmediateFireSmoke(fireVisual);
       let verifiedFireSpeech = false;
       if (immediateFireSmoke && fireVisual) {
-        // Vision already supplied both corroborating cues; avoid producing a
-        // second alert from a pending "sunog" phrase for the same event.
         recentSunogRef.current = null;
         recentFireVisualRef.current = null;
         emit('fire', fireSmokeLabel(fireVisual), fireVisual.confidence);
       } else if (fireVisual) {
         verifiedFireSpeech = maybeEmitVerifiedFire();
       }
-
-      faceAnalysisRevisionRef.current = revision;
-      await analyzeFace(canvas);
-      if (cancelled()) return;
 
       const previousFire = runtimeRef.current.fire;
       patch({
