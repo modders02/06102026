@@ -275,7 +275,7 @@ export default function Index() {
         householdId, alertId: id, alertType: event.type, message: `${event.cameraName}: ${event.label}`,
         severity, cameraLabel: event.cameraName, occurredAt: event.timestamp, confidence: event.confidence,
         trigger: event.label, details: { Location: event.location || undefined },
-        snapshotDataUrl: event.type === 'multimodal-distress' ? event.snapshot : undefined,
+        snapshotDataUrl: event.snapshot,
       }).then(result => {
         if (result.reason === 'error') {
           toast.error('Alert email could not be sent. Open Household → Notifications and send a test email to check the setup.', { id: 'camera-alert-email' });
