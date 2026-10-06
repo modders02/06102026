@@ -8,7 +8,12 @@ from typing import Optional
 import re
 
 from .binaries import pip_install_command
-from .config import WHISPER_MODEL
+from .config import (
+    WHISPER_COMPUTE_TYPE,
+    WHISPER_DEVICE,
+    WHISPER_HOTWORDS,
+    WHISPER_MODEL,
+)
 
 # Languages the household actually speaks. Anything else detected with very low
 # confidence is treated as noise rather than speech.
@@ -110,6 +115,9 @@ class WhisperEngine:
         self.available = False
         self.state = "idle"
         self.error: Optional[str] = None
+        self.device = "unloaded"
+        self.compute_type = ""
+        self.backend_note: Optional[str] = None
         self.lock = threading.Lock()
         try:
             from faster_whisper import WhisperModel  # noqa: F401
@@ -122,29 +130,76 @@ class WhisperEngine:
                 f"Install it into the SAME interpreter with:  {pip_install_command()}"
             )
 
+    def _backend_candidates(self):
+        """Return faster-whisper backends in preference order.
+
+        Official faster-whisper GPU execution uses CUDA 12 with cuBLAS and
+        cuDNN 9. In auto mode we try the GPU first and fall back to CPU int8 so
+        the app stays usable even when those Windows runtime DLLs are absent.
+        """
+        requested = WHISPER_DEVICE
+        explicit_compute = WHISPER_COMPUTE_TYPE or None
+        if requested == "cuda":
+            return [("cuda", explicit_compute or "int8_float16")]
+        if requested == "cpu":
+            return [("cpu", explicit_compute or "int8")]
+        return [
+            ("cuda", explicit_compute or "int8_float16"),
+            ("cpu", "int8"),
+        ]
+
     def load(self):
         if self.model is not None:
             return self.model
         if not self.available:
             raise RuntimeError(self.error or "faster-whisper is not installed")
         with self.lock:
-            if self.model is None:
-                from faster_whisper import WhisperModel
-                self.state = "loading"
+            if self.model is not None:
+                return self.model
+
+            from faster_whisper import WhisperModel
+            self.state = "loading"
+            failures = []
+            for device, compute_type in self._backend_candidates():
                 try:
-                    # CPU-only, int8: works on every laptop, no GPU required.
-                    self.model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+                    model = WhisperModel(
+                        self.model_name,
+                        device=device,
+                        compute_type=compute_type,
+                    )
+                    self.model = model
+                    self.device = device
+                    self.compute_type = compute_type
                     self.error = None
                     self.state = "ready"
-                except Exception as exc:
-                    self.state = "model_error"
-                    self.error = (
-                        f"Whisper model '{WHISPER_MODEL}' could not be loaded/downloaded: {exc}. "
-                        "The first run needs internet access to fetch the model; "
-                        "set MSD_WHISPER_MODEL=tiny for a smaller download."
+                    if failures:
+                        self.backend_note = (
+                            "CUDA faster-whisper was unavailable; using CPU int8 instead. "
+                            + " | ".join(failures)
+                        )
+                    else:
+                        self.backend_note = None
+                    print(
+                        f"[Whisper] faster-whisper model '{self.model_name}' ready "
+                        f"on {device} ({compute_type})",
+                        flush=True,
                     )
-                    raise RuntimeError(self.error) from exc
-        return self.model
+                    return self.model
+                except Exception as exc:
+                    failures.append(f"{device}/{compute_type}: {exc}")
+                    if WHISPER_DEVICE != "auto":
+                        break
+
+            self.state = "model_error"
+            self.device = "unavailable"
+            self.compute_type = ""
+            self.error = (
+                f"faster-whisper model '{self.model_name}' could not be loaded. "
+                + " | ".join(failures)
+                + ". GPU mode requires CUDA 12 cuBLAS and cuDNN 9; "
+                  "auto mode normally falls back to CPU int8."
+            )
+            raise RuntimeError(self.error)
 
     def transcribe(self, wav_path: str) -> str:
         """Multilingual (English + Tagalog) transcription with hallucination guards.
@@ -163,17 +218,19 @@ class WhisperEngine:
                 task="transcribe",          # never translate — keep "tulong" as "tulong"
                 vad_filter=True,
                 vad_parameters={
-                    "min_silence_duration_ms": 300,
+                    "min_silence_duration_ms": 500,
                     "threshold": 0.35,       # permissive: CCTV mics are quiet
                     "min_speech_duration_ms": 200,
                     "speech_pad_ms": 250,
                 },
-                condition_on_previous_text=False,  # stops repeat/echo hallucinations
+                condition_on_previous_text=False,  # avoids repetition loops between chunks
                 no_speech_threshold=0.8,
                 log_prob_threshold=-1.6,   # quiet CCTV mics give low-confidence real speech
                 temperature=[0.0, 0.2, 0.4],
                 beam_size=5,
-                initial_prompt="Tagalog at English na usapan sa bahay. Help, tulong, saklolo, sunog.",
+                best_of=5,
+                initial_prompt=None,
+                hotwords=WHISPER_HOTWORDS or None,
             )
             lang = getattr(info, "language", "") or ""
             lang_prob = getattr(info, "language_probability", 1.0) or 0.0
