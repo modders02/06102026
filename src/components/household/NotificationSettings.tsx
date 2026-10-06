@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { emailFailureMessage, emailSkipMessage } from '@/lib/emailFeedback';
+import { createEmailTestImage } from '@/lib/emailTestImage';
 import { Bell, Mail, Plus, X, Check, ShieldCheck } from 'lucide-react';
 
 interface Settings {
@@ -85,7 +86,9 @@ export default function NotificationSettings({ householdId }: { householdId: str
           severity: 'critical',
           alertType: 'Test alert',
           message: 'This is a test alert from your MSDS dashboard.',
-          trigger: 'Manual test',
+          trigger: 'Manual test with verification image',
+          snapshotDataUrl: createEmailTestImage(),
+          details: { Attachment: 'MSDS verification image test' },
         },
       });
       if (err) {
@@ -93,7 +96,9 @@ export default function NotificationSettings({ householdId }: { householdId: str
         return;
       }
       const res = data as { sent?: boolean; reason?: string; recipients?: number } | null;
-      setTestResult(res?.sent === true ? `Sent to ${res.recipients} recipient(s). Check your inbox and spam folder.` : emailSkipMessage(res?.reason));
+      setTestResult(res?.sent === true
+        ? `Sent to ${res.recipients} recipient(s) with a verification image. Check your inbox, attachment, and spam folder.`
+        : emailSkipMessage(res?.reason));
     } catch (err) {
       setTestResult(await emailFailureMessage(err));
     } finally {
@@ -203,8 +208,9 @@ export default function NotificationSettings({ householdId }: { householdId: str
           disabled={sendingTest}
           className="w-full px-4 py-3 rounded-lg border border-primary text-primary text-base font-semibold hover:bg-primary/10 disabled:cursor-wait disabled:opacity-60"
         >
-          Send test email
+          Send test email + image
         </button>
+        <p className="text-xs text-muted-foreground">Sends a generated MSDS verification image so the attachment path is tested end to end.</p>
         {testResult && <p role="status" className="text-sm text-foreground break-words">{testResult}</p>}
       </div>
 
