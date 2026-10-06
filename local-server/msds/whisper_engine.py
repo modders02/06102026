@@ -118,9 +118,15 @@ class WhisperEngine:
         self.device = "unloaded"
         self.compute_type = ""
         self.backend_note: Optional[str] = None
+        self.package_version: Optional[str] = None
+        self.av_version: Optional[str] = None
         self.lock = threading.Lock()
         try:
+            import av
+            import faster_whisper
             from faster_whisper import WhisperModel  # noqa: F401
+            self.package_version = getattr(faster_whisper, "__version__", None)
+            self.av_version = getattr(av, "__version__", None)
             self.available = True
         except Exception as exc:
             self.available = False
