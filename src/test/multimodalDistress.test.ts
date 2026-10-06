@@ -60,6 +60,7 @@ describe('multimodal distress fusion', () => {
   });
 
   it.each([
+    ['angry', 'Angry'],
     ['fearful', 'Frightened'],
     ['sad', 'Sad'],
   ] as const)('verifies screaming with %s', (expression, label) => {
@@ -73,9 +74,7 @@ describe('multimodal distress fusion', () => {
 
   it('rejects incompatible face/audio combinations', () => {
     const sad = makeDistressFaceSignal('sad', 0.9, 1000)!;
-    const angry = makeDistressFaceSignal('angry', 0.9, 1000)!;
     expect(fuseDistressSignals(sad, makeDistressSpeechSignal('help', 0.9, 1000)!)).toBeNull();
-    expect(fuseDistressSignals(angry, makeDistressSoundSignal('scream', 0.9, 1000)!)).toBeNull();
   });
 
   it('verifies either ordering inside the ten-second same-camera window', () => {
