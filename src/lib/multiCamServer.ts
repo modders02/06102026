@@ -240,7 +240,15 @@ export interface AudioTestReport {
   attempts?: { source: string; url: string; transport: string; returncode: number | null; bytes: number; seconds: number; ffmpeg_error: string | null }[];
   probe?: { ok: boolean; error: string | null; has_audio_track: boolean | null; audio_codec: string | null; streams: unknown[] };
   capture?: { returncode: number; bytes: number; seconds: number; ffmpeg_error: string | null };
-  whisper?: { available: boolean; state: string; error: string | null };
+  whisper?: {
+    available: boolean;
+    state: string;
+    model?: string;
+    device?: string;
+    compute_type?: string;
+    backend_note?: string | null;
+    error: string | null;
+  };
   available_camera_ids?: string[];
 }
 
