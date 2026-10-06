@@ -13,6 +13,7 @@ import {
   fuseDistressSignals,
   isMultimodalDistressExpression,
   makeDistressFaceSignal,
+  makeDistressSoundSignal,
   makeDistressSpeechSignal,
   multimodalDistressLabel,
   type DistressFaceSignal,
@@ -555,27 +556,33 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   }, [camera.enabled, camera.aiEnabled, playbackEnabled]);
 
   // Facial expression tracking.
-  // Happy, sad, and surprised/shock are informational history events only.
-  // Angry/Frightened are held as one half of the multimodal safety rule and
-  // never create a standalone facial alarm.
+  // Every base expression is non-alerting by itself. Angry/Frightened can
+  // verify help/tulong; Frightened/Sad can verify a scream. Happy, Sad, Shock,
+  // Neutral and Disgust remain informational Event History entries.
   useEffect(() => {
     if (!camera.enabled || !camera.aiEnabled || faceAnalysisRevisionRef.current !== analysisRevisionRef.current) return;
     const d = face.distress;
     const emotion = historyEmotionMeta(d.expression);
     const fusionExpression = d.hasFace && isMultimodalDistressExpression(d.expression);
     const distressFace = d.hasFace ? makeDistressFaceSignal(d.expression, d.probability) : null;
-    const detected = !!distressFace || (d.hasFace && d.distressLevel !== 'none' && !emotion);
+    const isSadCandidate = distressFace?.label === 'Sad';
+    const detected = !!distressFace && !isSadCandidate;
 
     patch({
       faceDistress: {
         detected,
         label: distressFace?.label ?? d.expression ?? '',
-        confidence: distressFace?.confidence ?? (emotion ? d.probability : d.distressScore / 100),
+        confidence: distressFace?.confidence ?? d.probability,
       },
     });
 
     if (d.hasFace && emotion && d.probability >= 0.55) {
-      recentDistressFaceRef.current = null;
+      if (emotion.emotion === 'sad' && distressFace) {
+        recentDistressFaceRef.current = distressFace;
+        maybeEmitVerifiedDistress();
+      } else {
+        recentDistressFaceRef.current = null;
+      }
       emit('emotion', emotion.label, d.probability);
       return;
     }
@@ -585,20 +592,15 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         recentDistressFaceRef.current = distressFace;
         maybeEmitVerifiedDistress();
       } else {
-        // Weak Angry/Frightened observations do not qualify for fusion and
-        // still must not fall through to the standalone facial alarm.
         recentDistressFaceRef.current = null;
       }
       return;
     }
 
-    // A clearly observed non-distress face invalidates an older pending
-    // Angry/Frightened candidate. Temporary no-face frames do not.
+    // Neutral, disgust, unknown expressions and no-face states never emit a
+    // facial alarm. A clearly observed non-fusion face invalidates the pending
+    // visual half; a temporary no-face frame preserves it within the 10 s window.
     if (d.hasFace) recentDistressFaceRef.current = null;
-
-    if (d.distressLevel === 'severe') {
-      emit('face-distress', d.expression || 'distress', d.distressScore / 100);
-    }
   }, [camera.enabled, camera.aiEnabled, face.distress, patch, emit, maybeEmitVerifiedDistress]);
 
   // ---- Audio: RTSP audio -> ffmpeg -> Whisper on the backend ---------------
@@ -670,8 +672,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
               confidence,
               spokenAt,
             );
-            if (distressSpeech) {
-              recentDistressSpeechRef.current = distressSpeech;
+            const distressSound = makeDistressSoundSignal(keyword, confidence, spokenAt);
+            const fusionAudio = distressSpeech ?? distressSound;
+            if (fusionAudio) {
+              recentDistressSpeechRef.current = fusionAudio;
               maybeEmitVerifiedDistress();
               continue;
             }
