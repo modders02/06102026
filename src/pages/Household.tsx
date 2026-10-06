@@ -153,7 +153,7 @@ export default function HouseholdPage() {
     if (hhErr || !hh) { setFormError(hhErr?.message || 'Could not create the household. Please try again.'); return; }
     const { error: memErr } = await supabase.from('household_members').insert({ household_id: hh.id, user_id: user.id, display_name: fullName, phone_number: phoneNumber, is_admin: true });
     if (memErr) { setFormError(memErr.message); return; }
-    await supabase.from('wake_words').insert({ household_id: hh.id, phrase: '911', is_emergency: true, created_by: user.id, action_type: 'both' });
+    await supabase.from('wake_words').insert({ household_id: hh.id, phrase: '911', is_emergency: true, created_by: user.id, action_type: 'email' });
     await fetchHousehold();
   };
 
