@@ -29,7 +29,7 @@ import { announce } from '@/lib/voiceGuide';
 import { sendAlertEmail } from '@/lib/alertEmail';
 import { stopAll as stopAllCameras, stopCamera } from '@/lib/multiCamServer';
 import { matchWakeWord } from '@/lib/safetyLexicon';
-import { makeDistressFaceSignal, makeDistressSpeechSignal, multimodalDistressLabel, fuseDistressSignals } from '@/lib/multimodalDistress';
+import { makeDistressFaceSignal, makeDistressSoundSignal, makeDistressSpeechSignal, multimodalDistressLabel, fuseDistressSignals } from '@/lib/multimodalDistress';
 import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import { getCameraSession } from '@/lib/cameraSessions';
 import { clipFileName, recordClip, saveClip } from '@/lib/clipRecorder';
@@ -67,9 +67,9 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   face: [
     {
       selector: '#tour-face-distress', placement: 'top', title: 'Facial distress',
-      body: 'TinyFaceDetector finds the nearest face. Expression scores are weighted for safety and averaged across five samples to prevent flickering alerts.',
+      body: 'TinyFaceDetector finds the nearest face. Expressions are smoothed for stability, but facial expressions never alarm by themselves. Angry/Frightened can verify help or tulong, while Frightened/Sad can verify screaming.'
       implementation: 'src/hooks/useFaceDistress.ts',
-      code: `distress = sad + 1.4*fearful + 0.8*angry + 0.7*disgusted;\nscore = average(lastFiveSamples);`,
+      code: `distress = sad + 1.4*fearful + 0.8*angry;\nalert = fuse(face, speechOrScream, 10_000);`,
     },
   ],
   speech: [
@@ -349,20 +349,66 @@ export default function Index() {
   }, [running, localCameras.length, connected.length, speech.transcript, speech.interimTranscript, checkForWakeWord, slots, raiseAlert, runtimes]);
 
   useEffect(() => {
-    if (!running || !localCameras.length || connected.length || !['scream', 'bang'].includes(audioFeatures.audioEvent)) return;
-    raiseAlert({ cameraId: 'slot-1', cameraName: slots[0].name, location: '', type: 'audio-distress',
-      label: `${audioFeatures.audioEvent === 'scream' ? 'Scream' : 'Impact'} detected`, confidence: 0,
-      timestamp: new Date().toISOString(),
-    }, audioFeatures.audioEvent === 'bang' ? 'critical' : 'high');
-  }, [running, localCameras.length, connected.length, audioFeatures.audioEvent, slots, raiseAlert]);
+    if (!running || !localCameras.length || connected.length) return;
+
+    if (audioFeatures.audioEvent === 'scream') {
+      const runtime = runtimes[1];
+      const face = runtime
+        ? makeDistressFaceSignal(runtime.faceDistress.label, runtime.faceDistress.confidence)
+        : null;
+      const scream = makeDistressSoundSignal('scream', 1);
+      const verified = fuseDistressSignals(face, scream);
+      if (!verified) return;
+      const slot = slots[0];
+      raiseAlert({
+        cameraId: 'slot-1',
+        cameraName: slot.name,
+        location: 'Local microphone',
+        type: 'multimodal-distress',
+        label: multimodalDistressLabel(verified),
+        confidence: verified.confidence,
+        timestamp: new Date(verified.at).toISOString(),
+        snapshot: captureCameraEventSnapshot('slot-1'),
+      }, 'critical');
+      return;
+    }
+
+    if (audioFeatures.audioEvent === 'bang') {
+      raiseAlert({ cameraId: 'slot-1', cameraName: slots[0].name, location: '', type: 'audio-distress',
+        label: 'Impact detected', confidence: 0, timestamp: new Date().toISOString(),
+      }, 'critical');
+    }
+  }, [running, localCameras.length, connected.length, audioFeatures.audioEvent, slots, raiseAlert, runtimes]);
 
   useEffect(() => {
     if (!localAudioEnabled || yamnet.distressScore < 35) return;
+
+    if (yamnet.topLabel === 'Screaming') {
+      const runtime = runtimes[1];
+      const face = runtime
+        ? makeDistressFaceSignal(runtime.faceDistress.label, runtime.faceDistress.confidence)
+        : null;
+      const scream = makeDistressSoundSignal('screaming', yamnet.topScore);
+      const verified = fuseDistressSignals(face, scream);
+      if (!verified) return;
+      raiseAlert({
+        cameraId: 'slot-1',
+        cameraName: slots[0].name,
+        location: 'Local microphone',
+        type: 'multimodal-distress',
+        label: multimodalDistressLabel(verified),
+        confidence: verified.confidence,
+        timestamp: new Date(verified.at).toISOString(),
+        snapshot: captureCameraEventSnapshot('slot-1'),
+      }, 'critical');
+      return;
+    }
+
     raiseAlert({ cameraId: 'slot-1', cameraName: slots[0].name, location: 'Local microphone', type: 'audio-distress',
       label: `Audio distress: ${yamnet.topLabel} (${yamnet.distressScore}%)`, confidence: yamnet.topScore,
       timestamp: new Date().toISOString(),
     }, yamnet.distressScore >= 60 ? 'critical' : 'high');
-  }, [localAudioEnabled, yamnet.distressScore, yamnet.topLabel, yamnet.topScore, slots, raiseAlert]);
+  }, [localAudioEnabled, yamnet.distressScore, yamnet.topLabel, yamnet.topScore, slots, raiseAlert, runtimes]);
 
   const handleStart = useCallback(async () => {
     setCameraError('');
