@@ -61,6 +61,7 @@ export function useFaceDistress(active: boolean) {
         .withFaceExpressions();
 
       if (!detections.length) {
+        historyRef.current = [];
         setDistress(EMPTY);
         return;
       }
@@ -72,12 +73,12 @@ export function useFaceDistress(active: boolean) {
       });
 
       const expr = main.expressions as unknown as Record<string, number>;
-      // Distress = sad + fearful + angry + disgusted ; positive = happy + surprised + neutral
+      // Safety distress score uses only expressions that participate in the
+      // multimodal rules. Disgust and neutral are never safety triggers.
       const sad = expr.sad ?? 0;
       const fearful = expr.fearful ?? 0;
       const angry = expr.angry ?? 0;
-      const disgusted = expr.disgusted ?? 0;
-      const distressRaw = sad * 1.0 + fearful * 1.4 + angry * 0.8 + disgusted * 0.7;
+      const distressRaw = sad * 1.0 + fearful * 1.4 + angry * 0.8;
       const instant = Math.min(100, Math.round(distressRaw * 100));
       // Temporal smoothing — rolling avg over last 5 samples to suppress flicker
       historyRef.current.push(instant);
