@@ -168,6 +168,9 @@ def status():
         "whisper": WHISPER.available,
         "whisper_state": WHISPER.state,
         "whisper_model": WHISPER_MODEL,
+        "whisper_device": WHISPER.device,
+        "whisper_compute_type": WHISPER.compute_type,
+        "whisper_backend_note": WHISPER.backend_note,
         "whisper_error": WHISPER.error,
         "python_exe": sys.executable,
         "install_command": pip_install_command(),
@@ -242,6 +245,10 @@ def audio_events(camera_id: str, since: Optional[str] = None):
                 "last_transcript": "", "has_audio_track": None,
                 "whisper_available": WHISPER.available,
                 "whisper_state": WHISPER.state,
+                "whisper_model": WHISPER.model_name,
+                "whisper_device": WHISPER.device,
+                "whisper_compute_type": WHISPER.compute_type,
+                "whisper_backend_note": WHISPER.backend_note,
                 "whisper_error": WHISPER.error,
                 "error": (f"This camera is not registered on the local bridge "
                           f"(id '{camera_id}'). Known ids: "
