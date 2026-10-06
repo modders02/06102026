@@ -8,6 +8,12 @@ const FALLBACK_TEST_IMAGE =
  */
 export function createEmailTestImage(): string {
   if (typeof document === 'undefined') return FALLBACK_TEST_IMAGE;
+  // JSDOM intentionally does not implement CanvasRenderingContext2D unless an
+  // extra native canvas package is installed. Avoid calling getContext there,
+  // because JSDOM logs a noisy "Not implemented" error even when code catches it.
+  if (typeof navigator !== 'undefined' && /jsdom/i.test(navigator.userAgent)) {
+    return FALLBACK_TEST_IMAGE;
+  }
   try {
     const canvas = document.createElement('canvas');
     canvas.width = 480;
