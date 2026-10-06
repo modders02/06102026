@@ -2,7 +2,7 @@
 //
 // Visual pipeline (single frame):
 //   1. Fire-color sampling   -> firePixelRatio, candidate bbox, flicker variance
-//   2. Smoke-color sampling  -> smokeRatio (desaturated grey, mid brightness)
+//   2. Smoke-color sampling  -> smokeRatio (dark/grey/white low-saturation haze)
 //   3. Visibility analysis   -> contrast (std-dev), edge density, saturation,
 //                               brightness -> 0..100 (100 = clear)
 //   4. False-alarm filter    -> rejects fire inside TV/phone/laptop/monitor
@@ -157,8 +157,10 @@ export function detectFire(
         if (y > maxY) maxY = y;
       }
 
-      // SMOKE: low saturation, mid-high luminance, near-grey (R≈G≈B), slight warm/cool ok
-      if (sat < 0.18 && lum > 0.30 && lum < 0.88 && (max - min) < 30) {
+      // SMOKE CANDIDATE: dark, grey, or pale/white low-saturation haze.
+      // The palette is intentionally broad because smoke never alarms alone;
+      // it must cover a meaningful region and corroborate visual fire.
+      if (sat < 0.25 && lum > 0.08 && lum < 0.97 && (max - min) < 50) {
         smokeCount++;
       }
 
