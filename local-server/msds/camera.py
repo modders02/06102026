@@ -20,7 +20,8 @@ from typing import List, Optional
 
 from .binaries import (MissingExecutable, install_hint, need_exe, no_window_flags,
                        now_iso, resolve_exe)
-from .config import (AUDIO_CHUNK_SECONDS, HLS_PORT, HLS_PROBE_TTL, RTSP_PORT,
+from .config import (AUDIO_CHUNK_SECONDS, AUDIO_STEP_SECONDS, AUDIO_WINDOW_SECONDS,
+                     HLS_PORT, HLS_PROBE_TTL, RTSP_PORT,
                      VIDEO_FPS, VIDEO_GOP, VIDEO_MAX_WIDTH, VIDEO_THREADS,
                      WEBRTC_PORT, match_distress)
 from .whisper_engine import WHISPER
@@ -428,20 +429,21 @@ class Camera:
         print(f"[Audio {self.id}] transcript: {transcript}", flush=True)
 
     def _audio_loop(self):
-        """Continuous RTSP audio capture -> raw PCM -> fixed WAV chunks -> Whisper.
+        """Continuous RTSP audio capture -> rolling PCM windows -> Whisper.
 
-        The FFmpeg process remains open for each candidate source. Python reads
-        its raw 16 kHz mono PCM stream and creates one WAV every
-        AUDIO_CHUNK_SECONDS seconds. This avoids depending on RTSP timestamps
-        for segment boundaries.
+        The first transcription window is intentionally short for responsiveness.
+        Subsequent windows overlap so speech that crosses a boundary is preserved.
+        This avoids depending on RTSP timestamps while keeping the live transcript
+        much closer to the camera audio.
         """
         tmpdir = tempfile.mkdtemp(prefix=f"msd-audio-{self.path}-")
         wav_path = os.path.join(tmpdir, "live-chunk.wav")
         last_probe = 0.0
         cand_index = 0
         bytes_per_second = 16000 * 2  # mono s16le
-        chunk_bytes = bytes_per_second * AUDIO_CHUNK_SECONDS
-        no_pcm_timeout = max(12.0, AUDIO_CHUNK_SECONDS * 3.0)
+        window_bytes = max(16000, int(bytes_per_second * AUDIO_WINDOW_SECONDS))
+        step_bytes = max(16000, min(window_bytes, int(bytes_per_second * AUDIO_STEP_SECONDS)))
+        no_pcm_timeout = max(12.0, AUDIO_WINDOW_SECONDS * 4.0)
 
         # Load Whisper once up-front so the failure is visible immediately.
         if WHISPER.available:
@@ -547,7 +549,7 @@ class Camera:
                 pcm = bytearray()
                 last_pcm_at = time.time()
 
-                # 3. Build deterministic fixed-size chunks from raw PCM.
+                # 3. Build low-latency overlapping windows from raw PCM.
                 while not self.stop_flag.is_set() and self.audio_proc.poll() is None:
                     try:
                         block = pcm_queue.get(timeout=0.5)
@@ -557,14 +559,16 @@ class Camera:
                     except queue.Empty:
                         pass
 
-                    while len(pcm) >= chunk_bytes and not self.stop_flag.is_set():
-                        chunk = bytes(pcm[:chunk_bytes])
-                        del pcm[:chunk_bytes]
+                    while len(pcm) >= window_bytes and not self.stop_flag.is_set():
+                        window = bytes(pcm[:window_bytes])
+                        # Advance by less than the window size to retain context
+                        # across boundaries without waiting for another full window.
+                        del pcm[:step_bytes]
                         try:
-                            transcribe_pcm(chunk)
+                            transcribe_pcm(window)
                             self.audio_error = None
                         except Exception as exc:
-                            self.audio_error = f"Audio chunk failed: {exc}"
+                            self.audio_error = f"Audio window failed: {exc}"
 
                     # FFmpeg can remain connected to an RTSP stream that contains
                     # no audio packets. Rotate sources instead of waiting forever.
@@ -590,7 +594,7 @@ class Camera:
                     try:
                         transcribe_pcm(bytes(pcm))
                     except Exception as exc:
-                        self.audio_error = f"Audio chunk failed: {exc}"
+                        self.audio_error = f"Audio window failed: {exc}"
 
                 code = self.audio_proc.poll()
                 produced = self.audio_chunks > chunks_before
