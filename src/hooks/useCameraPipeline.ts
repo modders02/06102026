@@ -8,6 +8,7 @@ import { createFireState, detectFire } from '@/lib/fireDetection';
 import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/multiCamServer';
 import { useFaceDistress } from '@/hooks/useFaceDistress';
 import { matchWakeWord } from '@/lib/safetyLexicon';
+import { historyEmotionMeta } from '@/lib/emotionEvents';
 import type {
   CameraConfig, CameraRuntime, DetectionEvent, MultiCamSettings,
 } from '@/types/multicam';
@@ -530,19 +531,30 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     return () => { stopped = true; window.clearInterval(id); };
   }, [camera.enabled, camera.aiEnabled, playbackEnabled]);
 
-  // Facial distress -> runtime + event
+  // Facial expression tracking.
+  // Happy, sad, and surprised/shock are informational history events only.
+  // They must never be promoted to face-distress alerts.
   useEffect(() => {
     if (!camera.enabled || !camera.aiEnabled || faceAnalysisRevisionRef.current !== analysisRevisionRef.current) return;
     const d = face.distress;
-    const detected = d.hasFace && d.distressLevel !== 'none';
+    const emotion = historyEmotionMeta(d.expression);
+    const detected = d.hasFace && d.distressLevel !== 'none' && !emotion;
     patch({
       faceDistress: {
         detected,
         label: d.expression ?? '',
-        confidence: d.distressScore / 100,
+        confidence: emotion ? d.probability : d.distressScore / 100,
       },
     });
-    if (d.distressLevel === 'severe') emit('face-distress', d.expression || 'distress', d.distressScore / 100);
+
+    if (d.hasFace && emotion && d.probability >= 0.55) {
+      emit('emotion', emotion.label, d.probability);
+      return;
+    }
+
+    if (d.distressLevel === 'severe') {
+      emit('face-distress', d.expression || 'distress', d.distressScore / 100);
+    }
   }, [camera.enabled, camera.aiEnabled, face.distress, patch, emit]);
 
   // ---- Audio: RTSP audio -> ffmpeg -> Whisper on the backend ---------------
