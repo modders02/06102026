@@ -1,8 +1,8 @@
-export type HistoryEmotion = 'happy' | 'sad' | 'shock';
+export type HistoryEmotion = 'happy' | 'sad' | 'shock' | 'neutral' | 'disgust';
 
 export interface HistoryEmotionMeta {
   emotion: HistoryEmotion;
-  label: 'Happy' | 'Sad' | 'Shock';
+  label: 'Happy' | 'Sad' | 'Shock' | 'Neutral' | 'Disgust';
   icon: string;
   rowClass: string;
   labelClass: string;
@@ -30,6 +30,20 @@ const META: Record<HistoryEmotion, HistoryEmotionMeta> = {
     rowClass: 'border-l-4 border-l-warning bg-warning/10',
     labelClass: 'text-warning',
   },
+  neutral: {
+    emotion: 'neutral',
+    label: 'Neutral',
+    icon: '😐',
+    rowClass: 'border-l-4 border-l-muted-foreground bg-muted/40',
+    labelClass: 'text-muted-foreground',
+  },
+  disgust: {
+    emotion: 'disgust',
+    label: 'Disgust',
+    icon: '🤢',
+    rowClass: 'border-l-4 border-l-accent bg-accent/10',
+    labelClass: 'text-accent',
+  },
 };
 
 /**
@@ -43,5 +57,7 @@ export function historyEmotionMeta(expression: string | null | undefined): Histo
   if (normalized === 'surprised' || normalized === 'surprise' || normalized === 'shock' || normalized === 'shocked') {
     return META.shock;
   }
+  if (normalized === 'neutral') return META.neutral;
+  if (normalized === 'disgusted' || normalized === 'disgust') return META.disgust;
   return null;
 }
