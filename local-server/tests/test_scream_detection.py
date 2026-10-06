@@ -25,6 +25,12 @@ class ScreamDetectionTests(unittest.TestCase):
     def test_detects_loud_high_frequency_candidate(self):
         self.assertGreaterEqual(detect_scream_pcm(sine_pcm(2500, 0.7)), 0.6)
 
+    def test_detects_brief_scream_inside_quiet_chunk(self):
+        quiet = b"\x00\x00" * 24000
+        scream = sine_pcm(2500, 0.7, seconds=0.5)
+        chunk = quiet[:16000] + scream + quiet[16000:32000]
+        self.assertGreaterEqual(detect_scream_pcm(chunk), 0.6)
+
     def test_rejects_loud_low_frequency_tone(self):
         self.assertEqual(detect_scream_pcm(sine_pcm(300, 0.7)), 0.0)
 
