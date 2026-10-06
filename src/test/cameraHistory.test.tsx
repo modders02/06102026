@@ -159,6 +159,8 @@ describe('informational emotion history', () => {
     ['Happy', 0.96],
     ['Sad', 0.91],
     ['Shock', 0.93],
+    ['Neutral', 0.95],
+    ['Disgust', 0.90],
   ] as const)('stores %s in event history without promoting it to camera alerts', (label, confidence) => {
     const registry = renderHook(useCameraRegistry);
     act(() => registry.result.current.addEvent(event(1, 'emotion', { label, confidence })));
