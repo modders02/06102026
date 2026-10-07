@@ -76,18 +76,54 @@ class CameraLifecycleTests(unittest.TestCase):
         self.assertEqual(cam.events, [])
 
 
-    def test_start_refuses_to_overlap_a_previous_audio_worker(self):
+    def test_start_defers_audio_instead_of_failing_while_previous_worker_stops(self):
         cam = Camera(id="slot-1", path="cam1", name="Camera 1", rtsp="rtsp://one")
         worker = MagicMock()
         worker.is_alive.return_value = True
         cam.audio_thread = worker
         cam.stop_flag.set()
 
-        with self.assertRaisesRegex(RuntimeError, "Previous audio worker is still stopping"):
+        with patch.object(cam, "start_video") as start_video, \
+                patch.object(cam, "_defer_audio_restart") as defer:
             cam.start()
 
-        worker.join.assert_called_once_with(timeout=5)
+        start_video.assert_called_once_with()
+        defer.assert_called_once_with(worker)
         self.assertTrue(cam.stop_flag.is_set())
+
+    def test_deferred_audio_restart_starts_after_previous_worker_exits(self):
+        cam = Camera(id="slot-1", path="cam1", name="Camera 1", rtsp="rtsp://one")
+        worker = MagicMock()
+        cam.audio_thread = worker
+        cam.stop_flag.set()
+        cam._audio_restart_pending = True
+        cam.enabled = True
+
+        with patch.object(cam, "start_audio") as start_audio:
+            cam._restart_audio_after(worker)
+
+        worker.join.assert_called_once_with()
+        self.assertIsNone(cam.audio_thread)
+        self.assertFalse(cam._audio_restart_pending)
+        self.assertFalse(cam.stop_flag.is_set())
+        start_audio.assert_called_once_with()
+
+    def test_deferred_audio_restart_does_not_restart_after_disconnect(self):
+        cam = Camera(id="slot-1", path="cam1", name="Camera 1", rtsp="rtsp://one")
+        worker = MagicMock()
+        cam.audio_thread = worker
+        cam.stop_flag.set()
+        cam._audio_restart_pending = True
+        cam.enabled = False
+
+        with patch.object(cam, "start_audio") as start_audio:
+            cam._restart_audio_after(worker)
+
+        worker.join.assert_called_once_with()
+        self.assertIsNone(cam.audio_thread)
+        self.assertFalse(cam._audio_restart_pending)
+        self.assertTrue(cam.stop_flag.is_set())
+        start_audio.assert_not_called()
 
 
 if __name__ == "__main__":
