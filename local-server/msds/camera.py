@@ -742,6 +742,7 @@ class Camera:
 
     def stop(self):
         self.stop_flag.set()
+        audio_thread = self.audio_thread
         for proc in (self.video_proc, self.audio_proc):
             if proc and proc.poll() is None:
                 try:
@@ -749,9 +750,35 @@ class Camera:
                     proc.wait(timeout=5)
                 except Exception:
                     proc.kill()
+
+        # A rapid Reconnect must not clear stop_flag while the previous audio
+        # worker is still alive, otherwise the old worker can resume beside the
+        # new one. Wait for this camera's worker only; other slots are untouched.
+        if (audio_thread and audio_thread is not threading.current_thread()
+                and audio_thread.is_alive()):
+            audio_thread.join(timeout=5)
+
         self.video_proc = None
         self.audio_proc = None
+        self.audio_thread = None
         self.audio_connected = False
+        self.audio_chunks = 0
+        self.audio_bytes = 0
+        self.audio_error = None
+        self.audio_ffmpeg_error = None
+        self.last_audio_chunk_at = None
+        self.last_transcription_at = None
+        self.last_transcript = ""
+        self.audio_source = None
+        self.audio_sources_tried = []
+        self.has_audio_track = None
+        self.audio_codec = None
+        self.audio_probe_error = None
+        self.audio_probed_at = None
+        self._last_publish_ts = 0.0
+        self._last_scream_publish_ts = 0.0
+        with self.lock:
+            self.events = []
         self._hls_ok = False
         self._hls_checked = 0.0
 
