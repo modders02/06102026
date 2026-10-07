@@ -25,7 +25,7 @@ import numpy as np
 SAMPLE_RATE = 16000
 SAMPLE_WIDTH = 2
 DEFAULT_KEYWORDS = ("help", "tulong", "sunog", "magnanakaw")
-FEATURE_VERSION = "logmel-shape-dtw-v3-open-set"
+FEATURE_VERSION = "logmel-shape-sequence-v4-open-set"
 NEGATIVE_CLASS = "unknown"
 MIN_TEMPLATES = 3
 MIN_NEGATIVE_TEMPLATES = 5
@@ -36,6 +36,14 @@ MATCH_MARGIN = 0.06
 OPEN_SET_MARGIN = 0.03
 MIN_DURATION_RATIO = 0.60
 MAX_DURATION_RATIO = 1.55
+
+# V4 matcher weights. Existing v2/v3 enrollment templates remain compatible:
+# temporal/delta representations are derived from the stored log-Mel frames.
+SEQUENCE_STEPS = 12
+DTW_WEIGHT = 0.45
+SEQUENCE_WEIGHT = 0.35
+DELTA_WEIGHT = 0.20
+DURATION_DISTANCE_WEIGHT = 0.04
 
 FRAME_MS = 25
 HOP_MS = 10
@@ -72,6 +80,7 @@ class KeywordDecision:
     runner_up_keyword: str
     runner_up_confidence: float
     keyword_scores: Dict[str, float]
+    keyword_duration_ratios: Dict[str, float]
     negative_confidence: float
     duration_ratio: float
     duration_ms: int
@@ -329,6 +338,70 @@ class CustomKeywordEngine:
         # collected false-positive/false-negative data later.
         return float(np.clip(1.0 - distance, 0.0, 1.0))
 
+    @staticmethod
+    def _resample_sequence(features: np.ndarray, steps: int = SEQUENCE_STEPS) -> np.ndarray:
+        """Resample a word to fixed relative-time positions without changing templates."""
+        if features.size == 0:
+            return np.empty((0, N_MELS), dtype=np.float32)
+        if len(features) == 1:
+            return np.repeat(features, steps, axis=0).astype(np.float32)
+        positions = np.linspace(0.0, len(features) - 1.0, steps, dtype=np.float32)
+        left = np.floor(positions).astype(int)
+        right = np.minimum(left + 1, len(features) - 1)
+        alpha = (positions - left).reshape(-1, 1)
+        sampled = features[left] * (1.0 - alpha) + features[right] * alpha
+        norms = np.linalg.norm(sampled, axis=1, keepdims=True)
+        sampled /= np.maximum(norms, 1e-6)
+        return sampled.astype(np.float32)
+
+    @staticmethod
+    def _delta_sequence(features: np.ndarray) -> np.ndarray:
+        """Centered spectral motion; emphasizes phoneme transitions and ordering."""
+        if len(features) < 2:
+            return np.zeros_like(features, dtype=np.float32)
+        delta = np.zeros_like(features, dtype=np.float32)
+        delta[0] = features[1] - features[0]
+        delta[-1] = features[-1] - features[-2]
+        if len(features) > 2:
+            delta[1:-1] = 0.5 * (features[2:] - features[:-2])
+        norms = np.linalg.norm(delta, axis=1, keepdims=True)
+        active = norms[:, 0] > 1e-5
+        delta[active] /= norms[active]
+        return delta
+
+    @staticmethod
+    def _aligned_cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
+        if a.size == 0 or b.size == 0 or len(a) != len(b):
+            return float("inf")
+        dots = np.sum(a * b, axis=1)
+        return float(np.mean(1.0 - np.clip(dots, -1.0, 1.0)))
+
+    def _sequence_distance(self, a: np.ndarray, b: np.ndarray) -> float:
+        """V4 distance: DTW + relative-time spectral shape + spectral motion."""
+        if a.size == 0 or b.size == 0:
+            return float("inf")
+
+        dtw = self._dtw_distance(a, b)
+        a_fixed = self._resample_sequence(a)
+        b_fixed = self._resample_sequence(b)
+        aligned = self._aligned_cosine_distance(a_fixed, b_fixed)
+
+        a_delta = self._delta_sequence(a_fixed)
+        b_delta = self._delta_sequence(b_fixed)
+        delta = self._aligned_cosine_distance(a_delta, b_delta)
+
+        ratio = max(len(a), 1) / max(len(b), 1)
+        duration_penalty = min(
+            0.08,
+            DURATION_DISTANCE_WEIGHT * abs(float(np.log(max(ratio, 1e-6)))),
+        )
+        return float(
+            DTW_WEIGHT * dtw
+            + SEQUENCE_WEIGHT * aligned
+            + DELTA_WEIGHT * delta
+            + duration_penalty
+        )
+
     def enroll(self, keyword: str, pcm: bytes) -> dict:
         key = self.normalize_keyword(keyword)
         features = self.extract_features(pcm)
@@ -378,7 +451,8 @@ class CustomKeywordEngine:
                 except ValueError:
                     continue
                 items: List[np.ndarray] = []
-                for path in sorted(folder.glob("*.npy"))[-MAX_TEMPLATES:]:
+                maximum = MAX_NEGATIVE_TEMPLATES if key == NEGATIVE_CLASS else MAX_TEMPLATES
+                for path in sorted(folder.glob("*.npy"))[-maximum:]:
                     try:
                         feature = np.load(path, allow_pickle=False)
                         if feature.ndim == 2 and feature.shape[1] == N_MELS and len(feature) >= 12:
@@ -408,8 +482,11 @@ class CustomKeywordEngine:
         ranked = []
         target_lengths = {}
         for keyword, templates in positive_snapshot.items():
-            distances = sorted(self._dtw_distance(features, template) for template in templates)
-            selected = distances[:min(2, len(distances))]
+            distances = sorted(self._sequence_distance(features, template) for template in templates)
+            # Multiple-class recognition needs consistency across enrollment
+            # examples. Best-three voting prevents one unusually similar
+            # cross-keyword template from dominating the class score.
+            selected = distances[:min(3, len(distances))]
             distance = float(np.mean(selected))
             confidence = self._distance_to_confidence(distance)
             median_frames = float(np.median([len(template) for template in templates]))
@@ -428,6 +505,10 @@ class CustomKeywordEngine:
             item_keyword: round(item_confidence, 3)
             for item_confidence, item_keyword, _ in ranked
         }
+        keyword_duration_ratios = {
+            item_keyword: round(target_lengths[item_keyword], 3)
+            for _, item_keyword, _ in ranked
+        }
         duration_ratio = target_lengths[keyword]
         duration_ms = round(len(pcm) / (SAMPLE_RATE * SAMPLE_WIDTH) * 1000)
 
@@ -436,7 +517,7 @@ class CustomKeywordEngine:
         if negative_ready:
             # A single close hard-negative example is enough to veto a keyword.
             negative_distance = min(
-                self._dtw_distance(features, template) for template in negative_templates
+                self._sequence_distance(features, template) for template in negative_templates
             )
             negative_confidence = self._distance_to_confidence(negative_distance)
 
@@ -470,6 +551,7 @@ class CustomKeywordEngine:
             runner_up_keyword=runner_up_keyword,
             runner_up_confidence=round(runner_up, 3),
             keyword_scores=keyword_scores,
+            keyword_duration_ratios=keyword_duration_ratios,
             negative_confidence=round(negative_confidence, 3),
             duration_ratio=round(duration_ratio, 3),
             duration_ms=duration_ms,
@@ -498,11 +580,11 @@ class CustomKeywordEngine:
         with self.lock:
             counts = {key: len(value) for key, value in sorted(self.templates.items())}
         return {
-            "engine": "msds-logmel-dtw-v3",
+            "engine": "msds-logmel-sequence-v4",
             "feature_version": FEATURE_VERSION,
             "sample_rate": SAMPLE_RATE,
             "features": f"{N_MELS}-bin per-frame-normalized log-Mel",
-            "matcher": "cosine DTW",
+            "matcher": "DTW + fixed-time spectral sequence + delta motion",
             "threshold": MATCH_THRESHOLD,
             "margin": MATCH_MARGIN,
             "open_set_margin": OPEN_SET_MARGIN,
