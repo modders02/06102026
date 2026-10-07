@@ -88,6 +88,9 @@ class KeywordDecision:
     class_margin: float
     required_margin: float
     negative_confidence: float
+    negative_second_confidence: float
+    negative_mean2_confidence: float
+    negative_top_confidences: List[float]
     duration_ratio: float
     duration_ms: int
     accepted: bool
@@ -632,12 +635,30 @@ class CustomKeywordEngine:
 
         negative_ready = len(negative_templates) >= MIN_NEGATIVE_TEMPLATES
         negative_confidence = 0.0
+        negative_second_confidence = 0.0
+        negative_mean2_confidence = 0.0
+        negative_top_confidences: List[float] = []
         if negative_ready:
-            # A single close hard-negative example is enough to veto a keyword.
-            negative_distance = min(
-                self._dtw_distance(features, template) for template in negative_templates
+            # Live acceptance still uses the closest hard negative. Keep the
+            # next-best scores visible so one anomalous UNKNOWN enrollment can
+            # be distinguished from broad negative-class overlap before tuning.
+            negative_distances = sorted(
+                self._dtw_distance(features, template)
+                for template in negative_templates
             )
-            negative_confidence = self._distance_to_confidence(negative_distance)
+            negative_top_confidences = [
+                round(self._distance_to_confidence(distance), 3)
+                for distance in negative_distances[:3]
+            ]
+            negative_confidence = negative_top_confidences[0]
+            if len(negative_top_confidences) > 1:
+                negative_second_confidence = negative_top_confidences[1]
+                negative_mean2_confidence = round(
+                    (negative_top_confidences[0] + negative_top_confidences[1]) / 2.0,
+                    3,
+                )
+            else:
+                negative_mean2_confidence = negative_confidence
 
         class_margin = confidence - runner_up
         required_margin = self.keyword_margins.get(keyword, MATCH_MARGIN)
@@ -676,6 +697,9 @@ class CustomKeywordEngine:
             class_margin=round(class_margin, 4),
             required_margin=round(required_margin, 4),
             negative_confidence=round(negative_confidence, 3),
+            negative_second_confidence=round(negative_second_confidence, 3),
+            negative_mean2_confidence=round(negative_mean2_confidence, 3),
+            negative_top_confidences=list(negative_top_confidences),
             duration_ratio=round(duration_ratio, 3),
             duration_ms=duration_ms,
             accepted=accepted,
