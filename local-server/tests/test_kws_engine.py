@@ -151,6 +151,34 @@ class CustomKeywordEngineTests(unittest.TestCase):
             self.assertIn("tulong", decision.keyword_duration_ratios)
             self.assertIn("sunog", decision.keyword_duration_ratios)
 
+    def test_template_evaluation_compares_v3_and_v4_without_mutation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = CustomKeywordEngine(tmp)
+            for scale in (0.98, 1.0, 1.02):
+                engine.enroll("tulong", synthetic_word([300, 560, 410], scale))
+                engine.enroll("sunog", synthetic_word([560, 300, 410], scale))
+            for index, pattern in enumerate((
+                [900, 720, 650],
+                [520, 810, 690],
+                [430, 910, 540],
+                [690, 470, 820],
+                [830, 610, 930],
+            )):
+                engine.enroll("unknown", synthetic_word(pattern, 1.0 + index * 0.005))
+
+            before = engine.status()["keywords"].copy()
+            report = engine.evaluate_templates()
+            after = engine.status()["keywords"].copy()
+
+            self.assertEqual(before, after)
+            self.assertTrue(report["success"])
+            self.assertIn("v3_dtw", report)
+            self.assertIn("v4_sequence", report)
+            self.assertEqual(report["v3_dtw"]["total"], 6)
+            self.assertEqual(report["v4_sequence"]["total"], 6)
+            self.assertIn("tulong", report["duration_summary"])
+            self.assertIn("sunog", report["duration_summary"])
+
     def test_unknown_training_becomes_open_set_ready_but_is_not_a_keyword(self):
         with tempfile.TemporaryDirectory() as tmp:
             engine = CustomKeywordEngine(tmp)
