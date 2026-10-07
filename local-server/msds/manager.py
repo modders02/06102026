@@ -63,13 +63,23 @@ def sync_cameras(incoming: List[dict]) -> int:
                 )
             else:
                 changed = cam.rtsp != item.get("rtsp", "") or cam.path != path
+                next_enabled = bool(item.get("enabled", True))
                 cam.name = item.get("name", cam.name)
                 cam.rtsp = item.get("rtsp", cam.rtsp)
                 cam.path = path
-                cam.enabled = bool(item.get("enabled", True))
-                if changed and cam.running():
-                    cam.stop()
-                    cam.start()
+
+                # Sync is registry reconciliation, not a global restart. If one
+                # slot is explicitly disabled, stop only that camera and keep
+                # every other registered camera untouched.
+                if not next_enabled:
+                    cam.enabled = False
+                    if cam.running() or not cam.stop_flag.is_set():
+                        cam.stop()
+                else:
+                    cam.enabled = True
+                    if changed and cam.running():
+                        cam.stop()
+                        cam.start()
         for cid in list(CAMERAS):
             if cid not in keep:
                 CAMERAS[cid].stop()
