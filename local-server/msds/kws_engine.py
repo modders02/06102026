@@ -380,6 +380,10 @@ class CustomKeywordEngine:
             duration_ms=duration_ms,
         )
 
+    def has_ready_templates(self) -> bool:
+        with self.lock:
+            return any(len(value) >= MIN_TEMPLATES for value in self.templates.values())
+
     def status(self) -> dict:
         with self.lock:
             counts = {key: len(value) for key, value in sorted(self.templates.items())}
