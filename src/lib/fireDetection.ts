@@ -29,7 +29,9 @@ export interface SaliencyBreakdown {
 }
 
 export interface FireDetectionResult {
-  detected: boolean;             // real fire OR smoke-induced low-visibility emergency
+  detected: boolean;
+  /** True when flame-like pixels belong to content displayed on an electronic screen. */
+  screenSuppressed: boolean;             // real fire OR smoke-induced low-visibility emergency
   /** Raw visual flame candidate used only when another modality corroborates it. */
   fireCandidate: boolean;
   fireDetected: boolean;         // real fire signature confirmed
@@ -56,6 +58,8 @@ export interface FireDetectorState {
   lastBbox: [number, number, number, number] | null;
   smoothBbox: [number, number, number, number] | null; // EMA-smoothed bbox
   missFrames: number;            // frames since last raw bbox (hold before clearing)
+  /** Recently observed display devices; survives brief COCO-SSD misses. */
+  recentScreens: { label: string; bbox: [number, number, number, number]; ttl: number }[];
 }
 
 export function createFireState(): FireDetectorState {
@@ -66,10 +70,16 @@ export function createFireState(): FireDetectorState {
     lastBbox: null,
     smoothBbox: null,
     missFrames: 0,
+    recentScreens: [],
   };
 }
 
-const SCREEN_LABELS = new Set(['tv', 'cell phone', 'laptop', 'monitor']);
+const SCREEN_LABELS = new Set(['tv', 'cell phone', 'laptop', 'monitor', 'tablet']);
+const SCREEN_MEMORY_FRAMES = 4;
+const SCREEN_MARGIN_RATIO = 0.12;
+const SCREEN_MIN_MARGIN_PX = 6;
+const FIRE_IN_SCREEN_OVERLAP = 0.25;
+const SCREEN_IN_FIRE_OVERLAP = 0.35;
 
 const MIN_FIRE_RATIO = 0.004;
 const LIGHTER_AREA_RATIO = 0.002;
@@ -120,6 +130,55 @@ function bboxOverlap(a: [number, number, number, number], b: [number, number, nu
   return area > 0 ? inter / area : 0;
 }
 
+function expandScreenBbox(
+  bbox: [number, number, number, number],
+  width: number,
+  height: number,
+): [number, number, number, number] {
+  const [x, y, w, h] = bbox;
+  const marginX = Math.max(SCREEN_MIN_MARGIN_PX, w * SCREEN_MARGIN_RATIO);
+  const marginY = Math.max(SCREEN_MIN_MARGIN_PX, h * SCREEN_MARGIN_RATIO);
+  const left = Math.max(0, x - marginX);
+  const top = Math.max(0, y - marginY);
+  const right = Math.min(width, x + w + marginX);
+  const bottom = Math.min(height, y + h + marginY);
+  return [left, top, Math.max(0, right - left), Math.max(0, bottom - top)];
+}
+
+function bboxCenterInside(
+  inner: [number, number, number, number],
+  outer: [number, number, number, number],
+) {
+  const cx = inner[0] + inner[2] / 2;
+  const cy = inner[1] + inner[3] / 2;
+  return cx >= outer[0] && cx <= outer[0] + outer[2]
+    && cy >= outer[1] && cy <= outer[1] + outer[3];
+}
+
+function updateRecentScreens(
+  state: FireDetectorState,
+  objects: DetectedObject[],
+) {
+  const remembered = state.recentScreens
+    .map(screen => ({ ...screen, ttl: screen.ttl - 1 }))
+    .filter(screen => screen.ttl > 0);
+
+  for (const object of objects) {
+    if (!SCREEN_LABELS.has(object.label) || object.confidence < 0.35) continue;
+    const bbox = [...object.bbox] as [number, number, number, number];
+    const existing = remembered.find(screen =>
+      screen.label === object.label
+      && (bboxOverlap(screen.bbox, bbox) > 0.45 || bboxOverlap(bbox, screen.bbox) > 0.45));
+    if (existing) {
+      existing.bbox = bbox;
+      existing.ttl = SCREEN_MEMORY_FRAMES;
+    } else {
+      remembered.push({ label: object.label, bbox, ttl: SCREEN_MEMORY_FRAMES });
+    }
+  }
+  state.recentScreens = remembered;
+}
+
 export function detectFire(
   frame: ImageData,
   state: FireDetectorState,
@@ -127,6 +186,7 @@ export function detectFire(
 ): FireDetectionResult {
   const { data, width, height } = frame;
   const step = 4;
+  updateRecentScreens(state, objects);
 
   // Single pass: fire pixels, smoke pixels, luminance stats, simple edge count.
   let fireCount = 0;
@@ -246,6 +306,7 @@ export function detectFire(
   const fireCandidate = ratio > 0 && !!bbox;
 
   const baseResult = {
+    screenSuppressed: false,
     fireCandidate,
     firePixelRatio: ratio,
     flickerScore: variance,
@@ -300,23 +361,27 @@ export function detectFire(
       };
     }
 
-    // Screen / device false alarm — fire "inside" a TV/phone/laptop/monitor
-    // Trigger if the fire bbox mostly sits inside a screen OR the screen mostly
-    // sits inside the fire bbox (covers zoomed-in TVs that fill the frame).
-    for (const obj of objects) {
-      if (!SCREEN_LABELS.has(obj.label)) continue;
-      const fireInsideScreen = bboxOverlap(bbox, obj.bbox);
-      const screenInsideFire = bboxOverlap(obj.bbox, bbox);
-      if (fireInsideScreen > 0.4 || screenInsideFire > 0.5) {
+    // Screen/device false alarm. Use current + recently observed screens so
+    // one missed COCO frame cannot turn the same TV/phone video into "real fire".
+    // Expand the device box slightly because object detectors usually outline
+    // the chassis while the bright screen content can bleed to its edges.
+    for (const screen of state.recentScreens) {
+      const expanded = expandScreenBbox(screen.bbox, width, height);
+      const fireInsideScreen = bboxOverlap(bbox, expanded);
+      const screenInsideFire = bboxOverlap(expanded, bbox);
+      const centerInside = bboxCenterInside(bbox, expanded);
+      if (centerInside || fireInsideScreen >= FIRE_IN_SCREEN_OVERLAP
+          || screenInsideFire >= SCREEN_IN_FIRE_OVERLAP) {
         return {
           ...baseResult,
           detected: false,
+          screenSuppressed: true,
           fireCandidate: false,
           fireDetected: false,
           smokeEmergency: false,
           confidence: 0,
-          rejectedReason: `fire inside ${obj.label} screen — ignored`,
-          saliency: makeSaliency(positive, 0, `fire inside ${obj.label} screen`),
+          rejectedReason: `displayed fire inside ${screen.label} — ignored`,
+          saliency: makeSaliency(positive, 0, `displayed fire inside ${screen.label}`),
         };
       }
     }
