@@ -20,9 +20,9 @@ from typing import List, Optional
 
 from .binaries import (MissingExecutable, install_hint, need_exe, no_window_flags,
                        now_iso, resolve_exe)
-from .config import (AUDIO_CHUNK_SECONDS, HLS_PORT, HLS_PROBE_TTL, RTSP_PORT,
-                     VIDEO_FPS, VIDEO_GOP, VIDEO_MAX_WIDTH, VIDEO_THREADS,
-                     WEBRTC_PORT, match_distress)
+from .config import (AUDIO_CHUNK_SECONDS, AUDIO_ENGINE, HLS_PORT, HLS_PROBE_TTL,
+                     RTSP_PORT, VIDEO_FPS, VIDEO_GOP, VIDEO_MAX_WIDTH,
+                     VIDEO_THREADS, WEBRTC_PORT, match_distress)
 from .whisper_engine import WHISPER
 from .kws_engine import KWS_ENGINE, StreamingSpeechSegmenter
 
@@ -38,8 +38,8 @@ def detect_scream_pcm(data: bytes) -> float:
 
     The chunk is scanned in overlapping 0.5 s windows so a short scream is not
     diluted by several seconds of quiet audio. A positive result is never an
-    alarm by itself; the renderer still requires a Frightened or Sad face from
-    the same camera within the multimodal fusion window.
+    alarm by itself; the renderer still requires an Angry or Frightened face
+    from the same camera within the multimodal fusion window.
     """
     if len(data) < 16000:
         return 0.0
@@ -398,6 +398,8 @@ class Camera:
         self.kws_last_keyword = match.keyword
         self.kws_last_confidence = match.confidence
         self.kws_last_detected_at = now_iso()
+        self.last_transcription_at = self.kws_last_detected_at
+        self.last_transcript = match.keyword.replace("_", " ")
         with self.lock:
             self.events.append({
                 "camera_id": self.id,
@@ -546,12 +548,11 @@ class Camera:
         )
 
     def _audio_loop(self):
-        """Continuous RTSP audio capture -> raw PCM -> fixed WAV chunks -> Whisper.
+        """Continuous RTSP audio capture for custom KWS and optional Whisper.
 
-        The FFmpeg process remains open for each candidate source. Python reads
-        its raw 16 kHz mono PCM stream and creates one WAV every
-        AUDIO_CHUNK_SECONDS seconds. This avoids depending on RTSP timestamps
-        for segment boundaries.
+        The custom engine consumes small PCM blocks immediately. In hybrid mode
+        the same bytes are also accumulated into deterministic fixed-size WAV
+        chunks for Whisper general transcription.
         """
         tmpdir = tempfile.mkdtemp(prefix=f"msd-audio-{self.path}-")
         wav_path = os.path.join(tmpdir, "live-chunk.wav")
@@ -561,19 +562,29 @@ class Camera:
         chunk_bytes = bytes_per_second * AUDIO_CHUNK_SECONDS
         no_pcm_timeout = max(12.0, AUDIO_CHUNK_SECONDS * 3.0)
 
-        # Load Whisper once up-front so the failure is visible immediately.
-        if WHISPER.available:
-            try:
-                WHISPER.load()
-            except Exception as exc:
-                self.audio_error = str(exc)
-        else:
-            self.audio_error = WHISPER.error or "Whisper is unavailable"
+        # Custom-only mode never loads or calls Faster-Whisper.
+        if AUDIO_ENGINE != "custom":
+            if WHISPER.available:
+                try:
+                    WHISPER.load()
+                except Exception as exc:
+                    self.audio_error = str(exc)
+            else:
+                self.audio_error = WHISPER.error or "Whisper is unavailable"
 
         def transcribe_pcm(data: bytes) -> None:
             if len(data) < 16000:  # less than ~0.5 s
                 return
             self._publish_scream_if_detected(data)
+
+            if AUDIO_ENGINE == "custom":
+                # Keep capture diagnostics meaningful even with Whisper off.
+                self.audio_connected = True
+                self.audio_chunks += 1
+                self.audio_bytes += len(data)
+                self.last_audio_chunk_at = now_iso()
+                return
+
             with wave.open(wav_path, "wb") as wav:
                 wav.setnchannels(1)
                 wav.setsampwidth(2)
@@ -1025,6 +1036,7 @@ class Camera:
             "audio_source": self.audio_source,
             "audio_sources_tried": list(self.audio_sources_tried),
             "chunk_seconds": AUDIO_CHUNK_SECONDS,
+            "recognition_engine": AUDIO_ENGINE,
             "custom_kws": {
                 **KWS_ENGINE.status(),
                 "pending_enrollment": self.kws_pending_enrollment,
@@ -1037,6 +1049,6 @@ class Camera:
             "whisper_state": WHISPER.state,
             "whisper_model": WHISPER.model_name,
             "whisper_error": WHISPER.error,
-            "error": error or WHISPER.error,
+            "error": error or (WHISPER.error if AUDIO_ENGINE != "custom" else None),
             "ffmpeg_error": self.audio_ffmpeg_error,
         }
