@@ -25,15 +25,16 @@ import numpy as np
 SAMPLE_RATE = 16000
 SAMPLE_WIDTH = 2
 DEFAULT_KEYWORDS = ("help", "tulong", "sunog", "magnanakaw")
+FEATURE_VERSION = "logmel-shape-dtw-v2"
 MIN_TEMPLATES = 3
 MAX_TEMPLATES = 10
-MATCH_THRESHOLD = 0.72
+MATCH_THRESHOLD = 0.70
 MATCH_MARGIN = 0.06
 
 FRAME_MS = 25
 HOP_MS = 10
 N_FFT = 512
-N_MELS = 24
+N_MELS = 32
 FREQ_MIN = 80.0
 FREQ_MAX = 7600.0
 
@@ -146,7 +147,7 @@ class CustomKeywordEngine:
     """Thread-safe log-Mel + DTW template keyword recognizer."""
 
     def __init__(self, data_dir: Optional[str] = None) -> None:
-        default_dir = Path(__file__).resolve().parents[1] / "kws-data"
+        default_dir = Path(__file__).resolve().parents[1] / "kws-data-v2"
         self.data_dir = Path(data_dir or os.environ.get("MSD_KWS_DATA_DIR", str(default_dir)))
         self.lock = threading.RLock()
         self.templates: Dict[str, List[np.ndarray]] = {}
@@ -254,13 +255,27 @@ class CustomKeywordEngine:
         mel = np.maximum(power @ self._filter_bank().T, 1e-10)
         features = np.log(mel)
 
-        # Cepstral mean/variance normalization makes templates much less
-        # sensitive to speaker loudness, microphone gain, and constant hum.
-        features -= np.mean(features, axis=0, keepdims=True)
-        scale = np.std(features, axis=0, keepdims=True)
-        features /= np.maximum(scale, 1e-3)
+        # Preserve the spectral envelope that identifies phonemes. V1
+        # normalized every frequency bin across the entire utterance, which
+        # removed too much word identity for very short CCTV speech. V2 only
+        # removes each frame's broadband level, so microphone gain changes do
+        # not dominate while relative Mel-band shape remains intact.
+        features -= np.mean(features, axis=1, keepdims=True)
+        frame_scale = np.std(features, axis=1, keepdims=True)
+        features /= np.maximum(frame_scale, 1e-3)
 
-        # Normalize each frame for cosine-DTW.
+        # Light temporal smoothing reduces codec/block noise without delaying
+        # the streaming detector.
+        if len(features) >= 3:
+            smoothed = features.copy()
+            smoothed[1:-1] = (
+                0.25 * features[:-2]
+                + 0.50 * features[1:-1]
+                + 0.25 * features[2:]
+            )
+            features = smoothed
+
+        # Cosine-DTW then compares spectral shape rather than absolute energy.
         norms = np.linalg.norm(features, axis=1, keepdims=True)
         features /= np.maximum(norms, 1e-6)
         return features.astype(np.float32)
@@ -275,12 +290,18 @@ class CustomKeywordEngine:
         if len(b) > 260:
             b = b[np.linspace(0, len(b) - 1, 260).astype(int)]
 
+        # Sakoe-Chiba band prevents unrelated sounds from matching via
+        # extreme time warping while still allowing ordinary speaking-rate
+        # differences. The band expands enough to connect unequal lengths.
+        band = max(abs(len(a) - len(b)) + 2, int(max(len(a), len(b)) * 0.30))
         previous = np.full(len(b) + 1, np.inf, dtype=np.float32)
         previous[0] = 0.0
         for i in range(1, len(a) + 1):
             current = np.full(len(b) + 1, np.inf, dtype=np.float32)
-            for j in range(1, len(b) + 1):
-                cosine_distance = 1.0 - float(np.dot(a[i - 1], b[j - 1]))
+            start = max(1, i - band)
+            stop = min(len(b), i + band) + 1
+            for j in range(start, stop):
+                cosine_distance = max(0.0, 1.0 - float(np.dot(a[i - 1], b[j - 1])))
                 current[j] = cosine_distance + min(
                     current[j - 1],
                     previous[j],
@@ -374,7 +395,11 @@ class CustomKeywordEngine:
 
         for keyword, templates in template_snapshot.items():
             distances = sorted(self._dtw_distance(features, template) for template in templates)
-            selected = distances[:min(3, len(distances))]
+            # Require agreement from two enrollment examples. Using the best
+            # two is more tolerant of one unusually pronounced training sample
+            # than the v1 best-three average, while a single template still
+            # cannot dominate the decision.
+            selected = distances[:min(2, len(distances))]
             distance = float(np.mean(selected))
             confidence = self._distance_to_confidence(distance)
             ranked.append((confidence, keyword, distance))
@@ -426,9 +451,10 @@ class CustomKeywordEngine:
         with self.lock:
             counts = {key: len(value) for key, value in sorted(self.templates.items())}
         return {
-            "engine": "msds-logmel-dtw-v1",
+            "engine": "msds-logmel-dtw-v2",
+            "feature_version": FEATURE_VERSION,
             "sample_rate": SAMPLE_RATE,
-            "features": f"{N_MELS}-bin log-Mel",
+            "features": f"{N_MELS}-bin per-frame-normalized log-Mel",
             "matcher": "cosine DTW",
             "threshold": MATCH_THRESHOLD,
             "margin": MATCH_MARGIN,
