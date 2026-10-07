@@ -456,8 +456,17 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       ));
       const fire = detectFire(frame, fireStateRef.current, objects);
       const fireObservedAt = Date.now();
+
+      // A flame-like region identified as content on a TV/phone/laptop must
+      // invalidate both halves of fire fusion. This prevents an earlier visual
+      // candidate or a recently spoken "sunog" from verifying screen content.
+      if (fire.screenSuppressed) {
+        recentFireVisualRef.current = null;
+        recentSunogRef.current = null;
+      }
+
       const fireVisual = makeFireVisualSignal(
-        fire.fireCandidate,
+        !fire.screenSuppressed && fire.fireCandidate,
         fire.confidence,
         fire.firePixelRatio,
         fire.smokeRatio,
@@ -501,7 +510,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         },
         // Smoke can be displayed as a visual condition, but smoke by itself no
         // longer emits an emergency alert. It must corroborate a fire candidate.
-        smoke: { detected: fire.smokeRatio >= SMOKE_REGION_MIN_RATIO, confidence: fire.smokeRatio },
+        smoke: {
+          detected: !fire.screenSuppressed && fire.smokeRatio >= SMOKE_REGION_MIN_RATIO,
+          confidence: fire.screenSuppressed ? 0 : fire.smokeRatio,
+        },
         lastDetectionAt: new Date().toISOString(),
         detections: runtimeRef.current.detections + objects.length,
         latencyMs: Math.round(performance.now() - started),
