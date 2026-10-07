@@ -118,7 +118,27 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
         )}
         {talk.error && <div role="alert" className="absolute right-3 top-3 max-w-[80%] rounded-lg bg-destructive px-3 py-2 text-xs text-destructive-foreground">{talk.error}</div>}
       </div>
-      <div className="flex items-center justify-between gap-3 px-4 py-3 text-xs text-muted-foreground">
+      <div className="border-t border-border px-4 py-2.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-primary">
+            <Mic className="h-3.5 w-3.5" />
+            Live transcription
+          </span>
+          <p
+            aria-live="polite"
+            aria-atomic="true"
+            className="min-w-0 flex-1 truncate text-sm text-foreground"
+            title={runtime?.transcript || runtime?.audioMessage || 'Listening…'}
+          >
+            {runtime?.transcript || (
+              <span className={runtime?.audioTone === 'error' ? 'text-destructive' : 'text-muted-foreground'}>
+                {runtime?.audioMessage || 'Listening…'}
+              </span>
+            )}
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5"><Camera className="h-3.5 w-3.5" />{camera.aiEnabled ? 'AI monitoring on' : 'AI monitoring off'}</span>
         {runtime?.status === 'online' && <span className="font-mono">{runtime.transport === 'webrtc' || runtime.transport === 'local' ? 'Realtime · ' : ''}{runtime.fps} FPS</span>}
       </div>
