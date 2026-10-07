@@ -1,12 +1,15 @@
 """Closed-vocabulary Whisper regression tests; no real model or audio device is used."""
+from array import array
 from pathlib import Path
 from types import SimpleNamespace
+import math
 import sys
 import threading
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from msds.camera import is_audible_speech_candidate_pcm
 from msds.whisper_engine import WhisperEngine, allowed_transcript
 
 
@@ -92,6 +95,19 @@ class ClosedVocabularyTests(unittest.TestCase):
     def test_transcribe_keeps_tagalog_target(self):
         engine = _engine(_segment("May SUNOG!"), language="tl")
         self.assertEqual(engine.transcribe("unused.wav"), "sunog")
+
+
+    def test_inaudible_pcm_is_rejected_before_whisper(self):
+        silence = (array("h", [0] * 16000)).tobytes()
+        quiet = (array("h", [40] * 16000)).tobytes()
+        self.assertFalse(is_audible_speech_candidate_pcm(silence))
+        self.assertFalse(is_audible_speech_candidate_pcm(quiet))
+
+    def test_audible_pcm_reaches_whisper_gate(self):
+        samples = array("h")
+        for i in range(16000):
+            samples.append(int(2200 * math.sin(2 * math.pi * 440 * i / 16000)))
+        self.assertTrue(is_audible_speech_candidate_pcm(samples.tobytes()))
 
 
 if __name__ == "__main__":
