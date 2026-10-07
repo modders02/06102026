@@ -16,7 +16,7 @@ from fastapi.responses import Response
 
 from .binaries import (install_hint, lan_ip, no_window_flags, pip_install_command,
                        resolve_exe)
-from .config import HLS_PORT, RTSP_PORT, WHISPER_MODEL
+from .config import AUDIO_ENGINE, HLS_PORT, RTSP_PORT, WHISPER_MODEL
 from .manager import (CAMERAS, mediamtx_running, snapshot, start_mediamtx,
                       stop_all_cameras, sync_cameras)
 from .whisper_engine import WHISPER
@@ -166,6 +166,8 @@ def status():
         "mediamtx": mediamtx_running(),
         "hls_port": HLS_PORT,
         "lan_ip": host,
+        "audio_engine": AUDIO_ENGINE,
+        "custom_kws": KWS_ENGINE.status(),
         "whisper": WHISPER.available,
         "whisper_state": WHISPER.state,
         "whisper_model": WHISPER_MODEL,
