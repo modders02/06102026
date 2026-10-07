@@ -32,37 +32,6 @@ NO_AUDIO_MESSAGE = (
 )
 
 
-def is_audible_speech_candidate_pcm(data: bytes) -> bool:
-    """Reject effectively silent PCM before it reaches Whisper.
-
-    This is deliberately only a floor, not a speech classifier. VAD and the
-    closed-vocabulary confidence checks still decide whether audible sound is
-    valid speech. Scanning short windows prevents a brief real utterance from
-    being diluted by the rest of a four-second chunk.
-    """
-    if len(data) < 8000:
-        return False
-    usable = len(data) - (len(data) % 2)
-    samples = array("h")
-    samples.frombytes(data[:usable])
-    if sys.byteorder != "little":
-        samples.byteswap()
-
-    window_size = 4000  # 0.25 s at 16 kHz
-    scale = 32768.0
-    for offset in range(0, len(samples) - window_size + 1, window_size):
-        window = samples[offset:offset + window_size]
-        peak = max(abs(int(sample)) for sample in window)
-        sum_sq = sum(int(sample) * int(sample) for sample in window)
-        rms = math.sqrt(sum_sq / float(len(window))) / scale
-        peak_norm = peak / scale
-        # About -46 dBFS RMS with a modest peak requirement. Truly quiet CCTV
-        # chunks are ignored, while ordinary distant speech still reaches VAD.
-        if rms >= 0.005 and peak_norm >= 0.025:
-            return True
-    return False
-
-
 def detect_scream_pcm(data: bytes) -> float:
     """Return a conservative 0..1 scream confidence from 16 kHz mono s16 PCM.
 
@@ -491,8 +460,6 @@ class Camera:
 
         def transcribe_pcm(data: bytes) -> None:
             if len(data) < 16000:  # less than ~0.5 s
-                return
-            if not is_audible_speech_candidate_pcm(data):
                 return
             self._publish_scream_if_detected(data)
             with wave.open(wav_path, "wb") as wav:
