@@ -132,6 +132,27 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
   });
 
+  it('shows a finished backend transcript on the next 350 ms live poll', async () => {
+    vi.stubGlobal('RTCPeerConnection', class {});
+    mocked.getAudioEvents
+      .mockResolvedValueOnce({ events: [], status: null })
+      .mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
+
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled />);
+
+    await act(async () => {});
+    expect(mocked.getAudioEvents).toHaveBeenCalledTimes(1);
+    expect(getCameraSession('slot-1').runtime?.transcript).toBe('');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(349); });
+    expect(mocked.getAudioEvents).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(mocked.getAudioEvents).toHaveBeenCalledTimes(2);
+    expect(getCameraSession('slot-1').runtime?.transcript).toBe('help me');
+  });
+
   it('starts and removes playback on page changes without restarting audio or replaying its events', async () => {
     vi.stubGlobal('RTCPeerConnection', class {});
     const slot = { ...makeSlot(2), ip: '192.168.1.2', connected: true };
