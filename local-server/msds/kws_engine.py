@@ -57,6 +57,17 @@ class KeywordMatch:
     duration_ms: int
 
 
+@dataclass(frozen=True)
+class KeywordDecision:
+    keyword: str
+    confidence: float
+    distance: float
+    runner_up_confidence: float
+    duration_ms: int
+    accepted: bool
+    reason: str
+
+
 class StreamingSpeechSegmenter:
     """Small energy VAD that emits complete speech segments from PCM blocks."""
 
@@ -341,7 +352,8 @@ class CustomKeywordEngine:
             self.last_error = str(exc)
         self.templates = loaded
 
-    def match(self, pcm: bytes) -> Optional[KeywordMatch]:
+    def diagnose(self, pcm: bytes) -> Optional[KeywordDecision]:
+        """Score one utterance and return the best candidate even when rejected."""
         features = self.extract_features(pcm)
         if len(features) < 12:
             return None
@@ -356,8 +368,6 @@ class CustomKeywordEngine:
 
         for keyword, templates in template_snapshot.items():
             distances = sorted(self._dtw_distance(features, template) for template in templates)
-            # Average the best three enrolled examples. One unusually similar
-            # template cannot dominate the decision.
             selected = distances[:min(3, len(distances))]
             distance = float(np.mean(selected))
             confidence = self._distance_to_confidence(distance)
@@ -365,21 +375,43 @@ class CustomKeywordEngine:
 
         if not ranked:
             return None
+
         ranked.sort(reverse=True)
         confidence, keyword, distance = ranked[0]
         runner_up = ranked[1][0] if len(ranked) > 1 else 0.0
-        if confidence < MATCH_THRESHOLD or confidence - runner_up < MATCH_MARGIN:
-            return None
-
         duration_ms = round(len(pcm) / (SAMPLE_RATE * SAMPLE_WIDTH) * 1000)
-        return KeywordMatch(
+
+        if confidence < MATCH_THRESHOLD:
+            accepted = False
+            reason = "below_threshold"
+        elif confidence - runner_up < MATCH_MARGIN:
+            accepted = False
+            reason = "insufficient_margin"
+        else:
+            accepted = True
+            reason = "accepted"
+
+        return KeywordDecision(
             keyword=keyword,
             confidence=round(confidence, 3),
             distance=round(distance, 4),
             runner_up_confidence=round(runner_up, 3),
             duration_ms=duration_ms,
+            accepted=accepted,
+            reason=reason,
         )
 
+    def match(self, pcm: bytes) -> Optional[KeywordMatch]:
+        decision = self.diagnose(pcm)
+        if not decision or not decision.accepted:
+            return None
+        return KeywordMatch(
+            keyword=decision.keyword,
+            confidence=decision.confidence,
+            distance=decision.distance,
+            runner_up_confidence=decision.runner_up_confidence,
+            duration_ms=decision.duration_ms,
+        )
     def has_ready_templates(self) -> bool:
         with self.lock:
             return any(len(value) >= MIN_TEMPLATES for value in self.templates.values())
