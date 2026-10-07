@@ -52,6 +52,10 @@ export interface FireDetectionResult {
   bbox?: [number, number, number, number];
   /** Temporally smoothed bbox — stable across frames for overlay rendering */
   smoothedBbox?: [number, number, number, number];
+  /** Portion of fire-colored samples that fall inside detected people. */
+  personFirePixelShare?: number;
+  /** Portion of the full frame containing fire-colored samples outside people. */
+  outsidePersonFirePixelRatio?: number;
   saliency: SaliencyBreakdown;
 }
 
@@ -87,6 +91,13 @@ const SCREEN_IN_FIRE_OVERLAP = 0.35;
 const PERSON_LABELS = new Set(['person']);
 const FIRE_IN_PERSON_OVERLAP = 0.70;
 const PERSON_FIRE_MIN_HISTORY = 3;
+/**
+ * Moving orange/red clothing can create apparent temporal "flicker" as the
+ * wearer moves. If most fire-colored pixels remain on a detected person and
+ * there is no meaningful independent fire-colored region outside the person,
+ * suppress the candidate regardless of temporal variance.
+ */
+const PERSON_FIRE_PIXEL_DOMINANCE = 0.70;
 
 const MIN_FIRE_RATIO = 0.004;
 const LIGHTER_AREA_RATIO = 0.002;
@@ -162,6 +173,15 @@ function bboxCenterInside(
     && cy >= outer[1] && cy <= outer[1] + outer[3];
 }
 
+function pointInsideBbox(
+  x: number,
+  y: number,
+  bbox: [number, number, number, number],
+) {
+  return x >= bbox[0] && x <= bbox[0] + bbox[2]
+    && y >= bbox[1] && y <= bbox[1] + bbox[3];
+}
+
 function updateRecentScreens(
   state: FireDetectorState,
   objects: DetectedObject[],
@@ -212,9 +232,13 @@ export function detectFire(
   const { data, width, height } = frame;
   const step = 4;
   updateRecentScreens(state, objects);
+  const personBboxes = objects
+    .filter(object => PERSON_LABELS.has(object.label) && object.confidence >= 0.5)
+    .map(object => [...object.bbox] as [number, number, number, number]);
 
   // Single pass: fire pixels, smoke pixels, luminance stats, simple edge count.
   let fireCount = 0;
+  let fireCountInsidePerson = 0;
   let smokeCount = 0;
   let minX = width, minY = height, maxX = 0, maxY = 0;
 
@@ -237,6 +261,9 @@ export function detectFire(
       // FIRE: strong red, mid green, low blue, R>G>B
       if (r > 200 && g > 100 && g < 200 && b < 100 && r > g + 40 && g > b + 20) {
         fireCount++;
+        if (personBboxes.some(person => pointInsideBbox(x, y, person))) {
+          fireCountInsidePerson++;
+        }
         if (x < minX) minX = x;
         if (y < minY) minY = y;
         if (x > maxX) maxX = x;
@@ -263,6 +290,8 @@ export function detectFire(
   const sampledTotal = Math.ceil(width / step) * Math.ceil(height / step);
   const ratio = fireCount / sampledTotal;
   const smokeRatio = smokeCount / sampledTotal;
+  const personFirePixelShare = fireCount > 0 ? fireCountInsidePerson / fireCount : 0;
+  const outsidePersonFirePixelRatio = Math.max(0, fireCount - fireCountInsidePerson) / sampledTotal;
 
   const meanLum = lumSum / Math.max(1, lumN);
   const varLum = Math.max(0, lumSqSum / Math.max(1, lumN) - meanLum * meanLum);
@@ -361,6 +390,8 @@ export function detectFire(
     lowVisibilityCorroborated,
     bbox,
     smoothedBbox,
+    personFirePixelShare,
+    outsidePersonFirePixelRatio,
   };
 
 
@@ -388,6 +419,30 @@ export function detectFire(
         };
       }
     }
+  }
+
+  // Strong person/clothing suppression. Motion in an orange/red shirt can
+  // generate enough frame-to-frame variation to look like flame flicker.
+  // Do not let temporal variance bypass clothing suppression when the actual
+  // fire-colored pixels are still concentrated on the detected person and no
+  // meaningful independent flame region exists elsewhere in the frame.
+  if (
+    bbox
+    && personFirePixelShare >= PERSON_FIRE_PIXEL_DOMINANCE
+    && outsidePersonFirePixelRatio < MIN_FIRE_RATIO
+  ) {
+    return {
+      ...baseResult,
+      detected: false,
+      fireCandidate: false,
+      fireDetected: false,
+      smokeEmergency: false,
+      smokeCorroborated: false,
+      lowVisibilityCorroborated: false,
+      confidence: 0,
+      rejectedReason: 'fire-colored pixels concentrated on person/clothing — ignored',
+      saliency: makeSaliency(0, positive, 'person/clothing pixel suppression'),
+    };
   }
 
   // Clothing / skin-tone false alarm. A fire-colored patch largely inside
