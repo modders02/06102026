@@ -35,6 +35,8 @@ describe('fire verification fusion', () => {
       firePixelRatio: 0.001,
       smokeRatio: 0.01,
       visibility: 90,
+      smokeCorroborated: false,
+      lowVisibilityCorroborated: false,
     });
   });
 
@@ -56,15 +58,20 @@ describe('fire verification fusion', () => {
   });
 
   it('immediately verifies fire plus a meaningful smoke region', () => {
-    const fire = makeFireVisualSignal(true, 0.4, 0.002, SMOKE_REGION_MIN_RATIO, 70, 1000)!;
+    const fire = makeFireVisualSignal(true, 0.4, 0.002, SMOKE_REGION_MIN_RATIO, 70, 1000, true, false)!;
     expect(isImmediateFireSmoke(fire)).toBe(true);
     expect(fireSmokeLabel(fire)).toBe('Verified fire: fire + smoke region (18%)');
   });
 
   it('immediately verifies fire plus low visibility', () => {
-    const fire = makeFireVisualSignal(true, 0.4, 0.002, 0.05, FIRE_LOW_VISIBILITY, 1000)!;
+    const fire = makeFireVisualSignal(true, 0.4, 0.002, 0.05, FIRE_LOW_VISIBILITY, 1000, false, true)!;
     expect(isImmediateFireSmoke(fire)).toBe(true);
     expect(fireSmokeLabel(fire)).toBe('Verified fire: fire + low visibility (45/100)');
+  });
+
+  it('does not treat a naturally gray scene as smoke corroboration without temporal change', () => {
+    const fire = makeFireVisualSignal(true, 0.44, 0.01, 0.60, 70, 1000, false, false)!;
+    expect(isImmediateFireSmoke(fire)).toBe(false);
   });
 
   it('does not verify smoke or low visibility without a fire candidate', () => {
