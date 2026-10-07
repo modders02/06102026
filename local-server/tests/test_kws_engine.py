@@ -13,6 +13,7 @@ from msds.kws_engine import (
     CustomKeywordEngine,
     MIN_NEGATIVE_TEMPLATES,
     MIN_TEMPLATES,
+    MATCH_MARGIN,
     OPEN_SET_MARGIN,
     SAMPLE_RATE,
     StreamingSpeechSegmenter,
@@ -178,6 +179,14 @@ class CustomKeywordEngineTests(unittest.TestCase):
             self.assertEqual(report["v4_sequence"]["total"], 6)
             self.assertIn("tulong", report["duration_summary"])
             self.assertIn("sunog", report["duration_summary"])
+
+            status = engine.status()
+            self.assertIn("tulong", status["keyword_margins"])
+            self.assertIn("sunog", status["keyword_margins"])
+            self.assertLessEqual(status["keyword_margins"]["tulong"], MATCH_MARGIN)
+            self.assertLessEqual(status["keyword_margins"]["sunog"], MATCH_MARGIN)
+            self.assertIn("tulong", status["keyword_margin_calibration"])
+            self.assertIn("sunog", status["keyword_margin_calibration"])
 
     def test_unknown_training_becomes_open_set_ready_but_is_not_a_keyword(self):
         with tempfile.TemporaryDirectory() as tmp:
