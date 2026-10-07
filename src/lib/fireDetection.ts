@@ -331,6 +331,33 @@ export function detectFire(
     visibility <= VISIBILITY_LOW &&
     (smokeRising || visibilityDropping);
 
+
+  // Device-screen suppression runs before every size/confidence shortcut.
+  // This is critical for phones: a tiny on-screen flame would otherwise take
+  // the "small fire candidate" path and remain eligible for speech fusion.
+  if (bbox) {
+    for (const screen of state.recentScreens) {
+      const expanded = expandScreenBbox(screen.bbox, width, height);
+      const fireInsideScreen = bboxOverlap(bbox, expanded);
+      const screenInsideFire = bboxOverlap(expanded, bbox);
+      const centerInside = bboxCenterInside(bbox, expanded);
+      if (centerInside || fireInsideScreen >= FIRE_IN_SCREEN_OVERLAP
+          || screenInsideFire >= SCREEN_IN_FIRE_OVERLAP) {
+        return {
+          ...baseResult,
+          detected: false,
+          screenSuppressed: true,
+          fireCandidate: false,
+          fireDetected: false,
+          smokeEmergency: false,
+          confidence: 0,
+          rejectedReason: `displayed fire inside ${screen.label} — ignored`,
+          saliency: makeSaliency(positive, 0, `displayed fire inside ${screen.label}`),
+        };
+      }
+    }
+  }
+
   // ---- Fire rejection ladder ----
   if (ratio < MIN_FIRE_RATIO) {
     return {
@@ -358,31 +385,6 @@ export function detectFire(
         rejectedReason: 'flame too small (likely lighter/candle)',
         saliency: makeSaliency(0, firePts + flickerPts, 'flame too small (lighter/candle)'),
       };
-    }
-
-    // Screen/device false alarm. Use current + recently observed screens so
-    // one missed COCO frame cannot turn the same TV/phone video into "real fire".
-    // Expand the device box slightly because object detectors usually outline
-    // the chassis while the bright screen content can bleed to its edges.
-    for (const screen of state.recentScreens) {
-      const expanded = expandScreenBbox(screen.bbox, width, height);
-      const fireInsideScreen = bboxOverlap(bbox, expanded);
-      const screenInsideFire = bboxOverlap(expanded, bbox);
-      const centerInside = bboxCenterInside(bbox, expanded);
-      if (centerInside || fireInsideScreen >= FIRE_IN_SCREEN_OVERLAP
-          || screenInsideFire >= SCREEN_IN_FIRE_OVERLAP) {
-        return {
-          ...baseResult,
-          detected: false,
-          screenSuppressed: true,
-          fireCandidate: false,
-          fireDetected: false,
-          smokeEmergency: false,
-          confidence: 0,
-          rejectedReason: `displayed fire inside ${screen.label} — ignored`,
-          saliency: makeSaliency(positive, 0, `displayed fire inside ${screen.label}`),
-        };
-      }
     }
 
     // Poster / wallpaper guard: fire candidate sits in a very low-edge,
