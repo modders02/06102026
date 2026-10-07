@@ -184,6 +184,8 @@ class Camera:
     kws_last_runner_up_confidence: float = 0.0
     kws_last_keyword_scores: dict = field(default_factory=dict)
     kws_last_keyword_duration_ratios: dict = field(default_factory=dict)
+    kws_last_class_margin: float = 0.0
+    kws_last_required_margin: float = 0.0
     kws_last_negative_confidence: float = 0.0
     kws_last_duration_ratio: float = 0.0
     kws_last_decision: str = ""
@@ -484,6 +486,8 @@ class Camera:
                 self.kws_last_runner_up_confidence = decision.runner_up_confidence
                 self.kws_last_keyword_scores = dict(decision.keyword_scores)
                 self.kws_last_keyword_duration_ratios = dict(decision.keyword_duration_ratios)
+                self.kws_last_class_margin = decision.class_margin
+                self.kws_last_required_margin = decision.required_margin
                 self.kws_last_negative_confidence = decision.negative_confidence
                 self.kws_last_duration_ratio = decision.duration_ratio
                 self.kws_last_decision = decision.reason
@@ -508,6 +512,8 @@ class Camera:
                 self.kws_last_runner_up_confidence = 0.0
                 self.kws_last_keyword_scores = {}
                 self.kws_last_keyword_duration_ratios = {}
+                self.kws_last_class_margin = 0.0
+                self.kws_last_required_margin = 0.0
                 self.kws_last_negative_confidence = 0.0
                 self.kws_last_duration_ratio = 0.0
                 self.kws_last_decision = "no_ready_candidate"
@@ -1065,6 +1071,8 @@ class Camera:
         self.kws_last_runner_up_confidence = 0.0
         self.kws_last_keyword_scores = {}
         self.kws_last_keyword_duration_ratios = {}
+        self.kws_last_class_margin = 0.0
+        self.kws_last_required_margin = 0.0
         self.kws_last_negative_confidence = 0.0
         self.kws_last_duration_ratio = 0.0
         self.kws_last_decision = ""
@@ -1155,6 +1163,8 @@ class Camera:
                 "last_runner_up_confidence": self.kws_last_runner_up_confidence,
                 "last_keyword_scores": dict(self.kws_last_keyword_scores),
                 "last_keyword_duration_ratios": dict(self.kws_last_keyword_duration_ratios),
+                "last_class_margin": self.kws_last_class_margin,
+                "last_required_margin": self.kws_last_required_margin,
                 "last_negative_confidence": self.kws_last_negative_confidence,
                 "last_duration_ratio": self.kws_last_duration_ratio,
                 "last_decision": self.kws_last_decision or None,
