@@ -13,6 +13,7 @@ from msds.kws_engine import (
     CustomKeywordEngine,
     MIN_NEGATIVE_TEMPLATES,
     MIN_TEMPLATES,
+    OPEN_SET_MARGIN,
     SAMPLE_RATE,
     StreamingSpeechSegmenter,
 )
@@ -121,7 +122,34 @@ class CustomKeywordEngineTests(unittest.TestCase):
             self.assertIsNotNone(decision)
             self.assertFalse(decision.accepted)
             self.assertEqual(decision.reason, "too_close_to_unknown")
-            self.assertGreaterEqual(decision.negative_confidence, decision.confidence - 0.08)
+            self.assertGreaterEqual(decision.negative_confidence, decision.confidence - OPEN_SET_MARGIN)
+
+    def test_v4_sequence_matcher_preserves_temporal_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = CustomKeywordEngine(tmp)
+
+            for scale in (0.98, 1.0, 1.02):
+                engine.enroll("tulong", synthetic_word([300, 560, 410], scale))
+                engine.enroll("sunog", synthetic_word([560, 300, 410], scale))
+
+            for index, pattern in enumerate((
+                [900, 720, 650],
+                [520, 810, 690],
+                [430, 910, 540],
+                [690, 470, 820],
+                [830, 610, 930],
+            )):
+                engine.enroll("unknown", synthetic_word(pattern, 1.0 + index * 0.005))
+
+            decision = engine.diagnose(synthetic_word([300, 560, 410], 1.01))
+            self.assertIsNotNone(decision)
+            self.assertEqual(decision.keyword, "tulong")
+            self.assertGreater(
+                decision.keyword_scores["tulong"],
+                decision.keyword_scores["sunog"],
+            )
+            self.assertIn("tulong", decision.keyword_duration_ratios)
+            self.assertIn("sunog", decision.keyword_duration_ratios)
 
     def test_unknown_training_becomes_open_set_ready_but_is_not_a_keyword(self):
         with tempfile.TemporaryDirectory() as tmp:
