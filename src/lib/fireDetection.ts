@@ -31,7 +31,7 @@ export interface SaliencyBreakdown {
 export interface FireDetectionResult {
   detected: boolean;
   /** True when flame-like pixels belong to content displayed on an electronic screen. */
-  screenSuppressed: boolean;             // real fire OR smoke-induced low-visibility emergency
+  screenSuppressed?: boolean;             // real fire OR smoke-induced low-visibility emergency
   /** Raw visual flame candidate used only when another modality corroborates it. */
   fireCandidate: boolean;
   fireDetected: boolean;         // real fire signature confirmed
@@ -59,7 +59,7 @@ export interface FireDetectorState {
   smoothBbox: [number, number, number, number] | null; // EMA-smoothed bbox
   missFrames: number;            // frames since last raw bbox (hold before clearing)
   /** Recently observed display devices; survives brief COCO-SSD misses. */
-  recentScreens: { label: string; bbox: [number, number, number, number]; ttl: number }[];
+  recentScreens: { label: string; bbox: [number, number, number, number]; expiresAt: number }[];
 }
 
 export function createFireState(): FireDetectorState {
@@ -75,7 +75,7 @@ export function createFireState(): FireDetectorState {
 }
 
 const SCREEN_LABELS = new Set(['tv', 'cell phone', 'laptop', 'monitor', 'tablet']);
-const SCREEN_MEMORY_FRAMES = 4;
+const SCREEN_MEMORY_MS = 12_000;
 const SCREEN_MARGIN_RATIO = 0.12;
 const SCREEN_MIN_MARGIN_PX = 6;
 const FIRE_IN_SCREEN_OVERLAP = 0.25;
@@ -159,9 +159,8 @@ function updateRecentScreens(
   state: FireDetectorState,
   objects: DetectedObject[],
 ) {
-  const remembered = state.recentScreens
-    .map(screen => ({ ...screen, ttl: screen.ttl - 1 }))
-    .filter(screen => screen.ttl > 0);
+  const now = Date.now();
+  const remembered = state.recentScreens.filter(screen => screen.expiresAt > now);
 
   for (const object of objects) {
     if (!SCREEN_LABELS.has(object.label) || object.confidence < 0.35) continue;
@@ -171,9 +170,9 @@ function updateRecentScreens(
       && (bboxOverlap(screen.bbox, bbox) > 0.45 || bboxOverlap(bbox, screen.bbox) > 0.45));
     if (existing) {
       existing.bbox = bbox;
-      existing.ttl = SCREEN_MEMORY_FRAMES;
+      existing.expiresAt = now + SCREEN_MEMORY_MS;
     } else {
-      remembered.push({ label: object.label, bbox, ttl: SCREEN_MEMORY_FRAMES });
+      remembered.push({ label: object.label, bbox, expiresAt: now + SCREEN_MEMORY_MS });
     }
   }
   state.recentScreens = remembered;
