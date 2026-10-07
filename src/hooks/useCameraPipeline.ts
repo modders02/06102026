@@ -636,16 +636,15 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
 
   // Facial expression tracking.
   // Every base expression is non-alerting by itself. Angry/Frightened can
-  // verify help/tulong; Frightened/Sad can verify a scream. Happy, Sad, Shock,
-  // Neutral and Disgust remain informational Event History entries.
+  // verify help/tulong or a scream. Sad, Happy, Shock, Neutral and Disgust
+  // remain informational Event History entries only.
   useEffect(() => {
     if (!camera.enabled || !camera.aiEnabled || faceAnalysisRevisionRef.current !== analysisRevisionRef.current) return;
     const d = face.distress;
     const emotion = historyEmotionMeta(d.expression);
     const fusionExpression = d.hasFace && isMultimodalDistressExpression(d.expression);
     const distressFace = d.hasFace ? makeDistressFaceSignal(d.expression, d.probability) : null;
-    const isSadCandidate = distressFace?.label === 'Sad';
-    const detected = !!distressFace && !isSadCandidate;
+    const detected = !!distressFace;
 
     patch({
       faceDistress: {
@@ -656,12 +655,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     });
 
     if (d.hasFace && emotion && d.probability >= 0.55) {
-      if (emotion.emotion === 'sad' && distressFace) {
-        recentDistressFaceRef.current = distressFace;
-        maybeEmitVerifiedDistress();
-      } else {
-        recentDistressFaceRef.current = null;
-      }
+      // History-only emotions, including Sad, must never become a pending
+      // distress-fusion face signal.
+      recentDistressFaceRef.current = null;
       emit('emotion', emotion.label, d.probability);
       return;
     }
