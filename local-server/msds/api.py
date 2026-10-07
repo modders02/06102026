@@ -20,6 +20,7 @@ from .config import HLS_PORT, RTSP_PORT, WHISPER_MODEL
 from .manager import (CAMERAS, mediamtx_running, snapshot, start_mediamtx,
                       stop_all_cameras, sync_cameras)
 from .whisper_engine import WHISPER
+from .kws_engine import KWS_ENGINE
 
 app = FastAPI(title="MSDSystem multi-camera bridge")
 app.add_middleware(
@@ -260,6 +261,45 @@ def audio_events(camera_id: str, since: Optional[str] = None):
     if since:
         events = [e for e in events if e["timestamp"] > since]
     return {"events": events, "status": cam.audio_status()}
+
+
+@app.get("/kws/status")
+def kws_status():
+    """Status of the custom MSDS keyword engine and enrolled templates."""
+    return {"success": True, **KWS_ENGINE.status()}
+
+
+@app.post("/cameras/{camera_id}/kws-enroll/{keyword}")
+def kws_enroll(camera_id: str, keyword: str):
+    """Arm one camera to use the next spoken segment as a keyword template."""
+    cam = find_camera(camera_id)
+    if not cam:
+        return {"success": False, "error": "unknown camera"}
+    if not cam.enabled:
+        return {"success": False, "error": "camera is disconnected"}
+    try:
+        status = cam.request_kws_enrollment(keyword)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    return {"success": True, **status}
+
+
+@app.post("/cameras/{camera_id}/kws-enroll-cancel")
+def kws_enroll_cancel(camera_id: str):
+    cam = find_camera(camera_id)
+    if not cam:
+        return {"success": False, "error": "unknown camera"}
+    cam.cancel_kws_enrollment()
+    return {"success": True}
+
+
+@app.delete("/kws/templates/{keyword}")
+def kws_clear_keyword(keyword: str):
+    try:
+        result = KWS_ENGINE.clear(keyword)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    return {"success": True, **result}
 
 
 @app.post("/cameras/{camera_id}/audio-test")
