@@ -27,6 +27,13 @@ MAX_CAMERAS = 16
 AUDIO_CHUNK_SECONDS = max(2, int(os.environ.get("MSD_AUDIO_CHUNK_SECONDS", 4)))
 WHISPER_MODEL = os.environ.get("MSD_WHISPER_MODEL", "base")
 
+# Audio recognition mode:
+#   hybrid -> custom low-latency safety keywords + Whisper general transcript
+#   custom -> custom keyword engine only; Faster-Whisper is never loaded/called
+AUDIO_ENGINE = os.environ.get("MSD_AUDIO_ENGINE", "hybrid").strip().lower()
+if AUDIO_ENGINE not in {"hybrid", "custom"}:
+    AUDIO_ENGINE = "hybrid"
+
 
 # How long a positive HLS probe stays valid (seconds). Avoids one HTTP request
 # per camera on every /status poll — the main cost with 16 cameras.
