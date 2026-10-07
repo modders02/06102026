@@ -233,7 +233,8 @@ describe('camera connection status', () => {
     expect(mocks.stopCamera).not.toHaveBeenCalledWith('http://127.0.0.1:5000', 'slot-2');
     expect(mocks.startCamera).toHaveBeenCalledWith('http://127.0.0.1:5000', 'slot-1');
 
-    const payload = mocks.syncCameras.mock.calls.at(-1)?.[1] as Array<{ id: string; enabled: boolean }>;
+    const lastSync = mocks.syncCameras.mock.calls[mocks.syncCameras.mock.calls.length - 1];
+    const payload = lastSync?.[1] as Array<{ id: string; enabled: boolean }>;
     expect(payload).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'slot-1', enabled: true }),
       expect.objectContaining({ id: 'slot-2', enabled: false }),
