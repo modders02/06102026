@@ -714,6 +714,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     }
     let stopped = false;
     let inFlight = false;
+    lastAudioPollStartedAtRef.current = 0;
     patch({ audioListening: true, audioMessage: 'Starting to listen…', audioTone: 'wait' });
 
     const poll = async () => {
