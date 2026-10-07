@@ -99,6 +99,26 @@ Enrollment speech is suppressed from emergency events so training `help` or
 
 
 
+
+## Per-keyword class-margin calibration
+
+The live v3 recognizer no longer relies only on one global target-vs-runner-up
+margin. Whenever templates are loaded, it performs a v3 leave-one-out check for
+each ready keyword.
+
+A keyword receives an automatically reduced live class margin only when every
+held-out enrollment template is still classified as that keyword. The required
+margin is 75% of the minimum observed correct leave-one-out margin, clamped to
+0.003-0.05. If any held-out sample is misclassified, that keyword keeps the
+conservative global 0.06 margin.
+
+The UNKNOWN/open-set margin remains 0.03. This separation is intentionally
+calibrated independently from inter-keyword confusion.
+
+Status exposes `keyword_margins`, `keyword_margin_calibration`,
+`last_class_margin`, and `last_required_margin` so live decisions can be
+audited from the camera status endpoint.
+
 ## V4 temporal sequence experiment
 
 The v4 sequence matcher is retained for offline comparison through
