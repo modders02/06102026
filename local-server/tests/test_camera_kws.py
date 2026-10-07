@@ -31,6 +31,8 @@ class CameraCustomKeywordTests(unittest.TestCase):
             runner_up_confidence=0.2,
             keyword_scores={"tulong": 0.91, "sunog": 0.2},
             keyword_duration_ratios={"tulong": 1.0, "sunog": 0.8},
+            class_margin=0.71,
+            required_margin=0.02,
             negative_confidence=0.1,
             duration_ratio=1.0,
             duration_ms=750,
@@ -53,6 +55,8 @@ class CameraCustomKeywordTests(unittest.TestCase):
         self.assertEqual(cam.kws_last_runner_up_keyword, "sunog")
         self.assertEqual(cam.kws_last_keyword_scores["tulong"], 0.91)
         self.assertEqual(cam.kws_last_keyword_duration_ratios["tulong"], 1.0)
+        self.assertEqual(cam.kws_last_class_margin, 0.71)
+        self.assertEqual(cam.kws_last_required_margin, 0.02)
         self.assertEqual(cam.kws_last_decision, "accepted")
         self.assertEqual(cam.kws_segments_seen, 1)
         self.assertGreaterEqual(cam.events[0]["processing_ms"], 0)
@@ -75,6 +79,8 @@ class CameraCustomKeywordTests(unittest.TestCase):
             runner_up_confidence=0.0,
             keyword_scores={"help": 0.61},
             keyword_duration_ratios={"help": 1.0},
+            class_margin=0.61,
+            required_margin=0.04,
             negative_confidence=0.2,
             duration_ratio=1.0,
             duration_ms=750,
