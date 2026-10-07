@@ -564,6 +564,136 @@ class CustomKeywordEngine:
             accepted=accepted,
             reason=reason,
         )
+    def evaluate_templates(self) -> dict:
+        """Leave-one-template-out audit for v3 DTW and v4 sequence scoring.
+
+        This uses only stored enrollment features and never changes templates.
+        Each positive template is classified while excluding itself from its
+        own class, exposing cross-keyword confusion before live thresholds are
+        tuned.
+        """
+        with self.lock:
+            snapshot = {
+                key: list(value)
+                for key, value in self.templates.items()
+            }
+
+        positives = {
+            key: value
+            for key, value in snapshot.items()
+            if key != NEGATIVE_CLASS and len(value) >= MIN_TEMPLATES
+        }
+        negatives = list(snapshot.get(NEGATIVE_CLASS, []))
+
+        duration_summary = {}
+        for key, templates in positives.items():
+            lengths = [len(item) for item in templates]
+            duration_summary[key] = {
+                "templates": len(lengths),
+                "median_frames": round(float(np.median(lengths)), 1),
+                "min_frames": int(min(lengths)),
+                "max_frames": int(max(lengths)),
+            }
+
+        def evaluate_mode(mode: str) -> dict:
+            distance_fn = self._dtw_distance if mode == "v3_dtw" else self._sequence_distance
+            vote_count = 2 if mode == "v3_dtw" else 3
+            samples = []
+            confusion = {
+                key: {other: 0 for other in positives}
+                for key in positives
+            }
+            by_keyword = {
+                key: {"tested": 0, "correct": 0, "margins": []}
+                for key in positives
+            }
+
+            for true_key, true_templates in positives.items():
+                for held_index, query in enumerate(true_templates):
+                    ranked = []
+                    duration_ratios = {}
+                    for candidate, candidate_templates in positives.items():
+                        pool = [
+                            template
+                            for index, template in enumerate(candidate_templates)
+                            if not (candidate == true_key and index == held_index)
+                        ]
+                        if not pool:
+                            continue
+                        distances = sorted(distance_fn(query, template) for template in pool)
+                        selected = distances[:min(vote_count, len(distances))]
+                        distance = float(np.mean(selected))
+                        confidence = self._distance_to_confidence(distance)
+                        median_frames = float(np.median([len(template) for template in pool]))
+                        duration_ratios[candidate] = len(query) / max(1.0, median_frames)
+                        ranked.append((confidence, candidate, distance))
+
+                    if not ranked:
+                        continue
+                    ranked.sort(reverse=True)
+                    confidence, predicted, distance = ranked[0]
+                    runner_keyword = ranked[1][1] if len(ranked) > 1 else ""
+                    runner_confidence = ranked[1][0] if len(ranked) > 1 else 0.0
+                    margin = confidence - runner_confidence
+                    negative_confidence = 0.0
+                    if negatives:
+                        negative_distance = min(distance_fn(query, item) for item in negatives)
+                        negative_confidence = self._distance_to_confidence(negative_distance)
+
+                    correct = predicted == true_key
+                    confusion[true_key][predicted] += 1
+                    by_keyword[true_key]["tested"] += 1
+                    by_keyword[true_key]["correct"] += int(correct)
+                    by_keyword[true_key]["margins"].append(margin)
+                    samples.append({
+                        "true_keyword": true_key,
+                        "template_index": held_index + 1,
+                        "predicted_keyword": predicted,
+                        "correct": correct,
+                        "confidence": round(confidence, 3),
+                        "runner_up_keyword": runner_keyword or None,
+                        "runner_up_confidence": round(runner_confidence, 3),
+                        "margin": round(margin, 3),
+                        "unknown_confidence": round(negative_confidence, 3),
+                        "unknown_gap": round(confidence - negative_confidence, 3),
+                        "duration_ratio": round(duration_ratios.get(predicted, 0.0), 3),
+                    })
+
+            total = len(samples)
+            correct_count = sum(1 for item in samples if item["correct"])
+            summary = {}
+            for key, values in by_keyword.items():
+                tested = values["tested"]
+                correct = values["correct"]
+                margins = values.pop("margins")
+                summary[key] = {
+                    "tested": tested,
+                    "correct": correct,
+                    "accuracy": round(correct / tested, 3) if tested else 0.0,
+                    "mean_top_margin": round(float(np.mean(margins)), 3) if margins else 0.0,
+                    "min_top_margin": round(float(np.min(margins)), 3) if margins else 0.0,
+                }
+
+            return {
+                "mode": mode,
+                "total": total,
+                "correct": correct_count,
+                "accuracy": round(correct_count / total, 3) if total else 0.0,
+                "by_keyword": summary,
+                "confusion": confusion,
+                "samples": samples,
+            }
+
+        return {
+            "success": True,
+            "feature_version": FEATURE_VERSION,
+            "positive_keywords": sorted(positives),
+            "negative_templates": len(negatives),
+            "duration_summary": duration_summary,
+            "v3_dtw": evaluate_mode("v3_dtw"),
+            "v4_sequence": evaluate_mode("v4_sequence"),
+        }
+
     def match(self, pcm: bytes) -> Optional[KeywordMatch]:
         decision = self.diagnose(pcm)
         if not decision or not decision.accepted:
