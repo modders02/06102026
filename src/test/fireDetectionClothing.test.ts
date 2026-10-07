@@ -71,6 +71,6 @@ describe('fire person/clothing suppression', () => {
 
     expect(result.personFirePixelShare).toBe(0);
     expect(result.outsidePersonFirePixelRatio).toBeGreaterThan(0.004);
-    expect(result.rejectedReason).not.toContain('person/clothing');
+    expect(result.rejectedReason ?? '').not.toContain('person/clothing');
   });
 });
