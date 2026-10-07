@@ -34,6 +34,9 @@ class CameraCustomKeywordTests(unittest.TestCase):
             class_margin=0.71,
             required_margin=0.02,
             negative_confidence=0.1,
+            negative_second_confidence=0.08,
+            negative_mean2_confidence=0.09,
+            negative_top_confidences=[0.1, 0.08, 0.05],
             duration_ratio=1.0,
             duration_ms=750,
             accepted=True,
@@ -57,6 +60,9 @@ class CameraCustomKeywordTests(unittest.TestCase):
         self.assertEqual(cam.kws_last_keyword_duration_ratios["tulong"], 1.0)
         self.assertEqual(cam.kws_last_class_margin, 0.71)
         self.assertEqual(cam.kws_last_required_margin, 0.02)
+        self.assertEqual(cam.kws_last_negative_second_confidence, 0.08)
+        self.assertEqual(cam.kws_last_negative_mean2_confidence, 0.09)
+        self.assertEqual(cam.kws_last_negative_top_confidences, [0.1, 0.08, 0.05])
         self.assertEqual(cam.kws_last_decision, "accepted")
         self.assertEqual(cam.kws_segments_seen, 1)
         self.assertGreaterEqual(cam.events[0]["processing_ms"], 0)
@@ -82,6 +88,9 @@ class CameraCustomKeywordTests(unittest.TestCase):
             class_margin=0.61,
             required_margin=0.04,
             negative_confidence=0.2,
+            negative_second_confidence=0.15,
+            negative_mean2_confidence=0.175,
+            negative_top_confidences=[0.2, 0.15, 0.1],
             duration_ratio=1.0,
             duration_ms=750,
             accepted=False,
