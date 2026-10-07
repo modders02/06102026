@@ -38,6 +38,8 @@ import { hlsUrlFor, webrtcUrlFor } from '@/types/multicam';
 const HUMAN_LABELS = new Set(['person']);
 /** Live CCTV text disappears this long after the last words were heard. */
 const TRANSCRIPT_CLEAR_MS = 5000;
+const AUDIO_POLL_TICK_MS = 350;
+const AUDIO_POLL_BACKGROUND_MIN_MS = 1400;
 const SNAPSHOT_INTERVAL_MS = 3000;
 const PLAYBACK_STALL_MS = 8000;
 
@@ -149,6 +151,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const [nonce, setNonce] = useState(0);
   const [preview, setPreview] = useState<{ image: string; timestamp: number } | null>(null);
   const latestPreviewRef = useRef<string | undefined>(undefined);
+  const playbackEnabledRef = useRef(playbackEnabled);
+  playbackEnabledRef.current = playbackEnabled;
+  const lastAudioPollStartedAtRef = useRef(0);
   const face = useFaceDistress(camera.enabled && camera.aiEnabled);
   const analyzeFace = face.analyze;
   const streamUrl = hlsUrlFor(camera, settings);
@@ -713,6 +718,13 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
 
     const poll = async () => {
       if (inFlight) return;
+      const now = Date.now();
+      if (!playbackEnabledRef.current
+          && lastAudioPollStartedAtRef.current
+          && now - lastAudioPollStartedAtRef.current < AUDIO_POLL_BACKGROUND_MIN_MS) {
+        return;
+      }
+      lastAudioPollStartedAtRef.current = now;
       inFlight = true;
       try {
         const { events, status } = await getAudioEvents(
@@ -802,7 +814,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       }
     };
 
-    const id = window.setInterval(poll, 1500);
+    const id = window.setInterval(poll, AUDIO_POLL_TICK_MS);
     void poll();
     return () => { stopped = true; window.clearInterval(id); patch({ audioListening: false }); };
   }, [camera.enabled, camera.id, sourceStream, settings.pythonServer, settings.audioThreshold, patch, emit, maybeEmitVerifiedDistress, maybeEmitVerifiedFire, showTranscript]);
