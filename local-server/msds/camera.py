@@ -766,6 +766,7 @@ class Camera:
         from every audio source in turn and transcribe the first good one."""
         report: dict = {
             "camera_id": self.id,
+            "recognition_engine": AUDIO_ENGINE,
             "rtsp": self.rtsp,
             "rtsp_configured": bool(self.rtsp),
             "probe": None,
@@ -846,6 +847,34 @@ class Camera:
                               if a.get("ffmpeg_error")), None)
                 report["error"] = worst or "no usable audio captured from any source"
                 return report
+            if AUDIO_ENGINE == "custom":
+                with wave.open(good_wav, "rb") as wav_file:
+                    pcm_data = wav_file.readframes(wav_file.getnframes())
+                segmenter = StreamingSpeechSegmenter()
+                segments = []
+                for offset in range(0, len(pcm_data), 4096):
+                    segments.extend(segmenter.feed(pcm_data[offset:offset + 4096]))
+                matches = []
+                for segment in segments:
+                    match = KWS_ENGINE.match(segment)
+                    if match:
+                        matches.append(match)
+                best = max(matches, key=lambda item: item.confidence) if matches else None
+                report["custom_kws"] = {
+                    **KWS_ENGINE.status(),
+                    "segments": len(segments),
+                    "match": ({
+                        "keyword": best.keyword,
+                        "confidence": best.confidence,
+                        "distance": best.distance,
+                        "runner_up_confidence": best.runner_up_confidence,
+                        "duration_ms": best.duration_ms,
+                    } if best else None),
+                }
+                report["transcript"] = best.keyword.replace("_", " ") if best else ""
+                report["success"] = True
+                return report
+
             if not WHISPER.available:
                 report["error"] = WHISPER.error or "Whisper is unavailable"
                 return report
@@ -861,11 +890,11 @@ class Camera:
 
     # ---- lifecycle --------------------------------------------------------- #
     def _restart_audio_after(self, previous_audio: threading.Thread) -> None:
-        """Finish an old Whisper worker, then restart audio if the slot is live.
+        """Finish the previous audio worker, then restart if the slot is live.
 
-        faster-whisper inference is not safely cancellable mid-call. Reconnect
-        therefore waits in a separate daemon thread instead of failing the user
-        or clearing stop_flag while the old worker is still running.
+        In hybrid mode Faster-Whisper inference is not safely cancellable
+        mid-call. Reconnect therefore waits in a daemon thread instead of
+        clearing stop_flag while the old worker is still running.
         """
         try:
             previous_audio.join()
