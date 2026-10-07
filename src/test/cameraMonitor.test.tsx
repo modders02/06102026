@@ -552,6 +552,8 @@ describe('camera snapshots and page-scoped playback', () => {
       firePixelRatio: 0.002,
       smokeRatio: 0.24,
       visibility: 70,
+      smokeCorroborated: true,
+      lowVisibilityCorroborated: false,
     });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     const onEvent = vi.fn();
@@ -573,6 +575,8 @@ describe('camera snapshots and page-scoped playback', () => {
       firePixelRatio: 0.002,
       smokeRatio: 0.08,
       visibility: 40,
+      smokeCorroborated: false,
+      lowVisibilityCorroborated: true,
     });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     const onEvent = vi.fn();
@@ -583,6 +587,27 @@ describe('camera snapshots and page-scoped playback', () => {
       label: 'Verified fire: fire + low visibility (40/100)',
       cameraId: 'slot-1',
     }));
+  });
+
+  it('does not verify a fire-colored patch plus static gray background as fire', async () => {
+    mocked.detectFire.mockReturnValueOnce({
+      fireCandidate: true,
+      fireDetected: false,
+      smokeEmergency: false,
+      screenSuppressed: false,
+      confidence: 0.44,
+      firePixelRatio: 0.01,
+      smokeRatio: 0.60,
+      visibility: 70,
+      smokeCorroborated: false,
+      lowVisibilityCorroborated: false,
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
+    expect(getCameraSession('slot-1').runtime?.fire.detected).toBe(false);
   });
 
   it('does not alarm on smoke region alone without a visual fire candidate', async () => {
