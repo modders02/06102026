@@ -8,6 +8,8 @@ export interface FireVisualSignal {
   firePixelRatio: number;
   smokeRatio: number;
   visibility: number;
+  smokeCorroborated: boolean;
+  lowVisibilityCorroborated: boolean;
 }
 
 export interface SunogSignal {
@@ -37,6 +39,8 @@ export function makeFireVisualSignal(
   smokeRatio = 0,
   visibility = 100,
   at = Date.now(),
+  smokeCorroborated = false,
+  lowVisibilityCorroborated = false,
 ): FireVisualSignal | null {
   if (!candidate) return null;
   const candidateConfidence = Math.max(
@@ -49,6 +53,8 @@ export function makeFireVisualSignal(
     firePixelRatio: Math.max(0, firePixelRatio || 0),
     smokeRatio: Math.max(0, smokeRatio || 0),
     visibility: Number.isFinite(visibility) ? visibility : 100,
+    smokeCorroborated: !!smokeCorroborated,
+    lowVisibilityCorroborated: !!lowVisibilityCorroborated,
   };
 }
 
@@ -99,8 +105,8 @@ export function isImmediateFireSmoke(
   fire: FireVisualSignal | null | undefined,
 ): boolean {
   return !!fire && (
-    fire.smokeRatio >= SMOKE_REGION_MIN_RATIO
-    || fire.visibility <= FIRE_LOW_VISIBILITY
+    (fire.smokeRatio >= SMOKE_REGION_MIN_RATIO && fire.smokeCorroborated)
+    || (fire.visibility <= FIRE_LOW_VISIBILITY && fire.lowVisibilityCorroborated)
   );
 }
 
@@ -110,10 +116,10 @@ export function fireSpeechLabel() {
 
 export function fireSmokeLabel(fire: FireVisualSignal) {
   const smokePercent = Math.round(fire.smokeRatio * 100);
-  if (fire.smokeRatio >= SMOKE_REGION_MIN_RATIO && fire.visibility <= FIRE_LOW_VISIBILITY) {
+  if (fire.smokeCorroborated && fire.lowVisibilityCorroborated) {
     return `Verified fire: fire + smoke (${smokePercent}%) + low visibility`;
   }
-  if (fire.smokeRatio >= SMOKE_REGION_MIN_RATIO) {
+  if (fire.smokeCorroborated) {
     return `Verified fire: fire + smoke region (${smokePercent}%)`;
   }
   return `Verified fire: fire + low visibility (${Math.round(fire.visibility)}/100)`;
