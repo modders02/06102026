@@ -373,8 +373,14 @@ class CustomKeywordEngine:
     def _aligned_cosine_distance(a: np.ndarray, b: np.ndarray) -> float:
         if a.size == 0 or b.size == 0 or len(a) != len(b):
             return float("inf")
+        norm_a = np.linalg.norm(a, axis=1)
+        norm_b = np.linalg.norm(b, axis=1)
+        both_quiet = (norm_a <= 1e-6) & (norm_b <= 1e-6)
         dots = np.sum(a * b, axis=1)
-        return float(np.mean(1.0 - np.clip(dots, -1.0, 1.0)))
+        distances = 1.0 - np.clip(dots, -1.0, 1.0)
+        # For delta features, two frames with no spectral motion agree.
+        distances[both_quiet] = 0.0
+        return float(np.mean(distances))
 
     def _sequence_distance(self, a: np.ndarray, b: np.ndarray) -> float:
         """V4 distance: DTW + relative-time spectral shape + spectral motion."""
