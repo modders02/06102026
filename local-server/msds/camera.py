@@ -174,6 +174,7 @@ class Camera:
     kws_last_keyword: str = ""
     kws_last_confidence: float = 0.0
     kws_last_detected_at: Optional[str] = None
+    kws_last_processing_ms: float = 0.0
     _last_kws_publish_ts: float = 0.0
     _kws_enroll_suppress_until: float = 0.0
 
@@ -387,7 +388,7 @@ class Camera:
         self._kws_enroll_suppress_until = 0.0
         self.kws_segmenter.reset()
 
-    def _publish_kws_match(self, match) -> None:
+    def _publish_kws_match(self, match, processing_ms: float) -> None:
         now_ts = time.time()
         if (
             match.keyword == self.kws_last_keyword
@@ -398,6 +399,7 @@ class Camera:
         self.kws_last_keyword = match.keyword
         self.kws_last_confidence = match.confidence
         self.kws_last_detected_at = now_iso()
+        self.kws_last_processing_ms = round(processing_ms, 2)
         self.last_transcription_at = self.kws_last_detected_at
         self.last_transcript = match.keyword.replace("_", " ")
         with self.lock:
@@ -408,12 +410,13 @@ class Camera:
                 "keyword": match.keyword.replace("_", " "),
                 "confidence": match.confidence,
                 "source": "custom-kws",
-                "latency_ms": match.duration_ms,
+                "segment_ms": match.duration_ms,
+                "processing_ms": self.kws_last_processing_ms,
             })
             self.events = self.events[-200:]
         print(
             f"[KWS {self.id}] {match.keyword}: {match.confidence:.2f} "
-            f"({match.duration_ms} ms segment)",
+            f"({match.duration_ms} ms segment, {self.kws_last_processing_ms:.1f} ms processing)",
             flush=True,
         )
 
@@ -450,9 +453,11 @@ class Camera:
                     }
                 continue
 
+            started = time.perf_counter()
             match = KWS_ENGINE.match(segment)
+            processing_ms = (time.perf_counter() - started) * 1000.0
             if match:
-                self._publish_kws_match(match)
+                self._publish_kws_match(match, processing_ms)
 
     def _publish_scream_if_detected(self, pcm: bytes) -> None:
         if self.stop_flag.is_set():
@@ -967,6 +972,7 @@ class Camera:
         self.kws_last_keyword = ""
         self.kws_last_confidence = 0.0
         self.kws_last_detected_at = None
+        self.kws_last_processing_ms = 0.0
         self._last_kws_publish_ts = 0.0
         self._kws_enroll_suppress_until = 0.0
         with self.lock:
@@ -1044,6 +1050,7 @@ class Camera:
                 "last_keyword": self.kws_last_keyword or None,
                 "last_confidence": self.kws_last_confidence,
                 "last_detected_at": self.kws_last_detected_at,
+                "last_processing_ms": self.kws_last_processing_ms,
             },
             "whisper_available": WHISPER.available,
             "whisper_state": WHISPER.state,
