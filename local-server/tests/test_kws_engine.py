@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from msds.kws_engine import (
     CustomKeywordEngine,
+    MIN_NEGATIVE_TEMPLATES,
     MIN_TEMPLATES,
     SAMPLE_RATE,
     StreamingSpeechSegmenter,
@@ -67,6 +68,14 @@ class CustomKeywordEngineTests(unittest.TestCase):
 
             for scale in (0.97, 1.0, 1.03):
                 engine.enroll("magnanakaw", synthetic_word([760, 360, 880], scale))
+            for index, pattern in enumerate((
+                [900, 720, 650],
+                [520, 810, 690],
+                [430, 910, 540],
+                [690, 470, 820],
+                [830, 610, 930],
+            )):
+                engine.enroll("unknown", synthetic_word(pattern, 1.0 + index * 0.005))
 
             match = engine.match(synthetic_word([310, 560, 430], 1.01))
             self.assertIsNotNone(match)
@@ -83,6 +92,56 @@ class CustomKeywordEngineTests(unittest.TestCase):
             status = reloaded.status()
             self.assertEqual(status["keywords"]["help"], 3)
             self.assertIn("help", status["ready_keywords"])
+            self.assertFalse(status["negative_ready"])
+            self.assertFalse(status["open_set_ready"])
+
+    def test_open_set_refuses_keyword_until_negative_speech_is_trained(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = CustomKeywordEngine(tmp)
+            for scale in (0.98, 1.0, 1.02):
+                engine.enroll("help", synthetic_word([280, 500, 390], scale))
+
+            decision = engine.diagnose(synthetic_word([280, 500, 390], 1.01))
+            self.assertIsNotNone(decision)
+            self.assertFalse(decision.accepted)
+            self.assertEqual(decision.reason, "negative_not_ready")
+            self.assertIsNone(engine.match(synthetic_word([280, 500, 390], 1.01)))
+
+    def test_hard_negative_vetoes_similar_non_keyword(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = CustomKeywordEngine(tmp)
+            for scale in (0.98, 1.0, 1.02):
+                engine.enroll("help", synthetic_word([280, 500, 390], scale))
+
+            confuser = synthetic_word([300, 520, 410], 1.0)
+            for scale in (0.97, 0.985, 1.0, 1.015, 1.03):
+                engine.enroll("unknown", synthetic_word([300, 520, 410], scale))
+
+            decision = engine.diagnose(confuser)
+            self.assertIsNotNone(decision)
+            self.assertFalse(decision.accepted)
+            self.assertEqual(decision.reason, "too_close_to_unknown")
+            self.assertGreaterEqual(decision.negative_confidence, decision.confidence - 0.08)
+
+    def test_unknown_training_becomes_open_set_ready_but_is_not_a_keyword(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = CustomKeywordEngine(tmp)
+            for scale in (0.98, 1.0, 1.02):
+                engine.enroll("help", synthetic_word([280, 500, 390], scale))
+            for index, pattern in enumerate((
+                [900, 720, 650],
+                [520, 810, 690],
+                [430, 910, 540],
+                [690, 470, 820],
+                [830, 610, 930],
+            )):
+                engine.enroll("unknown", synthetic_word(pattern, 1.0 + index * 0.005))
+
+            status = engine.status()
+            self.assertGreaterEqual(status["negative_templates"], MIN_NEGATIVE_TEMPLATES)
+            self.assertTrue(status["negative_ready"])
+            self.assertTrue(status["open_set_ready"])
+            self.assertNotIn("unknown", status["ready_keywords"])
 
     def test_untrained_engine_returns_no_keyword(self):
         with tempfile.TemporaryDirectory() as tmp:
