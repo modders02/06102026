@@ -1,6 +1,10 @@
 """Per-camera lifecycle regression tests; no real CCTV or subprocess is started."""
+from pathlib import Path
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from msds.camera import Camera
 from msds import manager
