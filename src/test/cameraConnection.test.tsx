@@ -211,4 +211,37 @@ describe('camera connection status', () => {
     expect(savedSlot.connected).toBe(true);
     expect(savedSlot.webrtcUrl).toBe(mocks.webrtcUrl);
   });
+
+  it('reconnects only the selected slot and preserves other disconnected cameras', async () => {
+    mocks.ready = true;
+    localStorage.setItem('msd-camera-slots-v1', JSON.stringify({
+      count: 2,
+      slots: [
+        { ...makeSlot(1), ip: '192.168.1.10', connected: true, autoConnect: true },
+        { ...makeSlot(2), ip: '192.168.1.11', connected: false, autoConnect: false },
+      ],
+    }));
+
+    render(<MultiCameraConnect />);
+    await act(async () => {});
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
+    });
+
+    expect(mocks.stopCamera).toHaveBeenCalledWith('http://127.0.0.1:5000', 'slot-1');
+    expect(mocks.stopCamera).not.toHaveBeenCalledWith('http://127.0.0.1:5000', 'slot-2');
+    expect(mocks.startCamera).toHaveBeenCalledWith('http://127.0.0.1:5000', 'slot-1');
+
+    const payload = mocks.syncCameras.mock.calls.at(-1)?.[1] as Array<{ id: string; enabled: boolean }>;
+    expect(payload).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'slot-1', enabled: true }),
+      expect.objectContaining({ id: 'slot-2', enabled: false }),
+    ]));
+
+    const savedSlots = JSON.parse(localStorage.getItem('msd-camera-slots-v1')!).slots;
+    expect(savedSlots[0]).toMatchObject({ connected: true, autoConnect: true });
+    expect(savedSlots[1]).toMatchObject({ connected: false, autoConnect: false });
+  });
+
 });
