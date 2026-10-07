@@ -80,6 +80,10 @@ class StreamingSpeechSegmenter:
         self.pre_roll = bytearray()
         self.silence_samples = 0
         self.total_samples = 0
+        if not hasattr(self, "blocks_seen"):
+            self.blocks_seen = 0
+        if not hasattr(self, "last_rms"):
+            self.last_rms = 0.0
 
     @staticmethod
     def _rms(pcm: bytes) -> float:
@@ -99,6 +103,8 @@ class StreamingSpeechSegmenter:
             return []
 
         rms = self._rms(usable)
+        self.last_rms = rms
+        self.blocks_seen += 1
         samples = len(usable) // SAMPLE_WIDTH
         emitted: List[bytes] = []
 
