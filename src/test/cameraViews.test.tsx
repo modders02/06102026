@@ -116,6 +116,40 @@ describe('shared live camera views', () => {
     expect(screen.getAllByText('help me')).toHaveLength(1);
   });
 
+  it('labels custom-only audio as safety keyword detection instead of stalled transcription', () => {
+    makeSession(1, {
+      transcript: '',
+      audioListening: true,
+      audioMessage: 'Listening for trained safety keywords…',
+      audioTone: 'ok',
+      audio: {
+        thread_running: true,
+        connected: true,
+        chunks_received: 1,
+        bytes_received: 32000,
+        last_chunk_at: null,
+        last_transcription_at: null,
+        last_transcript: '',
+        recognition_engine: 'custom',
+        custom_kws: { open_set_ready: true, ready_keywords: ['help'] },
+        error: null,
+        ffmpeg_error: null,
+      },
+    });
+
+    render(
+      <LiveCameraFeed
+        camera={slotCamera(mocks.slots[0] as CameraSlot)}
+        settings={DEFAULT_SETTINGS}
+        onConnect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Safety keyword detection')).toBeInTheDocument();
+    expect(screen.getByText('Listening for trained safety keywords…')).toBeInTheDocument();
+    expect(screen.queryByText('Listening… no speech heard yet.')).not.toBeInTheDocument();
+  });
+
   it('changes focused camera and layout without changing configured slots', () => {
     const first = makeSession(1);
     const second = makeSession(2);
