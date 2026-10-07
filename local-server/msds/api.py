@@ -192,6 +192,7 @@ def start_one(camera_id: str):
         return {"success": False, "error": "unknown camera"}
     start_mediamtx()
     try:
+        cam.enabled = True
         cam.start()
         deadline = time.time() + 8
         while time.time() < deadline and cam.running() and not cam.hls_ready(force=True):
@@ -207,6 +208,7 @@ def start_one(camera_id: str):
 def stop_one(camera_id: str):
     cam = find_camera(camera_id)
     if cam:
+        cam.enabled = False
         cam.stop()
     return {"success": True}
 
