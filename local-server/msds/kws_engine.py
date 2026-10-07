@@ -69,7 +69,9 @@ class KeywordDecision:
     keyword: str
     confidence: float
     distance: float
+    runner_up_keyword: str
     runner_up_confidence: float
+    keyword_scores: Dict[str, float]
     negative_confidence: float
     duration_ratio: float
     duration_ms: int
@@ -420,7 +422,12 @@ class CustomKeywordEngine:
 
         ranked.sort(reverse=True)
         confidence, keyword, distance = ranked[0]
+        runner_up_keyword = ranked[1][1] if len(ranked) > 1 else ""
         runner_up = ranked[1][0] if len(ranked) > 1 else 0.0
+        keyword_scores = {
+            item_keyword: round(item_confidence, 3)
+            for item_confidence, item_keyword, _ in ranked
+        }
         duration_ratio = target_lengths[keyword]
         duration_ms = round(len(pcm) / (SAMPLE_RATE * SAMPLE_WIDTH) * 1000)
 
@@ -460,7 +467,9 @@ class CustomKeywordEngine:
             keyword=keyword,
             confidence=round(confidence, 3),
             distance=round(distance, 4),
+            runner_up_keyword=runner_up_keyword,
             runner_up_confidence=round(runner_up, 3),
+            keyword_scores=keyword_scores,
             negative_confidence=round(negative_confidence, 3),
             duration_ratio=round(duration_ratio, 3),
             duration_ms=duration_ms,
