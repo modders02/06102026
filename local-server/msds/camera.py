@@ -175,6 +175,13 @@ class Camera:
     kws_last_confidence: float = 0.0
     kws_last_detected_at: Optional[str] = None
     kws_last_processing_ms: float = 0.0
+    kws_segments_seen: int = 0
+    kws_last_segment_at: Optional[str] = None
+    kws_last_segment_ms: int = 0
+    kws_last_candidate: str = ""
+    kws_last_candidate_confidence: float = 0.0
+    kws_last_runner_up_confidence: float = 0.0
+    kws_last_decision: str = ""
     _last_kws_publish_ts: float = 0.0
     _kws_enroll_suppress_until: float = 0.0
 
@@ -454,10 +461,34 @@ class Camera:
                 continue
 
             started = time.perf_counter()
-            match = KWS_ENGINE.match(segment)
+            decision = KWS_ENGINE.diagnose(segment)
             processing_ms = (time.perf_counter() - started) * 1000.0
-            if match:
-                self._publish_kws_match(match, processing_ms)
+            self.kws_segments_seen += 1
+            self.kws_last_segment_at = now_iso()
+            self.kws_last_segment_ms = round(len(segment) / 32.0)
+            self.kws_last_processing_ms = round(processing_ms, 2)
+            if decision:
+                self.kws_last_candidate = decision.keyword
+                self.kws_last_candidate_confidence = decision.confidence
+                self.kws_last_runner_up_confidence = decision.runner_up_confidence
+                self.kws_last_decision = decision.reason
+                print(
+                    f"[KWS {self.id}] candidate={decision.keyword} "
+                    f"confidence={decision.confidence:.3f} "
+                    f"runner_up={decision.runner_up_confidence:.3f} "
+                    f"decision={decision.reason} "
+                    f"segment={decision.duration_ms}ms "
+                    f"processing={processing_ms:.1f}ms",
+                    flush=True,
+                )
+                if decision.accepted:
+                    self._publish_kws_match(decision, processing_ms)
+            else:
+                self.kws_last_candidate = ""
+                self.kws_last_candidate_confidence = 0.0
+                self.kws_last_runner_up_confidence = 0.0
+                self.kws_last_decision = "no_ready_candidate"
+
 
     def _publish_scream_if_detected(self, pcm: bytes) -> None:
         if self.stop_flag.is_set():
@@ -1002,6 +1033,13 @@ class Camera:
         self.kws_last_confidence = 0.0
         self.kws_last_detected_at = None
         self.kws_last_processing_ms = 0.0
+        self.kws_segments_seen = 0
+        self.kws_last_segment_at = None
+        self.kws_last_segment_ms = 0
+        self.kws_last_candidate = ""
+        self.kws_last_candidate_confidence = 0.0
+        self.kws_last_runner_up_confidence = 0.0
+        self.kws_last_decision = ""
         self._last_kws_publish_ts = 0.0
         self._kws_enroll_suppress_until = 0.0
         with self.lock:
@@ -1076,6 +1114,17 @@ class Camera:
                 **KWS_ENGINE.status(),
                 "pending_enrollment": self.kws_pending_enrollment,
                 "enrollment": self.kws_enrollment_status,
+                "vad_active": self.kws_segmenter.active,
+                "vad_last_rms": round(self.kws_segmenter.last_rms, 5),
+                "vad_start_threshold": 0.025,
+                "vad_continue_threshold": 0.015,
+                "segments_seen": self.kws_segments_seen,
+                "last_segment_at": self.kws_last_segment_at,
+                "last_segment_ms": self.kws_last_segment_ms,
+                "last_candidate": self.kws_last_candidate or None,
+                "last_candidate_confidence": self.kws_last_candidate_confidence,
+                "last_runner_up_confidence": self.kws_last_runner_up_confidence,
+                "last_decision": self.kws_last_decision or None,
                 "last_keyword": self.kws_last_keyword or None,
                 "last_confidence": self.kws_last_confidence,
                 "last_detected_at": self.kws_last_detected_at,
