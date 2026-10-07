@@ -85,6 +85,8 @@ class KeywordDecision:
     runner_up_confidence: float
     keyword_scores: Dict[str, float]
     keyword_duration_ratios: Dict[str, float]
+    class_margin: float
+    required_margin: float
     negative_confidence: float
     duration_ratio: float
     duration_ms: int
@@ -637,6 +639,9 @@ class CustomKeywordEngine:
             )
             negative_confidence = self._distance_to_confidence(negative_distance)
 
+        class_margin = confidence - runner_up
+        required_margin = self.keyword_margins.get(keyword, MATCH_MARGIN)
+
         if not negative_ready:
             accepted = False
             reason = "negative_not_ready"
@@ -653,7 +658,7 @@ class CustomKeywordEngine:
             # so 0.03 preserves that separation without forcing false rejects.
             accepted = False
             reason = "too_close_to_unknown"
-        elif confidence - runner_up < self.keyword_margins.get(keyword, MATCH_MARGIN):
+        elif class_margin < required_margin:
             accepted = False
             reason = "insufficient_margin"
         else:
@@ -668,6 +673,8 @@ class CustomKeywordEngine:
             runner_up_confidence=round(runner_up, 3),
             keyword_scores=keyword_scores,
             keyword_duration_ratios=keyword_duration_ratios,
+            class_margin=round(class_margin, 4),
+            required_margin=round(required_margin, 4),
             negative_confidence=round(negative_confidence, 3),
             duration_ratio=round(duration_ratio, 3),
             duration_ms=duration_ms,
