@@ -50,6 +50,22 @@ describe('device-screen fire suppression', () => {
     },
   );
 
+  it('suppresses a tiny phone-screen flame before the small-fire fusion shortcut', () => {
+    const state = createFireState();
+    const result = detectFire(
+      fireFrame(200, 200, [72, 72, 8, 8]),
+      state,
+      [device('cell phone', [60, 50, 40, 80])],
+    );
+
+    expect(result.firePixelRatio).toBeGreaterThan(0);
+    expect(result.firePixelRatio).toBeLessThan(0.004);
+    expect(result.screenSuppressed).toBe(true);
+    expect(result.fireCandidate).toBe(false);
+    expect(result.fireDetected).toBe(false);
+    expect(result.detected).toBe(false);
+  });
+
   it('remembers the screen when object detection misses it on following frames', () => {
     const state = createFireState();
     const first = detectFire(fireFrame(), state, [device('tv', [10, 10, 80, 80])]);
