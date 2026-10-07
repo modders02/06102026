@@ -98,6 +98,24 @@ Enrollment speech is suppressed from emergency events so training `help` or
 `sunog` does not intentionally raise an alarm.
 
 
+
+## V4 temporal sequence matcher
+
+V4 keeps the existing enrolled log-Mel templates and derives additional
+relative-time and spectral-motion representations at match time. No retraining
+is required when upgrading from v3.
+
+The final template distance combines:
+
+- constrained cosine DTW for overall acoustic similarity,
+- fixed-time spectral sequence comparison to preserve phoneme order,
+- spectral delta comparison to emphasize transitions between sounds, and
+- a small duration-distance penalty.
+
+This is specifically intended to reduce confusions between safety words that
+share similar vowels or spectral envelopes, such as `tulong` and `sunog`,
+without weakening the open-set UNKNOWN rejection rules.
+
 ## Open-set negative training (required in v3)
 
 A safety keyword detector must be able to say **none of the above**. V3 therefore
