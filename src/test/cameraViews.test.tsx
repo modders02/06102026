@@ -37,7 +37,7 @@ const onlineRuntime = {
   status: 'online', objects: [], fire: { detected: false, confidence: 0 }, fps: 8,
 } as CameraRuntime;
 
-function makeSession(index: number) {
+function makeSession(index: number, runtimePatch: Partial<CameraRuntime> = {}) {
   const home = document.createElement('div');
   const video = document.createElement('video');
   const play = vi.spyOn(video, 'play').mockResolvedValue(undefined);
@@ -45,7 +45,11 @@ function makeSession(index: number) {
   video.style.cssText = 'position:fixed;left:-10000px;display:none;';
   home.appendChild(video);
   document.body.appendChild(home);
-  publishCameraSession(`slot-${index}`, { video, home, runtime: { ...onlineRuntime, cameraId: `slot-${index}` } });
+  publishCameraSession(`slot-${index}`, {
+    video,
+    home,
+    runtime: { ...onlineRuntime, cameraId: `slot-${index}`, ...runtimePatch },
+  });
   return { home, video, play, pause };
 }
 
@@ -89,6 +93,27 @@ describe('shared live camera views', () => {
     expect(video.muted).toBe(true);
     expect(pause).not.toHaveBeenCalled();
     expect(mocks.stopTalk).toHaveBeenCalled();
+  });
+
+  it('shows the existing camera transcript once below the live video without starting another pipeline', () => {
+    const { video } = makeSession(1, {
+      transcript: 'help me',
+      audioListening: true,
+      audioMessage: 'Listening',
+      audioTone: 'ok',
+    });
+    const view = render(
+      <LiveCameraFeed
+        camera={slotCamera(mocks.slots[0] as CameraSlot)}
+        settings={DEFAULT_SETTINGS}
+        onConnect={vi.fn()}
+      />,
+    );
+
+    expect(view.container.contains(video)).toBe(true);
+    expect(screen.getByText('Live transcription')).toBeInTheDocument();
+    expect(screen.getByText('help me')).toBeInTheDocument();
+    expect(screen.getAllByText('help me')).toHaveLength(1);
   });
 
   it('changes focused camera and layout without changing configured slots', () => {
