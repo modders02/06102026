@@ -14,7 +14,6 @@ describe('multimodal distress fusion', () => {
     ['angry', 'Angry'],
     ['fearful', 'Frightened'],
     ['frightened', 'Frightened'],
-    ['sad', 'Sad'],
   ] as const)('accepts a reliable %s face', (expression, label) => {
     expect(makeDistressFaceSignal(expression, 0.9, 1000)).toEqual({
       label,
@@ -26,6 +25,7 @@ describe('multimodal distress fusion', () => {
   it('rejects weak or unrelated facial expressions', () => {
     expect(makeDistressFaceSignal('angry', DISTRESS_FACE_MIN_CONFIDENCE - 0.01, 1000)).toBeNull();
     expect(makeDistressFaceSignal('happy', 0.99, 1000)).toBeNull();
+    expect(makeDistressFaceSignal('sad', 0.99, 1000)).toBeNull();
     expect(makeDistressFaceSignal('neutral', 0.99, 1000)).toBeNull();
     expect(makeDistressFaceSignal('disgusted', 0.99, 1000)).toBeNull();
   });
@@ -62,7 +62,6 @@ describe('multimodal distress fusion', () => {
   it.each([
     ['angry', 'Angry'],
     ['fearful', 'Frightened'],
-    ['sad', 'Sad'],
   ] as const)('verifies screaming with %s', (expression, label) => {
     const face = makeDistressFaceSignal(expression, 0.92, 5000)!;
     const scream = makeDistressSoundSignal('scream', 0.95, 7000)!;
@@ -72,9 +71,8 @@ describe('multimodal distress fusion', () => {
     expect(multimodalDistressLabel(result!)).toBe(`Verified distress: ${label} + screaming`);
   });
 
-  it('rejects incompatible face/audio combinations', () => {
-    const sad = makeDistressFaceSignal('sad', 0.9, 1000)!;
-    expect(fuseDistressSignals(sad, makeDistressSpeechSignal('help', 0.9, 1000)!)).toBeNull();
+  it('never creates a distress fusion face signal from Sad', () => {
+    expect(makeDistressFaceSignal('sad', 0.9, 1000)).toBeNull();
   });
 
   it('verifies either ordering inside the ten-second same-camera window', () => {
