@@ -187,6 +187,9 @@ class Camera:
     kws_last_class_margin: float = 0.0
     kws_last_required_margin: float = 0.0
     kws_last_negative_confidence: float = 0.0
+    kws_last_negative_second_confidence: float = 0.0
+    kws_last_negative_mean2_confidence: float = 0.0
+    kws_last_negative_top_confidences: list = field(default_factory=list)
     kws_last_duration_ratio: float = 0.0
     kws_last_decision: str = ""
     _last_kws_publish_ts: float = 0.0
@@ -489,6 +492,9 @@ class Camera:
                 self.kws_last_class_margin = decision.class_margin
                 self.kws_last_required_margin = decision.required_margin
                 self.kws_last_negative_confidence = decision.negative_confidence
+                self.kws_last_negative_second_confidence = decision.negative_second_confidence
+                self.kws_last_negative_mean2_confidence = decision.negative_mean2_confidence
+                self.kws_last_negative_top_confidences = list(decision.negative_top_confidences)
                 self.kws_last_duration_ratio = decision.duration_ratio
                 self.kws_last_decision = decision.reason
                 print(
@@ -515,6 +521,9 @@ class Camera:
                 self.kws_last_class_margin = 0.0
                 self.kws_last_required_margin = 0.0
                 self.kws_last_negative_confidence = 0.0
+                self.kws_last_negative_second_confidence = 0.0
+                self.kws_last_negative_mean2_confidence = 0.0
+                self.kws_last_negative_top_confidences = []
                 self.kws_last_duration_ratio = 0.0
                 self.kws_last_decision = "no_ready_candidate"
 
@@ -1074,6 +1083,9 @@ class Camera:
         self.kws_last_class_margin = 0.0
         self.kws_last_required_margin = 0.0
         self.kws_last_negative_confidence = 0.0
+        self.kws_last_negative_second_confidence = 0.0
+        self.kws_last_negative_mean2_confidence = 0.0
+        self.kws_last_negative_top_confidences = []
         self.kws_last_duration_ratio = 0.0
         self.kws_last_decision = ""
         self._last_kws_publish_ts = 0.0
@@ -1166,6 +1178,9 @@ class Camera:
                 "last_class_margin": self.kws_last_class_margin,
                 "last_required_margin": self.kws_last_required_margin,
                 "last_negative_confidence": self.kws_last_negative_confidence,
+                "last_negative_second_confidence": self.kws_last_negative_second_confidence,
+                "last_negative_mean2_confidence": self.kws_last_negative_mean2_confidence,
+                "last_negative_top_confidences": list(self.kws_last_negative_top_confidences),
                 "last_duration_ratio": self.kws_last_duration_ratio,
                 "last_decision": self.kws_last_decision or None,
                 "last_keyword": self.kws_last_keyword or None,
