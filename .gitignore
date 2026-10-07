@@ -56,4 +56,4 @@ local-server/auto.key
 supabase/.temp/
 
 # Local acoustic enrollment samples / templates
-local-server/kws-data/
+local-server/kws-data*/
