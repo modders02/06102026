@@ -143,6 +143,8 @@ class Camera:
     audio_proc: Optional[subprocess.Popen] = None
     audio_thread: Optional[threading.Thread] = None
     stop_flag: threading.Event = field(default_factory=threading.Event)
+    _audio_restart_pending: bool = False
+    _audio_restart_lock: threading.Lock = field(default_factory=threading.Lock)
     restarts: int = 0
     error: Optional[str] = None
     events: List[dict] = field(default_factory=list)
@@ -730,19 +732,57 @@ class Camera:
 
 
     # ---- lifecycle --------------------------------------------------------- #
+    def _restart_audio_after(self, previous_audio: threading.Thread) -> None:
+        """Finish an old Whisper worker, then restart audio if the slot is live.
+
+        faster-whisper inference is not safely cancellable mid-call. Reconnect
+        therefore waits in a separate daemon thread instead of failing the user
+        or clearing stop_flag while the old worker is still running.
+        """
+        try:
+            previous_audio.join()
+            with self._audio_restart_lock:
+                if self.audio_thread is previous_audio:
+                    self.audio_thread = None
+                self._audio_restart_pending = False
+                if not self.enabled:
+                    return
+                self.stop_flag.clear()
+                self.start_audio()
+        except Exception as exc:
+            with self._audio_restart_lock:
+                self._audio_restart_pending = False
+                if self.enabled:
+                    self.audio_error = f"Could not restart camera audio: {exc}"
+
+    def _defer_audio_restart(self, previous_audio: threading.Thread) -> None:
+        with self._audio_restart_lock:
+            if self._audio_restart_pending:
+                return
+            self._audio_restart_pending = True
+        threading.Thread(
+            target=self._restart_audio_after,
+            args=(previous_audio,),
+            daemon=True,
+        ).start()
+
     def start(self):
-        # Never clear the shared stop signal while a previous audio worker is
-        # still unwinding. This prevents duplicate Whisper/FFmpeg workers after
-        # a rapid Disconnect -> Reconnect on the same slot.
+        self.error = None
+        # Video does not share the Whisper worker's stop lifecycle, so restore
+        # it immediately even when audio is still finishing an old chunk.
+        self.start_video()
+
         previous_audio = self.audio_thread
         if previous_audio and previous_audio.is_alive():
-            previous_audio.join(timeout=5)
-            if previous_audio.is_alive():
-                raise RuntimeError("Previous audio worker is still stopping; retry reconnect.")
-        self.audio_thread = None
-        self.stop_flag.clear()
-        self.error = None
-        self.start_video()
+            if self.stop_flag.is_set():
+                self._defer_audio_restart(previous_audio)
+            # If stop_flag is clear this is simply an already-running camera.
+            return
+
+        with self._audio_restart_lock:
+            self.audio_thread = None
+            self._audio_restart_pending = False
+            self.stop_flag.clear()
         self.start_audio()
 
     def start_audio(self):
@@ -756,7 +796,10 @@ class Camera:
         self.audio_thread.start()
 
     def stop(self):
-        self.stop_flag.set()
+        # Serialize against the deferred restart so a late waiter can never
+        # clear stop_flag after the user has disconnected the camera again.
+        with self._audio_restart_lock:
+            self.stop_flag.set()
         audio_thread = self.audio_thread
         for proc in (self.video_proc, self.audio_proc):
             if proc and proc.poll() is None:
@@ -776,6 +819,9 @@ class Camera:
         self.video_proc = None
         self.audio_proc = None
         self.audio_thread = audio_thread if audio_thread and audio_thread.is_alive() else None
+        if self.audio_thread is None:
+            with self._audio_restart_lock:
+                self._audio_restart_pending = False
         self.audio_connected = False
         self.audio_chunks = 0
         self.audio_bytes = 0
