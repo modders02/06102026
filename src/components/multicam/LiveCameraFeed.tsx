@@ -20,6 +20,7 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
   const talk = useCctvTalk(settings.pythonServer, camera.id);
   const stopTalk = talk.stopTalk;
   const status = runtime?.status || 'connecting';
+  const customKeywordMode = runtime?.audio?.recognition_engine === 'custom';
 
   useEffect(() => {
     const container = containerRef.current;
@@ -122,7 +123,7 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
         <div className="flex min-w-0 items-center gap-2">
           <span className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-primary">
             <Mic className="h-3.5 w-3.5" />
-            Live transcription
+            {customKeywordMode ? 'Safety keyword detection' : 'Live transcription'}
           </span>
           <p
             aria-live="polite"
