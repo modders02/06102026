@@ -72,7 +72,7 @@ function SlotCard({
   onConnected: (v: { connected: boolean; streamUrl: string; webrtcUrl?: string }) => void;
 }) {
   const [status, setStatus] = useState<BackendCameraStatus | null>(null);
-  const [busy, setBusy] = useState<'' | 'check' | 'start' | 'stop' | 'test'>('');
+  const [busy, setBusy] = useState<'' | 'check' | 'start' | 'restart' | 'stop' | 'test'>('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [expanded, setExpanded] = useState(false);
@@ -131,10 +131,20 @@ function SlotCard({
     return () => window.clearInterval(t);
   }, [slot.ip, server, id]);
 
-  const handleConnect = async () => {
+  const handleConnect = async (forceRestart = false) => {
     if (!slot.ip.trim()) { setError('Enter the camera IP address first.'); return; }
-    setBusy('start'); setError(''); setMessage(`Connecting ${slot.name}…`);
+    setBusy(forceRestart ? 'restart' : 'start');
+    setError('');
+    setMessage(`${forceRestart ? 'Reconnecting' : 'Connecting'} ${slot.name}…`);
     try {
+      // A real reconnect must fully stop only this slot before starting it
+      // again. Other camera processes remain untouched.
+      if (forceRestart) {
+        connectionIntent.current = true;
+        await stopCamera(server, id);
+        apply(null);
+      }
+
       // Auto-discover the full RTSP endpoint, not just the port. Different
       // camera brands expose video under different paths (/stream1,
       // /live/ch00_1, /Streaming/Channels/101, ...).
@@ -183,21 +193,30 @@ function SlotCard({
         setMessage('');
         return;
       }
-      setMessage(`Connecting ${slot.name}…`);
+      setMessage(`${forceRestart ? 'Reconnecting' : 'Connecting'} ${slot.name}…`);
 
-      // Sync EVERY configured camera, otherwise the backend drops the others.
+      // Keep every configured camera registered so one Connect never evicts
+      // another slot. Preserve each other slot's explicit connection intent:
+      // disconnected cameras stay disabled while connected cameras stay live.
       const configured = allSlots.filter(s => s.ip.trim());
       const payload = (configured.length ? configured : [active]).map(s => {
         const cur = s.index === active.index ? active : s;
         return {
           id: `slot-${cur.index}`, path: slotPath(cur), name: cur.name, location: '',
-          rtspUrl: slotRtsp(cur), enabled: true, aiEnabled: cur.aiEnabled,
+          rtspUrl: slotRtsp(cur),
+          enabled: cur.index === active.index ? true : !!cur.autoConnect,
+          aiEnabled: cur.aiEnabled,
           recording: false, createdAt: new Date().toISOString(),
         };
       });
       await syncCameras(server, payload);
       const res = await startCamera(server, id);
-      if (!res.success) { setMessage(''); setError(res.error || 'Could not connect this camera.'); return; }
+      if (!res.success) {
+        apply(null);
+        setMessage('');
+        setError(res.error || 'Could not connect this camera.');
+        return;
+      }
       connectionIntent.current = true;
       onPatch({ autoConnect: true });
       const confirmed = await check(true);
@@ -205,6 +224,7 @@ function SlotCard({
       else if (!confirmed) { setMessage(''); setError('Could not confirm the camera connection. Try again.'); }
       else { setMessage('Waiting for camera connection confirmation.'); if (confirmed.error) setError(confirmed.error); }
     } catch {
+      apply(null);
       setMessage('');
       setError(backendHint(server) || `Could not reach the local server at ${server}.`);
     } finally { setBusy(''); }
@@ -249,13 +269,27 @@ function SlotCard({
   };
 
   const live = cameraReady(status);
+  const stateLabel = busy === 'start' ? 'Connecting'
+    : busy === 'restart' ? 'Reconnecting'
+      : busy === 'stop' ? 'Disconnecting'
+        : error ? 'Error'
+          : live ? 'Connected'
+            : slot.autoConnect && status?.ffmpeg ? 'Starting'
+              : 'Offline';
+  const stateClass = live && busy === ''
+    ? 'bg-success/15 text-success'
+    : error && busy === ''
+      ? 'bg-destructive/15 text-destructive'
+      : busy !== '' || slot.autoConnect
+        ? 'bg-primary/10 text-primary'
+        : 'bg-muted text-muted-foreground';
 
   return (
     <div className="rounded-xl border border-border bg-secondary/20 p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[16px] font-bold">CAM{slot.index}</span>
-        <span className={`text-[14px] font-bold px-2.5 py-0.5 rounded-full ${live ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground'}`}>
-          {live ? 'Connected' : 'Not connected'}
+        <span className={`text-[14px] font-bold px-2.5 py-0.5 rounded-full ${stateClass}`}>
+          {stateLabel}
         </span>
       </div>
 
@@ -406,12 +440,14 @@ function SlotCard({
             disabled={live || busy !== ''}
           />
           <button
-            onClick={handleConnect}
+            onClick={() => handleConnect(live)}
             disabled={busy !== ''}
             className="w-full flex items-center justify-center gap-2 text-[15px] font-bold px-3 py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/80 disabled:opacity-50"
           >
-            {busy === 'start' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            {busy === 'start' ? 'Connecting…' : 'Connect'}
+            {busy === 'start' || busy === 'restart'
+              ? <Loader2 className="w-4 h-4 animate-spin" />
+              : live ? <RefreshCw className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            {busy === 'restart' ? 'Reconnecting…' : busy === 'start' ? 'Connecting…' : live ? 'Reconnect' : 'Connect'}
           </button>
         </div>
         <button
