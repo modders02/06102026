@@ -29,11 +29,13 @@ class CameraCustomKeywordTests(unittest.TestCase):
             distance=0.09,
             runner_up_confidence=0.2,
             duration_ms=750,
+            accepted=True,
+            reason="accepted",
         )
 
         with patch.object(KWS_ENGINE, "has_ready_templates", return_value=True), \
                 patch.object(cam.kws_segmenter, "feed", return_value=[segment]), \
-                patch.object(KWS_ENGINE, "match", return_value=match):
+                patch.object(KWS_ENGINE, "diagnose", return_value=match):
             cam._process_custom_kws_pcm(b"pcm")
 
         self.assertEqual(len(cam.events), 1)
@@ -42,14 +44,42 @@ class CameraCustomKeywordTests(unittest.TestCase):
         self.assertEqual(cam.events[0]["transcript"], "tulong")
         self.assertEqual(cam.last_transcript, "tulong")
         self.assertEqual(cam.kws_last_keyword, "tulong")
+        self.assertEqual(cam.kws_last_candidate, "tulong")
+        self.assertEqual(cam.kws_last_decision, "accepted")
+        self.assertEqual(cam.kws_segments_seen, 1)
         self.assertGreaterEqual(cam.events[0]["processing_ms"], 0)
 
         # Same keyword inside the 3 s cooldown cannot duplicate the event.
         with patch.object(KWS_ENGINE, "has_ready_templates", return_value=True), \
                 patch.object(cam.kws_segmenter, "feed", return_value=[segment]), \
-                patch.object(KWS_ENGINE, "match", return_value=match):
+                patch.object(KWS_ENGINE, "diagnose", return_value=match):
             cam._process_custom_kws_pcm(b"pcm")
         self.assertEqual(len(cam.events), 1)
+
+    def test_rejected_candidate_is_visible_in_diagnostics(self):
+        cam = self.make_camera()
+        segment = b"\x01\x00" * 12000
+        decision = SimpleNamespace(
+            keyword="help",
+            confidence=0.61,
+            distance=0.39,
+            runner_up_confidence=0.0,
+            duration_ms=750,
+            accepted=False,
+            reason="below_threshold",
+        )
+
+        with patch.object(KWS_ENGINE, "has_ready_templates", return_value=True), \
+                patch.object(cam.kws_segmenter, "feed", return_value=[segment]), \
+                patch.object(KWS_ENGINE, "diagnose", return_value=decision):
+            cam._process_custom_kws_pcm(b"pcm")
+
+        self.assertEqual(cam.events, [])
+        self.assertEqual(cam.kws_segments_seen, 1)
+        self.assertEqual(cam.kws_last_candidate, "help")
+        self.assertEqual(cam.kws_last_candidate_confidence, 0.61)
+        self.assertEqual(cam.kws_last_decision, "below_threshold")
+        self.assertEqual(cam.kws_last_keyword, "")
 
     def test_enrollment_captures_template_without_publishing_alert(self):
         cam = self.make_camera()
