@@ -181,6 +181,8 @@ class Camera:
     kws_last_candidate: str = ""
     kws_last_candidate_confidence: float = 0.0
     kws_last_runner_up_confidence: float = 0.0
+    kws_last_negative_confidence: float = 0.0
+    kws_last_duration_ratio: float = 0.0
     kws_last_decision: str = ""
     _last_kws_publish_ts: float = 0.0
     _kws_enroll_suppress_until: float = 0.0
@@ -382,10 +384,15 @@ class Camera:
         self.kws_segmenter.reset()
         self.kws_pending_enrollment = key
         self._kws_enroll_suppress_until = time.time() + 8.0
+        prompt = (
+            "Say one NON-keyword phrase into the camera microphone."
+            if key == "unknown"
+            else f"Say '{key}' once into the camera microphone."
+        )
         self.kws_enrollment_status = {
             "state": "waiting",
             "keyword": key,
-            "message": f"Say '{key}' once into the camera microphone.",
+            "message": prompt,
         }
         return dict(self.kws_enrollment_status)
 
@@ -471,11 +478,15 @@ class Camera:
                 self.kws_last_candidate = decision.keyword
                 self.kws_last_candidate_confidence = decision.confidence
                 self.kws_last_runner_up_confidence = decision.runner_up_confidence
+                self.kws_last_negative_confidence = decision.negative_confidence
+                self.kws_last_duration_ratio = decision.duration_ratio
                 self.kws_last_decision = decision.reason
                 print(
                     f"[KWS {self.id}] candidate={decision.keyword} "
                     f"confidence={decision.confidence:.3f} "
+                    f"unknown={decision.negative_confidence:.3f} "
                     f"runner_up={decision.runner_up_confidence:.3f} "
+                    f"duration_ratio={decision.duration_ratio:.2f} "
                     f"decision={decision.reason} "
                     f"segment={decision.duration_ms}ms "
                     f"processing={processing_ms:.1f}ms",
@@ -487,6 +498,8 @@ class Camera:
                 self.kws_last_candidate = ""
                 self.kws_last_candidate_confidence = 0.0
                 self.kws_last_runner_up_confidence = 0.0
+                self.kws_last_negative_confidence = 0.0
+                self.kws_last_duration_ratio = 0.0
                 self.kws_last_decision = "no_ready_candidate"
 
 
@@ -1039,6 +1052,8 @@ class Camera:
         self.kws_last_candidate = ""
         self.kws_last_candidate_confidence = 0.0
         self.kws_last_runner_up_confidence = 0.0
+        self.kws_last_negative_confidence = 0.0
+        self.kws_last_duration_ratio = 0.0
         self.kws_last_decision = ""
         self._last_kws_publish_ts = 0.0
         self._kws_enroll_suppress_until = 0.0
@@ -1124,6 +1139,8 @@ class Camera:
                 "last_candidate": self.kws_last_candidate or None,
                 "last_candidate_confidence": self.kws_last_candidate_confidence,
                 "last_runner_up_confidence": self.kws_last_runner_up_confidence,
+                "last_negative_confidence": self.kws_last_negative_confidence,
+                "last_duration_ratio": self.kws_last_duration_ratio,
                 "last_decision": self.kws_last_decision or None,
                 "last_keyword": self.kws_last_keyword or None,
                 "last_confidence": self.kws_last_confidence,
