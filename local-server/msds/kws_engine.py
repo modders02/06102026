@@ -34,6 +34,9 @@ MAX_NEGATIVE_TEMPLATES = 40
 MATCH_THRESHOLD = 0.70
 MATCH_MARGIN = 0.06
 OPEN_SET_MARGIN = 0.03
+CALIBRATION_SAFETY_FACTOR = 0.75
+MIN_CALIBRATED_MARGIN = 0.003
+MAX_CALIBRATED_MARGIN = 0.05
 MIN_DURATION_RATIO = 0.60
 MAX_DURATION_RATIO = 1.55
 
@@ -173,6 +176,8 @@ class CustomKeywordEngine:
         self.templates: Dict[str, List[np.ndarray]] = {}
         self._mel_bank: Optional[np.ndarray] = None
         self.last_error: Optional[str] = None
+        self.keyword_margins: Dict[str, float] = {}
+        self.keyword_margin_calibration: Dict[str, dict] = {}
         self.load()
 
     @staticmethod
@@ -471,6 +476,109 @@ class CustomKeywordEngine:
         except Exception as exc:
             self.last_error = str(exc)
         self.templates = loaded
+        self._calibrate_keyword_margins()
+
+    def _calibrate_keyword_margins(self) -> None:
+        """Derive safe per-keyword class margins from enrolled v3 templates.
+
+        A keyword is auto-calibrated only when every leave-one-out enrollment
+        sample is still classified as that keyword. Otherwise the conservative
+        global MATCH_MARGIN remains in force.
+        """
+        positives = {
+            key: list(value)
+            for key, value in self.templates.items()
+            if key != NEGATIVE_CLASS and len(value) >= MIN_TEMPLATES
+        }
+        margins: Dict[str, float] = {
+            key: MATCH_MARGIN for key in positives
+        }
+        evidence: Dict[str, dict] = {}
+
+        if len(positives) < 2:
+            self.keyword_margins = margins
+            self.keyword_margin_calibration = {
+                key: {
+                    "tested": 0,
+                    "correct": 0,
+                    "accuracy": 0.0,
+                    "min_observed_margin": None,
+                    "required_margin": MATCH_MARGIN,
+                    "calibrated": False,
+                    "reason": "need_at_least_two_ready_keywords",
+                }
+                for key in positives
+            }
+            return
+
+        for true_key, true_templates in positives.items():
+            observed: List[float] = []
+            tested = 0
+            correct = 0
+
+            for held_index, query in enumerate(true_templates):
+                ranked = []
+                for candidate, candidate_templates in positives.items():
+                    pool = [
+                        template
+                        for index, template in enumerate(candidate_templates)
+                        if not (candidate == true_key and index == held_index)
+                    ]
+                    if not pool:
+                        continue
+                    distances = sorted(
+                        self._dtw_distance(query, template)
+                        for template in pool
+                    )
+                    selected = distances[:min(2, len(distances))]
+                    distance = float(np.mean(selected))
+                    ranked.append((
+                        self._distance_to_confidence(distance),
+                        candidate,
+                    ))
+
+                if len(ranked) < 2:
+                    continue
+                ranked.sort(reverse=True)
+                tested += 1
+                top_confidence, predicted = ranked[0]
+                runner_confidence = ranked[1][0]
+                if predicted == true_key:
+                    correct += 1
+                    observed.append(top_confidence - runner_confidence)
+
+            accuracy = correct / tested if tested else 0.0
+            calibrated = tested == len(true_templates) and correct == tested and bool(observed)
+
+            if calibrated:
+                minimum_observed = float(min(observed))
+                required = float(np.clip(
+                    minimum_observed * CALIBRATION_SAFETY_FACTOR,
+                    MIN_CALIBRATED_MARGIN,
+                    MAX_CALIBRATED_MARGIN,
+                ))
+                margins[true_key] = required
+                reason = "all_leave_one_out_samples_correct"
+            else:
+                minimum_observed = float(min(observed)) if observed else None
+                required = MATCH_MARGIN
+                reason = "leave_one_out_not_clean"
+
+            evidence[true_key] = {
+                "tested": tested,
+                "correct": correct,
+                "accuracy": round(accuracy, 3),
+                "min_observed_margin": (
+                    round(minimum_observed, 4)
+                    if minimum_observed is not None else None
+                ),
+                "required_margin": round(required, 4),
+                "calibrated": calibrated,
+                "reason": reason,
+            }
+
+        self.keyword_margins = margins
+        self.keyword_margin_calibration = evidence
 
     def diagnose(self, pcm: bytes) -> Optional[KeywordDecision]:
         """Open-set keyword decision: target must beat trained non-keyword speech."""
@@ -545,7 +653,7 @@ class CustomKeywordEngine:
             # so 0.03 preserves that separation without forcing false rejects.
             accepted = False
             reason = "too_close_to_unknown"
-        elif confidence - runner_up < MATCH_MARGIN:
+        elif confidence - runner_up < self.keyword_margins.get(keyword, MATCH_MARGIN):
             accepted = False
             reason = "insufficient_margin"
         else:
@@ -728,6 +836,14 @@ class CustomKeywordEngine:
             "threshold": MATCH_THRESHOLD,
             "margin": MATCH_MARGIN,
             "open_set_margin": OPEN_SET_MARGIN,
+            "keyword_margins": {
+                key: round(value, 4)
+                for key, value in sorted(self.keyword_margins.items())
+            },
+            "keyword_margin_calibration": {
+                key: dict(value)
+                for key, value in sorted(self.keyword_margin_calibration.items())
+            },
             "minimum_templates": MIN_TEMPLATES,
             "minimum_negative_templates": MIN_NEGATIVE_TEMPLATES,
             "keywords": counts,
