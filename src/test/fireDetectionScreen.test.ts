@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFireState, detectFire } from '@/lib/fireDetection';
 import type { DetectedObject } from '@/types/dashboard';
 
@@ -28,6 +28,10 @@ describe('device-screen fire suppression', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-07T00:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it.each(['tv', 'cell phone', 'laptop', 'monitor', 'tablet'])(
