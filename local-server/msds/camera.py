@@ -24,6 +24,7 @@ from .config import (AUDIO_CHUNK_SECONDS, HLS_PORT, HLS_PROBE_TTL, RTSP_PORT,
                      VIDEO_FPS, VIDEO_GOP, VIDEO_MAX_WIDTH, VIDEO_THREADS,
                      WEBRTC_PORT, match_distress)
 from .whisper_engine import WHISPER
+from .kws_engine import KWS_ENGINE, StreamingSpeechSegmenter
 
 NO_AUDIO_MESSAGE = (
     "This camera's RTSP stream does not expose a usable audio track, so there is "
@@ -167,6 +168,14 @@ class Camera:
     audio_restarts: int = 0
     audio_source: Optional[str] = None          # which URL/transport is working
     audio_sources_tried: List[str] = field(default_factory=list)
+    kws_segmenter: StreamingSpeechSegmenter = field(default_factory=StreamingSpeechSegmenter)
+    kws_pending_enrollment: Optional[str] = None
+    kws_enrollment_status: Optional[dict] = None
+    kws_last_keyword: str = ""
+    kws_last_confidence: float = 0.0
+    kws_last_detected_at: Optional[str] = None
+    _last_kws_publish_ts: float = 0.0
+    _kws_enroll_suppress_until: float = 0.0
 
     _hls_ok: bool = False
     _hls_checked: float = 0.0
@@ -360,6 +369,89 @@ class Camera:
             if not self.stop_flag.is_set():
                 self.audio_error = f"Audio PCM reader failed: {exc}"
 
+    def request_kws_enrollment(self, keyword: str) -> dict:
+        key = KWS_ENGINE.normalize_keyword(keyword)
+        self.kws_segmenter.reset()
+        self.kws_pending_enrollment = key
+        self._kws_enroll_suppress_until = time.time() + 8.0
+        self.kws_enrollment_status = {
+            "state": "waiting",
+            "keyword": key,
+            "message": f"Say '{key}' once into the camera microphone.",
+        }
+        return dict(self.kws_enrollment_status)
+
+    def cancel_kws_enrollment(self) -> None:
+        self.kws_pending_enrollment = None
+        self.kws_enrollment_status = None
+        self._kws_enroll_suppress_until = 0.0
+        self.kws_segmenter.reset()
+
+    def _publish_kws_match(self, match) -> None:
+        now_ts = time.time()
+        if (
+            match.keyword == self.kws_last_keyword
+            and now_ts - self._last_kws_publish_ts < 3.0
+        ):
+            return
+        self._last_kws_publish_ts = now_ts
+        self.kws_last_keyword = match.keyword
+        self.kws_last_confidence = match.confidence
+        self.kws_last_detected_at = now_iso()
+        with self.lock:
+            self.events.append({
+                "camera_id": self.id,
+                "timestamp": self.kws_last_detected_at,
+                "transcript": match.keyword.replace("_", " "),
+                "keyword": match.keyword.replace("_", " "),
+                "confidence": match.confidence,
+                "source": "custom-kws",
+                "latency_ms": match.duration_ms,
+            })
+            self.events = self.events[-200:]
+        print(
+            f"[KWS {self.id}] {match.keyword}: {match.confidence:.2f} "
+            f"({match.duration_ms} ms segment)",
+            flush=True,
+        )
+
+    def _process_custom_kws_pcm(self, pcm: bytes) -> None:
+        if self.stop_flag.is_set():
+            return
+        if not self.kws_pending_enrollment and not KWS_ENGINE.has_ready_templates():
+            return
+        for segment in self.kws_segmenter.feed(pcm):
+            if self.kws_pending_enrollment:
+                key = self.kws_pending_enrollment
+                self.kws_pending_enrollment = None
+                try:
+                    result = KWS_ENGINE.enroll(key, segment)
+                    self.kws_enrollment_status = {
+                        "state": "captured",
+                        **result,
+                        "message": (
+                            f"Captured '{key}' sample {result['templates']}/"
+                            f"{result['minimum_templates']}."
+                        ),
+                    }
+                    self._kws_enroll_suppress_until = time.time() + 4.0
+                    print(
+                        f"[KWS {self.id}] enrolled {key}: "
+                        f"{result['templates']} template(s)",
+                        flush=True,
+                    )
+                except Exception as exc:
+                    self.kws_enrollment_status = {
+                        "state": "error",
+                        "keyword": key,
+                        "message": str(exc),
+                    }
+                continue
+
+            match = KWS_ENGINE.match(segment)
+            if match:
+                self._publish_kws_match(match)
+
     def _publish_scream_if_detected(self, pcm: bytes) -> None:
         if self.stop_flag.is_set():
             return
@@ -424,16 +516,34 @@ class Camera:
         timestamp = now_iso()
         self.last_transcription_at = timestamp
         self.last_transcript = transcript
-        with self.lock:
-            self.events.append({
-                "camera_id": self.id,
-                "timestamp": timestamp,
-                "transcript": transcript,
-                "keyword": keyword,
-                "confidence": confidence,
-            })
-            self.events = self.events[-200:]
-        print(f"[Audio {self.id}] transcript: {transcript}", flush=True)
+
+        # During KWS enrollment the spoken training word must never generate an
+        # emergency. Also suppress a slower Whisper duplicate when the custom
+        # engine already emitted the same keyword a few seconds earlier.
+        suppress_event = time.time() < self._kws_enroll_suppress_until
+        if (
+            keyword
+            and keyword == self.kws_last_keyword.replace("_", " ")
+            and time.time() - self._last_kws_publish_ts < 6.0
+        ):
+            suppress_event = True
+
+        if not suppress_event:
+            with self.lock:
+                self.events.append({
+                    "camera_id": self.id,
+                    "timestamp": timestamp,
+                    "transcript": transcript,
+                    "keyword": keyword,
+                    "confidence": confidence,
+                    "source": "whisper",
+                })
+                self.events = self.events[-200:]
+        print(
+            f"[Audio {self.id}] transcript: {transcript}"
+            + (" (event suppressed by custom KWS)" if suppress_event else ""),
+            flush=True,
+        )
 
     def _audio_loop(self):
         """Continuous RTSP audio capture -> raw PCM -> fixed WAV chunks -> Whisper.
@@ -553,6 +663,7 @@ class Camera:
                 ).start()
 
                 pcm = bytearray()
+                self.kws_segmenter.reset()
                 last_pcm_at = time.time()
 
                 # 3. Build deterministic fixed-size chunks from raw PCM.
@@ -560,6 +671,7 @@ class Camera:
                     try:
                         block = pcm_queue.get(timeout=0.5)
                         if block:
+                            self._process_custom_kws_pcm(block)
                             pcm.extend(block)
                             last_pcm_at = time.time()
                     except queue.Empty:
@@ -838,6 +950,14 @@ class Camera:
         self.audio_probed_at = None
         self._last_publish_ts = 0.0
         self._last_scream_publish_ts = 0.0
+        self.kws_segmenter.reset()
+        self.kws_pending_enrollment = None
+        self.kws_enrollment_status = None
+        self.kws_last_keyword = ""
+        self.kws_last_confidence = 0.0
+        self.kws_last_detected_at = None
+        self._last_kws_publish_ts = 0.0
+        self._kws_enroll_suppress_until = 0.0
         with self.lock:
             self.events = []
         self._hls_ok = False
@@ -905,6 +1025,14 @@ class Camera:
             "audio_source": self.audio_source,
             "audio_sources_tried": list(self.audio_sources_tried),
             "chunk_seconds": AUDIO_CHUNK_SECONDS,
+            "custom_kws": {
+                **KWS_ENGINE.status(),
+                "pending_enrollment": self.kws_pending_enrollment,
+                "enrollment": self.kws_enrollment_status,
+                "last_keyword": self.kws_last_keyword or None,
+                "last_confidence": self.kws_last_confidence,
+                "last_detected_at": self.kws_last_detected_at,
+            },
             "whisper_available": WHISPER.available,
             "whisper_state": WHISPER.state,
             "whisper_model": WHISPER.model_name,
