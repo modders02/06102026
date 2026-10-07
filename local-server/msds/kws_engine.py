@@ -25,7 +25,7 @@ import numpy as np
 SAMPLE_RATE = 16000
 SAMPLE_WIDTH = 2
 DEFAULT_KEYWORDS = ("help", "tulong", "sunog", "magnanakaw")
-FEATURE_VERSION = "logmel-shape-sequence-v4-open-set"
+FEATURE_VERSION = "logmel-shape-dtw-v3-open-set"
 NEGATIVE_CLASS = "unknown"
 MIN_TEMPLATES = 3
 MIN_NEGATIVE_TEMPLATES = 5
@@ -44,6 +44,7 @@ DTW_WEIGHT = 0.45
 SEQUENCE_WEIGHT = 0.35
 DELTA_WEIGHT = 0.20
 DURATION_DISTANCE_WEIGHT = 0.04
+PRIMARY_MATCHER = "v3_dtw"
 
 FRAME_MS = 25
 HOP_MS = 10
@@ -488,11 +489,12 @@ class CustomKeywordEngine:
         ranked = []
         target_lengths = {}
         for keyword, templates in positive_snapshot.items():
-            distances = sorted(self._sequence_distance(features, template) for template in templates)
-            # Multiple-class recognition needs consistency across enrollment
-            # examples. Best-three voting prevents one unusually similar
-            # cross-keyword template from dominating the class score.
-            selected = distances[:min(3, len(distances))]
+            # The real enrollment audit favored the original constrained DTW
+            # matcher over the experimental v4 sequence matcher (14/18 vs
+            # 12/18 leave-one-out correct). Keep v4 available in /kws/evaluate,
+            # but use the stronger measured baseline for live recognition.
+            distances = sorted(self._dtw_distance(features, template) for template in templates)
+            selected = distances[:min(2, len(distances))]
             distance = float(np.mean(selected))
             confidence = self._distance_to_confidence(distance)
             median_frames = float(np.median([len(template) for template in templates]))
@@ -523,7 +525,7 @@ class CustomKeywordEngine:
         if negative_ready:
             # A single close hard-negative example is enough to veto a keyword.
             negative_distance = min(
-                self._sequence_distance(features, template) for template in negative_templates
+                self._dtw_distance(features, template) for template in negative_templates
             )
             negative_confidence = self._distance_to_confidence(negative_distance)
 
@@ -716,11 +718,13 @@ class CustomKeywordEngine:
         with self.lock:
             counts = {key: len(value) for key, value in sorted(self.templates.items())}
         return {
-            "engine": "msds-logmel-sequence-v4",
+            "engine": "msds-logmel-dtw-v3",
             "feature_version": FEATURE_VERSION,
             "sample_rate": SAMPLE_RATE,
             "features": f"{N_MELS}-bin per-frame-normalized log-Mel",
-            "matcher": "DTW + fixed-time spectral sequence + delta motion",
+            "matcher": "cosine DTW",
+            "primary_matcher": PRIMARY_MATCHER,
+            "experimental_matcher": "v4_sequence (audit only)",
             "threshold": MATCH_THRESHOLD,
             "margin": MATCH_MARGIN,
             "open_set_margin": OPEN_SET_MARGIN,
