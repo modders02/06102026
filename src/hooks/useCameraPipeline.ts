@@ -674,8 +674,20 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     if (!camera.enabled) {
       recentDistressSpeechRef.current = null;
       recentSunogRef.current = null;
+      lastAudioRef.current = undefined;
+      lastShownRef.current = '';
+      if (clearTimerRef.current) {
+        window.clearTimeout(clearTimerRef.current);
+        clearTimerRef.current = undefined;
+      }
+      latestPreviewRef.current = undefined;
+      setPreview(null);
       patch({
+        transcript: '',
         audioListening: false,
+        audio: null,
+        audioDistress: { detected: false, keyword: '', confidence: 0, transcript: '' },
+        audioBackendReachable: true,
         audioMessage: 'Connect this camera to start listening.',
         audioTone: 'wait',
       });
