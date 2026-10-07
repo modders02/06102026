@@ -271,6 +271,12 @@ def kws_status():
     return {"success": True, **KWS_ENGINE.status()}
 
 
+@app.get("/kws/evaluate")
+def kws_evaluate():
+    """Audit enrolled keyword templates without recording new audio."""
+    return KWS_ENGINE.evaluate_templates()
+
+
 @app.post("/cameras/{camera_id}/kws-enroll/{keyword}")
 def kws_enroll(camera_id: str, keyword: str):
     """Arm one camera to use the next spoken segment as a keyword template."""
