@@ -472,6 +472,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         fire.smokeRatio,
         fire.visibility,
         fireObservedAt,
+        !!fire.smokeCorroborated,
+        !!fire.lowVisibilityCorroborated,
       );
 
       faceAnalysisRevisionRef.current = revision;
