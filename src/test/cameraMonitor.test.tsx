@@ -469,9 +469,9 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
   });
 
-  it('verifies a small visual fire candidate plus sunog immediately', async () => {
+  it('verifies a small visual fire candidate plus sunog on a current visual frame', async () => {
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [sunogAudioEvent], status: null });
-    mocked.detectFire.mockReturnValueOnce({
+    mocked.detectFire.mockReturnValue({
       fireCandidate: true,
       fireDetected: false,
       smokeEmergency: false,
@@ -484,6 +484,7 @@ describe('camera snapshots and page-scoped playback', () => {
     const onEvent = vi.fn();
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: 'fire',
       label: 'Verified fire: visual fire + "sunog"',
@@ -491,6 +492,55 @@ describe('camera snapshots and page-scoped playback', () => {
       snapshot: 'data:image/jpeg;base64,preview',
     }));
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
+  });
+
+  it('does not let a stale fire candidate plus sunog verify fire once a device screen is recognized', async () => {
+    mocked.getAudioEvents
+      .mockResolvedValueOnce({ events: [], status: null })
+      .mockResolvedValueOnce({ events: [sunogAudioEvent], status: null });
+    mocked.detectFire
+      .mockReturnValueOnce({
+        fireCandidate: true,
+        fireDetected: false,
+        smokeEmergency: false,
+        screenSuppressed: false,
+        confidence: 0.3,
+        firePixelRatio: 0.01,
+        smokeRatio: 0.02,
+        visibility: 85,
+      })
+      .mockReturnValueOnce({
+        fireCandidate: false,
+        fireDetected: false,
+        smokeEmergency: false,
+        screenSuppressed: true,
+        confidence: 0,
+        firePixelRatio: 0.01,
+        smokeRatio: 0.2,
+        visibility: 60,
+        rejectedReason: 'displayed fire inside tv — ignored',
+      });
+
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+
+    // Speech arrives after the old visual candidate. It must wait for a current
+    // visual frame instead of verifying from stale state.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
+
+    // The next visual frame identifies the flames as TV content and clears
+    // both pending fusion signals.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
+    expect(getCameraSession('slot-1').runtime?.fire).toMatchObject({
+      detected: false,
+      candidate: false,
+      confidence: 0,
+    });
+    expect(getCameraSession('slot-1').runtime?.smoke.detected).toBe(false);
   });
 
   it('immediately alerts when a visual fire candidate overlaps a smoke region', async () => {
