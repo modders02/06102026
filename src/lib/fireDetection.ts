@@ -36,6 +36,10 @@ export interface FireDetectionResult {
   fireCandidate: boolean;
   fireDetected: boolean;         // real fire signature confirmed
   smokeEmergency: boolean;       // smoke + low visibility
+  /** Smoke rose over time enough to corroborate a flame candidate. */
+  smokeCorroborated?: boolean;
+  /** Visibility dropped over time enough to corroborate a flame candidate. */
+  lowVisibilityCorroborated?: boolean;
   confidence: number;            // 0..1 fused
   firePixelRatio: number;
   flickerScore: number;
@@ -80,6 +84,9 @@ const SCREEN_MARGIN_RATIO = 0.12;
 const SCREEN_MIN_MARGIN_PX = 6;
 const FIRE_IN_SCREEN_OVERLAP = 0.25;
 const SCREEN_IN_FIRE_OVERLAP = 0.35;
+const PERSON_LABELS = new Set(['person']);
+const FIRE_IN_PERSON_OVERLAP = 0.70;
+const PERSON_FIRE_MIN_HISTORY = 3;
 
 const MIN_FIRE_RATIO = 0.004;
 const LIGHTER_AREA_RATIO = 0.002;
@@ -176,6 +183,25 @@ function updateRecentScreens(
     }
   }
   state.recentScreens = remembered;
+}
+
+function fireLooksLikeClothing(
+  bbox: [number, number, number, number],
+  objects: DetectedObject[],
+  state: FireDetectorState,
+  flickerVariance: number,
+) {
+  const lowTemporalEvidence =
+    state.history.length < PERSON_FIRE_MIN_HISTORY
+    || flickerVariance < MIN_FLICKER * 2;
+
+  if (!lowTemporalEvidence) return false;
+
+  return objects.some(object => {
+    if (!PERSON_LABELS.has(object.label) || object.confidence < 0.5) return false;
+    const insidePerson = bboxOverlap(bbox, object.bbox);
+    return insidePerson >= FIRE_IN_PERSON_OVERLAP;
+  });
 }
 
 export function detectFire(
@@ -304,6 +330,23 @@ export function detectFire(
 
   const fireCandidate = ratio > 0 && !!bbox;
 
+  // Temporal corroboration. A naturally gray room, gray wall, white ceiling,
+  // or dark CCTV image can have a large low-saturation area without smoke.
+  // Require the scene to actually change before smoke/visibility can verify fire.
+  const smokeRising =
+    state.smokeHistory.length >= 6 &&
+    state.smokeHistory[state.smokeHistory.length - 1] >
+      state.smokeHistory[0] + 0.05;
+  const visibilityDropping =
+    state.visibilityHistory.length >= 6 &&
+    state.visibilityHistory[0] - visibility > 15;
+  const smokeCorroborated = smokeRatio >= SMOKE_COVERAGE_HIGH && smokeRising;
+  const lowVisibilityCorroborated = visibility <= VISIBILITY_LOW && visibilityDropping;
+  const smokeEmergency =
+    smokeRatio >= SMOKE_COVERAGE_HIGH &&
+    visibility <= VISIBILITY_LOW &&
+    (smokeRising || visibilityDropping);
+
   const baseResult = {
     screenSuppressed: false,
     fireCandidate,
@@ -314,22 +357,11 @@ export function detectFire(
     contrast,
     edgeDensity,
     saturation: meanSat,
+    smokeCorroborated,
+    lowVisibilityCorroborated,
     bbox,
     smoothedBbox,
   };
-
-  // ---- Smoke-only emergency (no flames visible yet, but room is filling) ----
-  const smokeRising =
-    state.smokeHistory.length >= 6 &&
-    state.smokeHistory[state.smokeHistory.length - 1] >
-      state.smokeHistory[0] + 0.05;
-  const visibilityDropping =
-    state.visibilityHistory.length >= 6 &&
-    state.visibilityHistory[0] - visibility > 15;
-  const smokeEmergency =
-    smokeRatio >= SMOKE_COVERAGE_HIGH &&
-    visibility <= VISIBILITY_LOW &&
-    (smokeRising || visibilityDropping);
 
 
   // Device-screen suppression runs before every size/confidence shortcut.
@@ -356,6 +388,25 @@ export function detectFire(
         };
       }
     }
+  }
+
+  // Clothing / skin-tone false alarm. A fire-colored patch largely inside
+  // a detected person is not allowed to verify fire until it shows temporal
+  // flame behavior. This prevents orange/red shirts from combining with the
+  // room's gray background and becoming a false "fire + smoke" emergency.
+  if (bbox && fireLooksLikeClothing(bbox, objects, state, variance)) {
+    return {
+      ...baseResult,
+      detected: false,
+      fireCandidate: false,
+      fireDetected: false,
+      smokeEmergency: false,
+      smokeCorroborated: false,
+      lowVisibilityCorroborated: false,
+      confidence: 0,
+      rejectedReason: 'static fire-colored region on person/clothing — ignored',
+      saliency: makeSaliency(0, positive, 'person/clothing color suppression'),
+    };
   }
 
   // ---- Fire rejection ladder ----
