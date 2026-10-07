@@ -1,0 +1,83 @@
+"""Camera integration tests for the custom MSDS keyword engine."""
+from pathlib import Path
+import sys
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from msds.camera import Camera
+from msds.kws_engine import KWS_ENGINE
+
+
+class CameraCustomKeywordTests(unittest.TestCase):
+    def make_camera(self):
+        return Camera(
+            id="slot-1",
+            path="cam1",
+            name="Camera 1",
+            rtsp="rtsp://example",
+        )
+
+    def test_custom_keyword_event_updates_live_transcript_once(self):
+        cam = self.make_camera()
+        segment = b"\x01\x00" * 12000
+        match = SimpleNamespace(
+            keyword="tulong",
+            confidence=0.91,
+            distance=0.09,
+            runner_up_confidence=0.2,
+            duration_ms=750,
+        )
+
+        with patch.object(KWS_ENGINE, "has_ready_templates", return_value=True), \
+                patch.object(cam.kws_segmenter, "feed", return_value=[segment]), \
+                patch.object(KWS_ENGINE, "match", return_value=match):
+            cam._process_custom_kws_pcm(b"pcm")
+
+        self.assertEqual(len(cam.events), 1)
+        self.assertEqual(cam.events[0]["source"], "custom-kws")
+        self.assertEqual(cam.events[0]["keyword"], "tulong")
+        self.assertEqual(cam.events[0]["transcript"], "tulong")
+        self.assertEqual(cam.last_transcript, "tulong")
+        self.assertEqual(cam.kws_last_keyword, "tulong")
+        self.assertGreaterEqual(cam.events[0]["processing_ms"], 0)
+
+        # Same keyword inside the 3 s cooldown cannot duplicate the event.
+        with patch.object(KWS_ENGINE, "has_ready_templates", return_value=True), \
+                patch.object(cam.kws_segmenter, "feed", return_value=[segment]), \
+                patch.object(KWS_ENGINE, "match", return_value=match):
+            cam._process_custom_kws_pcm(b"pcm")
+        self.assertEqual(len(cam.events), 1)
+
+    def test_enrollment_captures_template_without_publishing_alert(self):
+        cam = self.make_camera()
+        segment = b"\x01\x00" * 12000
+        cam.request_kws_enrollment("help")
+
+        with patch.object(cam.kws_segmenter, "feed", return_value=[segment]), \
+                patch.object(KWS_ENGINE, "enroll", return_value={
+                    "keyword": "help",
+                    "templates": 1,
+                    "ready": False,
+                    "minimum_templates": 3,
+                }):
+            cam._process_custom_kws_pcm(b"pcm")
+
+        self.assertEqual(cam.events, [])
+        self.assertIsNone(cam.kws_pending_enrollment)
+        self.assertEqual(cam.kws_enrollment_status["state"], "captured")
+        self.assertEqual(cam.kws_enrollment_status["keyword"], "help")
+        self.assertEqual(cam.kws_enrollment_status["templates"], 1)
+
+    def test_no_templates_skips_segmentation_work(self):
+        cam = self.make_camera()
+        with patch.object(KWS_ENGINE, "has_ready_templates", return_value=False), \
+                patch.object(cam.kws_segmenter, "feed") as feed:
+            cam._process_custom_kws_pcm(b"pcm")
+        feed.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()
