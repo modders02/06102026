@@ -35,22 +35,11 @@ HALLUCINATION_PATTERNS = [
 ]
 _HALLUCINATION_RE = [re.compile(p, re.IGNORECASE) for p in HALLUCINATION_PATTERNS]
 
-# MSDS uses a deliberately closed speech vocabulary. Whisper may decode other
-# words internally, but only these canonical phrases are ever published to the
-# renderer or safety fusion pipeline.
-ALLOWED_TRANSCRIPTS = ("help me", "sunog", "tulong", "magnanakaw", "fire")
-
-# Conservative aliases for common ASR spelling drift. The UI/backend still
-# publishes the canonical form above, never the alias itself.
-_TRANSCRIPT_ALIASES = {
-    "sonog": "sunog",
+# Short distress words must never be filtered out as "too short / noise".
+KEEP_ALWAYS = {
+    "help", "fire", "stop", "police", "tulong", "saklolo", "sunog", "aray",
+    "pulis", "ambulansya", "masakit", "huwag", "wag",
 }
-
-# Even a target phrase must look like real speech. These post-decode gates are
-# intentionally stricter than the previous safety-word exemption so silence
-# cannot pass merely because Whisper guessed a keyword.
-MAX_ALLOWED_NO_SPEECH_PROB = 0.65
-MIN_ALLOWED_AVG_LOGPROB = -1.25
 
 
 def _normalise_repetition(text: str) -> str:
@@ -100,45 +89,11 @@ def _normalise_repetition(text: str) -> str:
 
 def is_hallucination(text: str) -> bool:
     stripped = text.strip()
+    if stripped.lower().strip(" .!?,").replace("!", "") in KEEP_ALWAYS:
+        return False
     if len(stripped) < 2:
         return True
     return any(rx.match(stripped) for rx in _HALLUCINATION_RE)
-
-
-def _normalise_words(text: str) -> str:
-    value = (text or "").lower()
-    value = re.sub(r"[^a-z0-9]+", " ", value)
-    return " ".join(value.split())
-
-
-def allowed_transcript(text: str) -> str:
-    """Return only canonical MSDS phrases found in decoded speech.
-
-    Ordinary conversation and hallucinated text are discarded. A longer
-    sentence may contain a target phrase ("please help me now"), but the
-    published transcript is reduced to the approved phrase ("help me").
-    Multiple approved phrases in one chunk are kept once, in spoken order.
-    """
-    normalized = _normalise_words(text)
-    if not normalized:
-        return ""
-
-    tokens = normalized.split()
-    normalized = " ".join(_TRANSCRIPT_ALIASES.get(token, token) for token in tokens)
-    padded = f" {normalized} "
-
-    found: list[tuple[int, str]] = []
-    for phrase in ALLOWED_TRANSCRIPTS:
-        needle = f" {phrase} "
-        start = padded.find(needle)
-        if start >= 0:
-            found.append((start, phrase))
-
-    if not found:
-        return ""
-
-    found.sort(key=lambda item: item[0])
-    return " ".join(dict.fromkeys(phrase for _, phrase in found))
 
 
 class WhisperEngine:
@@ -192,12 +147,11 @@ class WhisperEngine:
         return self.model
 
     def transcribe(self, wav_path: str) -> str:
-        """Closed-vocabulary English/Tagalog safety transcription.
+        """Multilingual (English + Tagalog) transcription with hallucination guards.
 
-        Whisper still performs acoustic decoding, but MSDS publishes only:
-        help me, sunog, tulong, magnanakaw, or fire. Even those phrases must pass
-        conservative speech-confidence gates so silence/noise cannot create a
-        safety transcript merely because the decoder guessed a keyword.
+        Filters are tuned for real CCTV microphones: quiet, reverberant and noisy.
+        They must reject silence-driven phantom sentences without discarding
+        genuine (often short) speech such as "tulong" or "help".
         """
         if not self.available:
             raise RuntimeError(self.error or "faster-whisper is not installed")
@@ -215,11 +169,11 @@ class WhisperEngine:
                     "speech_pad_ms": 250,
                 },
                 condition_on_previous_text=False,  # stops repeat/echo hallucinations
-                no_speech_threshold=0.65,
-                log_prob_threshold=-1.25,
+                no_speech_threshold=0.8,
+                log_prob_threshold=-1.6,   # quiet CCTV mics give low-confidence real speech
                 temperature=[0.0, 0.2, 0.4],
                 beam_size=5,
-                initial_prompt="English and Tagalog home-safety speech.",
+                initial_prompt="Tagalog at English na usapan sa bahay. Help, tulong, saklolo, sunog.",
             )
             lang = getattr(info, "language", "") or ""
             lang_prob = getattr(info, "language_probability", 1.0) or 0.0
@@ -233,19 +187,15 @@ class WhisperEngine:
                 text = (seg.text or "").strip()
                 if not text:
                     continue
-                if getattr(seg, "no_speech_prob", 0.0) > MAX_ALLOWED_NO_SPEECH_PROB:
+                is_safety = any(w in text.lower() for w in KEEP_ALWAYS)
+                if not is_safety and getattr(seg, "no_speech_prob", 0.0) > 0.9:
                     continue
-                if getattr(seg, "avg_logprob", 0.0) < MIN_ALLOWED_AVG_LOGPROB:
+                if not is_safety and getattr(seg, "avg_logprob", 0.0) < -1.8:
                     continue
                 if is_hallucination(text):
                     continue
-                canonical = allowed_transcript(text)
-                if canonical:
-                    kept.append(canonical)
-
-            # Re-run the closed-vocabulary filter after joining segments so the
-            # public result can never contain arbitrary Whisper prose.
-            return allowed_transcript(" ".join(kept))
+                kept.append(text)
+            return _normalise_repetition(" ".join(kept).strip())
 
 
 WHISPER = WhisperEngine()
