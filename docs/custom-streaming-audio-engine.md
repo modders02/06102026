@@ -99,22 +99,18 @@ Enrollment speech is suppressed from emergency events so training `help` or
 
 
 
-## V4 temporal sequence matcher
+## V4 temporal sequence experiment
 
-V4 keeps the existing enrolled log-Mel templates and derives additional
-relative-time and spectral-motion representations at match time. No retraining
-is required when upgrading from v3.
+The v4 sequence matcher is retained for offline comparison through
+`/kws/evaluate`, but it is not the live matcher. On the first real enrolled
+template audit it scored 12/18 leave-one-out correct versus 14/18 for the v3
+DTW baseline, and it classified all five enrolled `sunog` templates as
+`tulong`. The live recognizer therefore remains on constrained cosine DTW
+until a stronger replacement is demonstrated by the same audit.
 
-The final template distance combines:
-
-- constrained cosine DTW for overall acoustic similarity,
-- fixed-time spectral sequence comparison to preserve phoneme order,
-- spectral delta comparison to emphasize transitions between sounds, and
-- a small duration-distance penalty.
-
-This is specifically intended to reduce confusions between safety words that
-share similar vowels or spectral envelopes, such as `tulong` and `sunog`,
-without weakening the open-set UNKNOWN rejection rules.
+The v4 experiment combines fixed-time spectral sequence and spectral-delta
+motion with DTW. Existing templates remain compatible, so it can still be
+evaluated without retraining.
 
 ## Open-set negative training (required in v3)
 
