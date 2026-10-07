@@ -10,7 +10,7 @@ CCTV RTSP audio
   -> FFmpeg 16 kHz mono PCM
   -> small PCM blocks (~128 ms)
   -> energy VAD
-  -> 24-bin log-Mel features
+  -> 32-bin per-frame-normalized log-Mel features
   -> cosine Dynamic Time Warping (DTW)
   -> enrolled keyword confidence
   -> existing multimodal fusion
@@ -30,6 +30,9 @@ Suggested first words:
 - `magnanakaw`
 
 The scream detector remains a separate waveform detector.
+
+
+> **v2 note:** The feature representation changed from v1. Existing samples in `local-server/kws-data/` are intentionally not reused. Re-enroll each keyword into the new `local-server/kws-data-v2/` store before testing v2.
 
 ## Recognition modes
 
@@ -126,7 +129,7 @@ The audio status exposes:
 Invoke-RestMethod -Method Delete "http://127.0.0.1:5000/kws/templates/help"
 ```
 
-Runtime acoustic templates are saved under `local-server/kws-data/`. That
+Runtime acoustic templates are saved under `local-server/kws-data-v2/`. That
 directory is gitignored because the samples are installation-specific and
 derived from local voice recordings.
 
