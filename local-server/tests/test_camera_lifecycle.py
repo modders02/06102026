@@ -35,7 +35,7 @@ class CameraLifecycleTests(unittest.TestCase):
         video.poll.return_value = None
         audio.poll.return_value = None
         worker = MagicMock()
-        worker.is_alive.return_value = True
+        worker.is_alive.side_effect = [True, False]
 
         cam.video_proc = video
         cam.audio_proc = audio
@@ -70,6 +70,20 @@ class CameraLifecycleTests(unittest.TestCase):
         self.assertIsNone(cam.has_audio_track)
         self.assertIsNone(cam.audio_codec)
         self.assertEqual(cam.events, [])
+
+
+    def test_start_refuses_to_overlap_a_previous_audio_worker(self):
+        cam = Camera(id="slot-1", path="cam1", name="Camera 1", rtsp="rtsp://one")
+        worker = MagicMock()
+        worker.is_alive.return_value = True
+        cam.audio_thread = worker
+        cam.stop_flag.set()
+
+        with self.assertRaisesRegex(RuntimeError, "Previous audio worker is still stopping"):
+            cam.start()
+
+        worker.join.assert_called_once_with(timeout=5)
+        self.assertTrue(cam.stop_flag.is_set())
 
 
 if __name__ == "__main__":
