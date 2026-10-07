@@ -28,6 +28,8 @@ class CameraCustomKeywordTests(unittest.TestCase):
             confidence=0.91,
             distance=0.09,
             runner_up_confidence=0.2,
+            negative_confidence=0.1,
+            duration_ratio=1.0,
             duration_ms=750,
             accepted=True,
             reason="accepted",
@@ -64,6 +66,8 @@ class CameraCustomKeywordTests(unittest.TestCase):
             confidence=0.61,
             distance=0.39,
             runner_up_confidence=0.0,
+            negative_confidence=0.2,
+            duration_ratio=1.0,
             duration_ms=750,
             accepted=False,
             reason="below_threshold",
@@ -78,8 +82,16 @@ class CameraCustomKeywordTests(unittest.TestCase):
         self.assertEqual(cam.kws_segments_seen, 1)
         self.assertEqual(cam.kws_last_candidate, "help")
         self.assertEqual(cam.kws_last_candidate_confidence, 0.61)
+        self.assertEqual(cam.kws_last_negative_confidence, 0.2)
+        self.assertEqual(cam.kws_last_duration_ratio, 1.0)
         self.assertEqual(cam.kws_last_decision, "below_threshold")
         self.assertEqual(cam.kws_last_keyword, "")
+
+    def test_unknown_enrollment_uses_non_keyword_prompt(self):
+        cam = self.make_camera()
+        result = cam.request_kws_enrollment("unknown")
+        self.assertEqual(result["keyword"], "unknown")
+        self.assertIn("NON-keyword", result["message"])
 
     def test_enrollment_captures_template_without_publishing_alert(self):
         cam = self.make_camera()
