@@ -6,6 +6,7 @@ fastapi>=0.110
 uvicorn>=0.27
 python-multipart>=0.0.9
 psutil>=5.9
+numpy>=1.26
 
 # CCTV microphone -> wake-word transcription.
 # The Whisper model itself is downloaded on first use (needs internet once).
