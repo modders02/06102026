@@ -25,11 +25,17 @@ import numpy as np
 SAMPLE_RATE = 16000
 SAMPLE_WIDTH = 2
 DEFAULT_KEYWORDS = ("help", "tulong", "sunog", "magnanakaw")
-FEATURE_VERSION = "logmel-shape-dtw-v2"
+FEATURE_VERSION = "logmel-shape-dtw-v3-open-set"
+NEGATIVE_CLASS = "unknown"
 MIN_TEMPLATES = 3
+MIN_NEGATIVE_TEMPLATES = 5
 MAX_TEMPLATES = 10
+MAX_NEGATIVE_TEMPLATES = 40
 MATCH_THRESHOLD = 0.70
 MATCH_MARGIN = 0.06
+OPEN_SET_MARGIN = 0.08
+MIN_DURATION_RATIO = 0.60
+MAX_DURATION_RATIO = 1.55
 
 FRAME_MS = 25
 HOP_MS = 10
@@ -64,6 +70,8 @@ class KeywordDecision:
     confidence: float
     distance: float
     runner_up_confidence: float
+    negative_confidence: float
+    duration_ratio: float
     duration_ms: int
     accepted: bool
     reason: str
@@ -329,18 +337,20 @@ class CustomKeywordEngine:
             folder = self.data_dir / key
             folder.mkdir(parents=True, exist_ok=True)
             existing = sorted(folder.glob("*.npy"))
-            if len(existing) >= MAX_TEMPLATES:
+            maximum = MAX_NEGATIVE_TEMPLATES if key == NEGATIVE_CLASS else MAX_TEMPLATES
+            if len(existing) >= maximum:
                 oldest = existing[0]
                 oldest.unlink(missing_ok=True)
             stamp = f"{int(time.time() * 1000)}-{os.getpid()}"
             np.save(folder / f"{stamp}.npy", features, allow_pickle=False)
             self.load()
             count = len(self.templates.get(key, []))
+        minimum = MIN_NEGATIVE_TEMPLATES if key == NEGATIVE_CLASS else MIN_TEMPLATES
         return {
             "keyword": key,
             "templates": count,
-            "ready": count >= MIN_TEMPLATES,
-            "minimum_templates": MIN_TEMPLATES,
+            "ready": count >= minimum,
+            "minimum_templates": minimum,
         }
 
     def clear(self, keyword: str) -> dict:
@@ -380,28 +390,29 @@ class CustomKeywordEngine:
         self.templates = loaded
 
     def diagnose(self, pcm: bytes) -> Optional[KeywordDecision]:
-        """Score one utterance and return the best candidate even when rejected."""
+        """Open-set keyword decision: target must beat trained non-keyword speech."""
         features = self.extract_features(pcm)
         if len(features) < 12:
             return None
 
-        ranked = []
         with self.lock:
-            template_snapshot = {
+            positive_snapshot = {
                 key: list(value)
                 for key, value in self.templates.items()
-                if len(value) >= MIN_TEMPLATES
+                if key != NEGATIVE_CLASS and len(value) >= MIN_TEMPLATES
             }
+            negative_templates = list(self.templates.get(NEGATIVE_CLASS, []))
 
-        for keyword, templates in template_snapshot.items():
+        ranked = []
+        target_lengths = {}
+        for keyword, templates in positive_snapshot.items():
             distances = sorted(self._dtw_distance(features, template) for template in templates)
-            # Require agreement from two enrollment examples. Using the best
-            # two is more tolerant of one unusually pronounced training sample
-            # than the v1 best-three average, while a single template still
-            # cannot dominate the decision.
             selected = distances[:min(2, len(distances))]
             distance = float(np.mean(selected))
             confidence = self._distance_to_confidence(distance)
+            median_frames = float(np.median([len(template) for template in templates]))
+            duration_ratio = len(features) / max(1.0, median_frames)
+            target_lengths[keyword] = duration_ratio
             ranked.append((confidence, keyword, distance))
 
         if not ranked:
@@ -410,11 +421,30 @@ class CustomKeywordEngine:
         ranked.sort(reverse=True)
         confidence, keyword, distance = ranked[0]
         runner_up = ranked[1][0] if len(ranked) > 1 else 0.0
+        duration_ratio = target_lengths[keyword]
         duration_ms = round(len(pcm) / (SAMPLE_RATE * SAMPLE_WIDTH) * 1000)
 
-        if confidence < MATCH_THRESHOLD:
+        negative_ready = len(negative_templates) >= MIN_NEGATIVE_TEMPLATES
+        negative_confidence = 0.0
+        if negative_ready:
+            # A single close hard-negative example is enough to veto a keyword.
+            negative_distance = min(
+                self._dtw_distance(features, template) for template in negative_templates
+            )
+            negative_confidence = self._distance_to_confidence(negative_distance)
+
+        if not negative_ready:
+            accepted = False
+            reason = "negative_not_ready"
+        elif duration_ratio < MIN_DURATION_RATIO or duration_ratio > MAX_DURATION_RATIO:
+            accepted = False
+            reason = "duration_mismatch"
+        elif confidence < MATCH_THRESHOLD:
             accepted = False
             reason = "below_threshold"
+        elif negative_confidence >= confidence - OPEN_SET_MARGIN:
+            accepted = False
+            reason = "too_close_to_unknown"
         elif confidence - runner_up < MATCH_MARGIN:
             accepted = False
             reason = "insufficient_margin"
@@ -427,11 +457,12 @@ class CustomKeywordEngine:
             confidence=round(confidence, 3),
             distance=round(distance, 4),
             runner_up_confidence=round(runner_up, 3),
+            negative_confidence=round(negative_confidence, 3),
+            duration_ratio=round(duration_ratio, 3),
             duration_ms=duration_ms,
             accepted=accepted,
             reason=reason,
         )
-
     def match(self, pcm: bytes) -> Optional[KeywordMatch]:
         decision = self.diagnose(pcm)
         if not decision or not decision.accepted:
@@ -445,22 +476,40 @@ class CustomKeywordEngine:
         )
     def has_ready_templates(self) -> bool:
         with self.lock:
-            return any(len(value) >= MIN_TEMPLATES for value in self.templates.values())
+            return any(
+                key != NEGATIVE_CLASS and len(value) >= MIN_TEMPLATES
+                for key, value in self.templates.items()
+            )
 
     def status(self) -> dict:
         with self.lock:
             counts = {key: len(value) for key, value in sorted(self.templates.items())}
         return {
-            "engine": "msds-logmel-dtw-v2",
+            "engine": "msds-logmel-dtw-v3",
             "feature_version": FEATURE_VERSION,
             "sample_rate": SAMPLE_RATE,
             "features": f"{N_MELS}-bin per-frame-normalized log-Mel",
             "matcher": "cosine DTW",
             "threshold": MATCH_THRESHOLD,
             "margin": MATCH_MARGIN,
+            "open_set_margin": OPEN_SET_MARGIN,
             "minimum_templates": MIN_TEMPLATES,
+            "minimum_negative_templates": MIN_NEGATIVE_TEMPLATES,
             "keywords": counts,
-            "ready_keywords": [key for key, count in counts.items() if count >= MIN_TEMPLATES],
+            "negative_class": NEGATIVE_CLASS,
+            "negative_templates": counts.get(NEGATIVE_CLASS, 0),
+            "negative_ready": counts.get(NEGATIVE_CLASS, 0) >= MIN_NEGATIVE_TEMPLATES,
+            "open_set_ready": (
+                counts.get(NEGATIVE_CLASS, 0) >= MIN_NEGATIVE_TEMPLATES
+                and any(
+                    key != NEGATIVE_CLASS and count >= MIN_TEMPLATES
+                    for key, count in counts.items()
+                )
+            ),
+            "ready_keywords": [
+                key for key, count in counts.items()
+                if key != NEGATIVE_CLASS and count >= MIN_TEMPLATES
+            ],
             "suggested_keywords": list(DEFAULT_KEYWORDS),
             "data_dir": str(self.data_dir),
             "error": self.last_error,
