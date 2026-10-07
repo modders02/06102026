@@ -758,8 +758,11 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             const sunog = makeSunogSignal(sourceText, confidence, spokenAt);
             if (sunog) {
               reservedForFusion = true;
+              // Store speech only. Fire verification is performed by the next
+              // current visual analysis frame, after device-screen suppression.
+              // This prevents an older unsuppressed frame from combining with
+              // "sunog" before a TV/phone is recognized on the next frame.
               recentSunogRef.current = sunog;
-              maybeEmitVerifiedFire();
             }
 
             const distressSpeech = makeDistressSpeechSignal(sourceText, confidence, spokenAt);
