@@ -97,6 +97,43 @@ the next request. Do not send all enrollment requests at once.
 Enrollment speech is suppressed from emergency events so training `help` or
 `sunog` does not intentionally raise an alarm.
 
+
+## Open-set negative training (required in v3)
+
+A safety keyword detector must be able to say **none of the above**. V3 therefore
+will not accept any safety keyword until at least five `unknown` / non-keyword
+examples have been enrolled.
+
+Keep the existing positive `help` templates. For each negative phrase, arm an
+`unknown` enrollment, say exactly one ordinary/non-keyword phrase, and wait
+for capture:
+
+```powershell
+Invoke-RestMethod -Method Post "http://127.0.0.1:5000/cameras/slot-1/kws-enroll/unknown"
+```
+
+Useful hard negatives for `help` include:
+
+```text
+hello
+yelp
+helpful
+halo
+tulog
+yellow
+good morning
+kumusta
+thank you
+```
+
+One phrase per enrollment request. Five are the minimum; 8-15 varied negatives
+are better. The `unknown` class is never emitted as a keyword. It exists only
+to veto false positive safety matches.
+
+V3 accepts a target only when the target is above its absolute threshold, has a
+plausible duration, and beats the closest negative example by the open-set
+margin.
+
 ## Test without Faster-Whisper
 
 Stop the app, then in the same PowerShell window:
