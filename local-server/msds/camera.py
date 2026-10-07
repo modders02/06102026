@@ -359,6 +359,8 @@ class Camera:
                 self.audio_error = f"Audio PCM reader failed: {exc}"
 
     def _publish_scream_if_detected(self, pcm: bytes) -> None:
+        if self.stop_flag.is_set():
+            return
         confidence = detect_scream_pcm(pcm)
         if confidence <= 0:
             return
@@ -379,6 +381,8 @@ class Camera:
         print(f"[Audio {self.id}] scream candidate: {confidence:.2f}", flush=True)
 
     def _handle_chunk(self, wav: str):
+        if self.stop_flag.is_set():
+            return
         size = os.path.getsize(wav)
         # 16 kHz mono s16 == 32 000 bytes/s; require ~0.5 s of real PCM.
         if size < 16000:
@@ -393,6 +397,8 @@ class Camera:
             return
         try:
             transcript = WHISPER.transcribe(wav)
+            if self.stop_flag.is_set():
+                return
             self.audio_error = None
         except Exception as exc:
             self.audio_error = f"Whisper transcription failed: {exc}"
@@ -725,6 +731,15 @@ class Camera:
 
     # ---- lifecycle --------------------------------------------------------- #
     def start(self):
+        # Never clear the shared stop signal while a previous audio worker is
+        # still unwinding. This prevents duplicate Whisper/FFmpeg workers after
+        # a rapid Disconnect -> Reconnect on the same slot.
+        previous_audio = self.audio_thread
+        if previous_audio and previous_audio.is_alive():
+            previous_audio.join(timeout=5)
+            if previous_audio.is_alive():
+                raise RuntimeError("Previous audio worker is still stopping; retry reconnect.")
+        self.audio_thread = None
         self.stop_flag.clear()
         self.error = None
         self.start_video()
@@ -760,7 +775,7 @@ class Camera:
 
         self.video_proc = None
         self.audio_proc = None
-        self.audio_thread = None
+        self.audio_thread = audio_thread if audio_thread and audio_thread.is_alive() else None
         self.audio_connected = False
         self.audio_chunks = 0
         self.audio_bytes = 0
