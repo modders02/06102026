@@ -64,6 +64,24 @@ export interface CctvAudioStatus {
   audio_source?: string | null;
   audio_sources_tried?: string[];
   chunk_seconds?: number;
+  /** hybrid = custom safety keywords + Whisper text; custom = keyword spotting only. */
+  recognition_engine?: 'hybrid' | 'custom' | string;
+  custom_kws?: {
+    engine?: string;
+    feature_version?: string;
+    ready_keywords?: string[];
+    negative_ready?: boolean;
+    open_set_ready?: boolean;
+    pending_enrollment?: string | null;
+    enrollment?: {
+      state?: string;
+      keyword?: string;
+      message?: string;
+    } | null;
+    last_keyword?: string | null;
+    last_confidence?: number;
+    last_decision?: string | null;
+  };
 
   whisper_available?: boolean;
   whisper_state?: string;
@@ -91,13 +109,23 @@ export function describeAudioStatus(
       tone: 'error',
     };
   }
-  if (status.whisper_available === false) {
+
+  const customOnly = status.recognition_engine === 'custom';
+  if (customOnly && status.custom_kws?.pending_enrollment) {
+    return {
+      message: status.custom_kws.enrollment?.message
+        || `Training "${status.custom_kws.pending_enrollment}" — say it once.`,
+      tone: 'wait',
+    };
+  }
+
+  if (status.whisper_available === false && !customOnly) {
     return { message: status.whisper_error || 'Speech recognition is not installed.', tone: 'error' };
   }
-  if (status.whisper_state === 'model_error') {
+  if (!customOnly && status.whisper_state === 'model_error') {
     return { message: status.whisper_error || 'Speech recognition model failed to load.', tone: 'error' };
   }
-  if (status.whisper_state === 'loading') {
+  if (!customOnly && status.whisper_state === 'loading') {
     return { message: 'Preparing speech recognition…', tone: 'wait' };
   }
   if (!status.thread_running) {
@@ -112,6 +140,19 @@ export function describeAudioStatus(
       tone: 'wait',
     };
   }
+  if (customOnly) {
+    if (!status.custom_kws?.open_set_ready) {
+      return {
+        message: 'Custom keyword mode — training is incomplete; no general speech transcription is running.',
+        tone: 'wait',
+      };
+    }
+    if (!status.last_transcript) {
+      return { message: 'Listening for trained safety keywords…', tone: 'ok' };
+    }
+    return { message: 'Listening for trained safety keywords.', tone: 'ok' };
+  }
+
   if (!status.last_transcript) {
     return { message: 'Listening… no speech heard yet.', tone: 'wait' };
   }
