@@ -33,7 +33,7 @@ MAX_TEMPLATES = 10
 MAX_NEGATIVE_TEMPLATES = 40
 MATCH_THRESHOLD = 0.70
 MATCH_MARGIN = 0.06
-OPEN_SET_MARGIN = 0.08
+OPEN_SET_MARGIN = 0.03
 MIN_DURATION_RATIO = 0.60
 MAX_DURATION_RATIO = 1.55
 
@@ -443,6 +443,10 @@ class CustomKeywordEngine:
             accepted = False
             reason = "below_threshold"
         elif negative_confidence >= confidence - OPEN_SET_MARGIN:
+            # Require the target to beat the closest trained non-keyword by a
+            # small but real margin. Real CCTV measurements showed genuine
+            # "help" at +0.041 over UNKNOWN while "hello" had UNKNOWN ahead,
+            # so 0.03 preserves that separation without forcing false rejects.
             accepted = False
             reason = "too_close_to_unknown"
         elif confidence - runner_up < MATCH_MARGIN:
