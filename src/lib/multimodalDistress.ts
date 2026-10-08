@@ -2,7 +2,7 @@ export const MULTIMODAL_FUSION_WINDOW_MS = 10_000;
 export const DISTRESS_FACE_MIN_CONFIDENCE = 0.55;
 
 export type DistressFaceLabel = 'Angry' | 'Frightened';
-export type DistressKeyword = 'help' | 'tulong' | 'scream';
+export type DistressKeyword = 'help' | 'emergency' | 'scream';
 
 export interface DistressFaceSignal {
   label: DistressFaceLabel;
@@ -53,8 +53,8 @@ export function makeDistressFaceSignal(
 }
 
 /**
- * Only the explicit fusion words requested by the safety rule qualify.
- * Other safety phrases continue through their existing alert logic.
+ * English-only distress words reserved for face+speech verification.
+ * Other English emergency words continue through the validated wake-word path.
  */
 export function makeDistressSpeechSignal(
   transcript: string | null | undefined,
@@ -64,7 +64,7 @@ export function makeDistressSpeechSignal(
   const text = (transcript ?? '').toLowerCase();
   const keyword: DistressKeyword | null =
     /(^|[^a-z])help([^a-z]|$)/i.test(text) ? 'help'
-      : /(^|[^a-z])tulong([^a-z]|$)/i.test(text) ? 'tulong'
+      : /(^|[^a-z])emergency([^a-z]|$)/i.test(text) ? 'emergency'
         : null;
   if (!keyword) return null;
   return {
@@ -98,7 +98,7 @@ export function fuseDistressSignals(
   if (!face || !speech || Math.abs(face.at - speech.at) > windowMs) return null;
 
   const compatible =
-    ((speech.keyword === 'help' || speech.keyword === 'tulong')
+    ((speech.keyword === 'help' || speech.keyword === 'emergency')
       && (face.label === 'Angry' || face.label === 'Frightened'))
     || (speech.keyword === 'scream'
       && (face.label === 'Angry' || face.label === 'Frightened'));
