@@ -536,7 +536,10 @@ export const MultiCameraConnect = ({ selectedSlot }: Props) => {
 
       <div className="flex flex-wrap gap-x-4 gap-y-1 px-3 py-2 rounded-lg bg-secondary/30 border border-border">
         <Dot ok={!!backend} label="Camera service" />
-        <Dot ok={!!backend?.whisper} label="Audio detection" />
+        <Dot
+          ok={backend?.audio_engine === 'custom' && !!backend?.custom_kws?.open_set_ready}
+          label="Trained audio detection"
+        />
       </div>
 
       <div className={`grid gap-4 ${count === 1 ? 'grid-cols-1' : 'lg:grid-cols-2'}`}>
