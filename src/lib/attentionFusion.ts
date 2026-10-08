@@ -66,3 +66,25 @@ export function computeAttentionScore(
     + FUSION_WEIGHTS.object * clamp100(objectScore),
   ));
 }
+
+export type AttentionAlertReason = 'priority-object' | 'loud-audio' | 'priority-object+loud-audio';
+
+/**
+ * Chapter III alert-condition gate after α(t) crosses τ.
+ * Loud audio is only considered when VAD says an audio event/speech is active.
+ */
+export function attentionAlertReason(
+  attentionScore: number,
+  attentionThreshold: number,
+  objectScore: number,
+  audioScore: number,
+  audioActive: boolean,
+): AttentionAlertReason | null {
+  if (attentionScore <= attentionThreshold) return null;
+  const priorityObject = objectScore > 0;
+  const loudAudio = audioActive && audioScore >= 60;
+  if (priorityObject && loudAudio) return 'priority-object+loud-audio';
+  if (priorityObject) return 'priority-object';
+  if (loudAudio) return 'loud-audio';
+  return null;
+}
