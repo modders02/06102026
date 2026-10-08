@@ -34,7 +34,7 @@ else:
 
 NO_AUDIO_MESSAGE = (
     "This camera's RTSP stream does not expose a usable audio track, so there is "
-    "nothing to transcribe. Enable the microphone in the camera's own settings "
+    "nothing for the trained keyword detector to analyze. Enable the microphone in the camera's own settings "
     "(or use an RTSP sub-stream that carries audio)."
 )
 
