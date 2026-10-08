@@ -29,7 +29,7 @@ const statusStyle: Record<string, string> = {
 
 /** Only these really matter — object sightings are informational, never red. */
 const EMERGENCY_TYPES = new Set<DetectionEvent['type']>([
-  'fire', 'smoke', 'face-distress', 'audio-distress',
+  'fire', 'smoke', 'face-distress', 'audio-distress', 'multimodal-distress', 'motion-anomaly',
 ]);
 
 export default function CameraTile({
