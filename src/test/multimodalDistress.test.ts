@@ -14,6 +14,8 @@ describe('multimodal distress fusion', () => {
     ['angry', 'Angry'],
     ['fearful', 'Frightened'],
     ['frightened', 'Frightened'],
+    ['surprised', 'Frightened'],
+    ['shock', 'Frightened'],
   ] as const)('accepts a reliable %s face', (expression, label) => {
     expect(makeDistressFaceSignal(expression, 0.9, 1000)).toEqual({
       label,
@@ -62,6 +64,7 @@ describe('multimodal distress fusion', () => {
   it.each([
     ['angry', 'Angry'],
     ['fearful', 'Frightened'],
+    ['surprised', 'Frightened'],
   ] as const)('verifies screaming with %s', (expression, label) => {
     const face = makeDistressFaceSignal(expression, 0.92, 5000)!;
     const scream = makeDistressSoundSignal('scream', 0.95, 7000)!;
@@ -74,6 +77,19 @@ describe('multimodal distress fusion', () => {
   it('never creates a distress fusion face signal from Sad', () => {
     expect(makeDistressFaceSignal('sad', 0.9, 1000)).toBeNull();
   });
+
+  it.each(['surprised', 'shock', 'shocked'] as const)(
+    'verifies %s + help/tulong as Frightened distress',
+    expression => {
+      const face = makeDistressFaceSignal(expression, 0.93, 5000)!;
+      const help = makeDistressSpeechSignal('help', 0.96, 6000)!;
+      const tulong = makeDistressSpeechSignal('tulong', 0.95, 6000)!;
+      expect(multimodalDistressLabel(fuseDistressSignals(face, help)!))
+        .toBe('Verified distress: Frightened + "help"');
+      expect(multimodalDistressLabel(fuseDistressSignals(face, tulong)!))
+        .toBe('Verified distress: Frightened + "tulong"');
+    },
+  );
 
   it('verifies either ordering inside the ten-second same-camera window', () => {
     const face = makeDistressFaceSignal('fearful', 0.91, 10_000)!;
