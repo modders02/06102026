@@ -16,31 +16,44 @@ const YAMNET_URL =
 
 // AudioSet ontology indices for distress vs non-distress vocalisations.
 // Positive (distress) classes — weight contributes to distress score.
+// Official YAMNet 521-class output indices. Keep these aligned with
+// tensorflow/models/research/audioset/yamnet/yamnet_class_map.csv.
 const DISTRESS_CLASSES: Record<number, { label: string; weight: number }> = {
-  11: { label: 'Shout',             weight: 0.85 },
-  12: { label: 'Bellow',            weight: 0.75 },
-  13: { label: 'Whoop',             weight: 0.40 },
-  14: { label: 'Yell',              weight: 0.85 },
-  15: { label: 'Children shouting', weight: 0.55 },
-  16: { label: 'Screaming',         weight: 1.00 },
+  6:  { label: 'Shout',             weight: 0.85 },
+  7:  { label: 'Bellow',            weight: 0.75 },
+  8:  { label: 'Whoop',             weight: 0.40 },
+  9:  { label: 'Yell',              weight: 0.85 },
+  10: { label: 'Children shouting', weight: 0.55 },
+  11: { label: 'Screaming',         weight: 1.00 },
   19: { label: 'Crying, sobbing',   weight: 0.90 },
   20: { label: 'Baby cry, infant cry', weight: 0.90 },
+  21: { label: 'Whimper',           weight: 0.75 },
   22: { label: 'Wail, moan',        weight: 0.85 },
   23: { label: 'Sigh',              weight: 0.10 },
-  64: { label: 'Groan',             weight: 0.60 },
+  33: { label: 'Groan',             weight: 0.60 },
 };
-// Negative (non-emergency vocalisation) — suppresses distress score.
+
+// Fire-relevant environmental sounds from the same official class map.
+const FIRE_AUDIO_CLASSES: Record<number, { label: string; weight: number; alarm: boolean }> = {
+  292: { label: 'Fire', weight: 1.00, alarm: false },
+  293: { label: 'Crackle', weight: 0.85, alarm: false },
+  393: { label: 'Smoke detector / smoke alarm', weight: 1.00, alarm: true },
+  394: { label: 'Fire alarm', weight: 1.00, alarm: true },
+};
+
+// Negative (ordinary vocalisation/music) — suppresses distress score.
 const NEGATIVE_CLASSES = new Set<number>([
-  17, 18,            // Whispering, Laughter
-  24, 25, 26, 27,    // Giggle, Snicker, Belly laugh, Chuckle/chortle
-  63,                // Cheering
-  300, 301, 302,     // Music-ish
+  12, 13, 14, 15, 16, 17, 18, // whispering + laughter family
+  24, 25, 26, 27, 28, 29, 30, 31, 32, // singing/music-like human voice
 ]);
 
 export interface YamnetResult {
   topLabel: string;
   topScore: number;     // 0..1
   distressScore: number; // 0..100
+  fireScore: number;     // 0..100
+  fireLabel: string;
+  fireAlarm: boolean;
   ready: boolean;
   error: string | null;
 }
@@ -68,6 +81,9 @@ export function useYamnet(enabled: boolean) {
     topLabel: '—',
     topScore: 0,
     distressScore: 0,
+    fireScore: 0,
+    fireLabel: '—',
+    fireAlarm: false,
     ready: false,
     error: null,
   });
@@ -126,7 +142,7 @@ export function useYamnet(enabled: boolean) {
           if (rms < 0.004) {
             setResult(r => (r.distressScore === 0 && r.topLabel === 'silence'
               ? r
-              : { ...r, topLabel: 'silence', topScore: 0, distressScore: 0, ready: true }));
+              : { ...r, topLabel: 'silence', topScore: 0, distressScore: 0, fireScore: 0, fireLabel: '—', fireAlarm: false, ready: true }));
             return;
           }
 
@@ -156,13 +172,31 @@ export function useYamnet(enabled: boolean) {
               let negative = 0;
               NEGATIVE_CLASSES.forEach((idx) => { negative += arr[idx] || 0; });
               const finalDistress = Math.max(0, Math.min(100, Math.round((distress - negative * 0.5) * 100)));
+
+              let fireScore = 0;
+              let fireLabel = '—';
+              let fireAlarm = false;
+              for (const [idxStr, meta] of Object.entries(FIRE_AUDIO_CLASSES)) {
+                const score = (arr[Number(idxStr)] || 0) * meta.weight;
+                if (score > fireScore) {
+                  fireScore = score;
+                  fireLabel = meta.label;
+                  fireAlarm = meta.alarm;
+                }
+              }
+              const finalFire = Math.max(0, Math.min(100, Math.round(fireScore * 100)));
+
               const label =
                 DISTRESS_CLASSES[topIdx]?.label ||
+                FIRE_AUDIO_CLASSES[topIdx]?.label ||
                 (NEGATIVE_CLASSES.has(topIdx) ? `non-distress (#${topIdx})` : `class #${topIdx}`);
               setResult({
                 topLabel: label,
                 topScore,
                 distressScore: finalDistress,
+                fireScore: finalFire,
+                fireLabel,
+                fireAlarm,
                 ready: true,
                 error: null,
               });
