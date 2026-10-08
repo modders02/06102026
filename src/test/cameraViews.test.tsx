@@ -137,14 +137,14 @@ describe('shared live camera views', () => {
           last_segment_ms: 620,
           last_candidate: 'help',
           last_candidate_confidence: 0.934,
-          last_runner_up_keyword: 'tulong',
+          last_runner_up_keyword: 'fire',
           last_runner_up_confidence: 0.898,
           last_class_margin: 0.0354,
           last_required_margin: 0.0341,
           last_negative_confidence: 0.895,
           last_duration_ratio: 1.12,
           last_decision: 'duration_mismatch',
-          last_keyword: 'tulong',
+          last_keyword: 'emergency',
           last_processing_ms: 205.95,
         },
         error: null,
@@ -167,9 +167,9 @@ describe('shared live camera views', () => {
     expect(within(diagnostics).getByText('Voice diagnostics')).toBeInTheDocument();
     expect(within(diagnostics).getByText('duration_mismatch')).toBeInTheDocument();
     expect(within(diagnostics).getByText(/help \(93\.4%\)/)).toBeInTheDocument();
-    expect(within(diagnostics).getByText(/tulong \(89\.8%\)/)).toBeInTheDocument();
+    expect(within(diagnostics).getByText(/fire \(89\.8%\)/)).toBeInTheDocument();
     expect(within(diagnostics).getByText('0.0354 / 0.0341')).toBeInTheDocument();
-    expect(within(diagnostics).getByText('tulong', { selector: 'span.font-mono' })).toBeInTheDocument();
+    expect(within(diagnostics).getByText('emergency', { selector: 'span.font-mono' })).toBeInTheDocument();
   });
 
   it('changes focused camera and layout without changing configured slots', () => {
