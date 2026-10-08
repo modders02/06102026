@@ -16,6 +16,7 @@ import os
 import re
 import threading
 import time
+import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -24,9 +25,22 @@ import numpy as np
 
 SAMPLE_RATE = 16000
 SAMPLE_WIDTH = 2
-DEFAULT_KEYWORDS = ("help", "tulong", "sunog", "magnanakaw")
+# Chapter I scope is English-only on this branch. The Tagalog-trained runtime
+# is preserved separately on tagalog-kws-experimental.
+DEFAULT_KEYWORDS = (
+    "help",
+    "fire",
+    "emergency",
+    "danger",
+    "intruder",
+    "police",
+    "ambulance",
+    "stop",
+)
 FEATURE_VERSION = "logmel-shape-dtw-v3-open-set"
 NEGATIVE_CLASS = "unknown"
+LANGUAGE_SCOPE = "en"
+ACTIVE_TEMPLATE_KEYS = frozenset((*DEFAULT_KEYWORDS, NEGATIVE_CLASS))
 MIN_TEMPLATES = 3
 MIN_NEGATIVE_TEMPLATES = 5
 MAX_TEMPLATES = 10
@@ -419,8 +433,170 @@ class CustomKeywordEngine:
             + duration_penalty
         )
 
+    @staticmethod
+    def _require_active_keyword(keyword: str) -> str:
+        key = CustomKeywordEngine.normalize_keyword(keyword)
+        if key not in ACTIVE_TEMPLATE_KEYS:
+            raise ValueError(
+                f"Keyword '{key}' is outside the English-only thesis scope. "
+                f"Allowed: {', '.join((*DEFAULT_KEYWORDS, NEGATIVE_CLASS))}."
+            )
+        return key
+
+    @staticmethod
+    def _read_wav_as_pcm16k_mono(path: Path) -> bytes:
+        """Decode an uncompressed PCM WAV into 16 kHz mono signed-int16.
+
+        Dataset training deliberately stays offline and dependency-free. WAV
+        files may be mono/stereo and 8/16-bit PCM at common sample rates.
+        Unsupported encodings are rejected and reported instead of silently
+        producing bad templates.
+        """
+        with wave.open(str(path), "rb") as wav_file:
+            channels = wav_file.getnchannels()
+            width = wav_file.getsampwidth()
+            rate = wav_file.getframerate()
+            frames = wav_file.readframes(wav_file.getnframes())
+
+        if channels < 1:
+            raise ValueError("WAV has no audio channels")
+        if width == 1:
+            samples = np.frombuffer(frames, dtype=np.uint8).astype(np.float32)
+            samples = (samples - 128.0) / 128.0
+        elif width == 2:
+            samples = np.frombuffer(frames, dtype="<i2").astype(np.float32) / 32768.0
+        else:
+            raise ValueError("Only 8-bit or 16-bit PCM WAV is supported")
+
+        usable = samples.size - (samples.size % channels)
+        if usable <= 0:
+            raise ValueError("WAV contains no samples")
+        samples = samples[:usable].reshape(-1, channels).mean(axis=1)
+
+        if rate <= 0:
+            raise ValueError("WAV sample rate is invalid")
+        if rate != SAMPLE_RATE and samples.size > 1:
+            output_count = max(1, int(round(samples.size * SAMPLE_RATE / rate)))
+            old_x = np.arange(samples.size, dtype=np.float32)
+            new_x = np.linspace(0, samples.size - 1, output_count, dtype=np.float32)
+            samples = np.interp(new_x, old_x, samples).astype(np.float32)
+
+        samples = np.clip(samples, -1.0, 0.999969)
+        return (samples * 32768.0).astype("<i2").tobytes()
+
+    def train_from_wav_dataset(self, dataset_dir: str | Path, reset: bool = True) -> dict:
+        """Automatically build validated templates from labelled English WAV folders.
+
+        Expected layout:
+          dataset/help/*.wav
+          dataset/fire/*.wav
+          ...
+          dataset/stop/*.wav
+          dataset/unknown/*.wav
+
+        Training never fabricates speech. It ingests real labelled recordings,
+        normalizes them to the runtime format, extracts the same log-Mel
+        features used live, caps each class to its runtime template limit, then
+        performs the existing leave-one-out audit.
+        """
+        root = Path(dataset_dir).expanduser().resolve()
+        report = {
+            "success": False,
+            "language_scope": LANGUAGE_SCOPE,
+            "dataset_dir": str(root),
+            "reset": bool(reset),
+            "classes": {},
+            "unsupported_folders": [],
+            "errors": [],
+        }
+        if not root.exists() or not root.is_dir():
+            report["errors"].append("Dataset directory does not exist.")
+            return report
+
+        for folder in sorted(path for path in root.iterdir() if path.is_dir()):
+            try:
+                key = self.normalize_keyword(folder.name)
+            except ValueError:
+                report["unsupported_folders"].append(folder.name)
+                continue
+            if key not in ACTIVE_TEMPLATE_KEYS:
+                report["unsupported_folders"].append(folder.name)
+
+        with self.lock:
+            if reset:
+                for key in ACTIVE_TEMPLATE_KEYS:
+                    folder = self.data_dir / key
+                    if folder.exists():
+                        for path in folder.glob("*.npy"):
+                            path.unlink(missing_ok=True)
+
+            for key in (*DEFAULT_KEYWORDS, NEGATIVE_CLASS):
+                source = root / key
+                target = self.data_dir / key
+                target.mkdir(parents=True, exist_ok=True)
+                maximum = MAX_NEGATIVE_TEMPLATES if key == NEGATIVE_CLASS else MAX_TEMPLATES
+                candidates = sorted(source.glob("*.wav")) if source.exists() else []
+                accepted = []
+                rejected = []
+
+                for wav_path in candidates:
+                    try:
+                        pcm = self._read_wav_as_pcm16k_mono(wav_path)
+                        features = self.extract_features(pcm)
+                        if len(features) < 12:
+                            raise ValueError("speech is too short or too quiet")
+                        accepted.append((wav_path, features))
+                    except Exception as exc:
+                        rejected.append({"file": wav_path.name, "reason": str(exc)})
+
+                # Prefer a compact set with representative durations rather than
+                # blindly keeping arbitrary extras. This reduces outlier-driven
+                # duration mismatches while the leave-one-out audit still checks
+                # cross-keyword confusion.
+                if len(accepted) > maximum:
+                    median_frames = float(np.median([len(features) for _, features in accepted]))
+                    accepted.sort(key=lambda item: abs(len(item[1]) - median_frames))
+                    accepted = accepted[:maximum]
+
+                if reset:
+                    for path in target.glob("*.npy"):
+                        path.unlink(missing_ok=True)
+
+                for index, (wav_path, features) in enumerate(accepted, start=1):
+                    safe_stem = re.sub(r"[^a-zA-Z0-9_-]+", "_", wav_path.stem)[:48] or "sample"
+                    np.save(
+                        target / f"dataset-{index:02d}-{safe_stem}.npy",
+                        features,
+                        allow_pickle=False,
+                    )
+
+                minimum = MIN_NEGATIVE_TEMPLATES if key == NEGATIVE_CLASS else MIN_TEMPLATES
+                report["classes"][key] = {
+                    "wav_files": len(candidates),
+                    "templates_written": len(accepted),
+                    "minimum_templates": minimum,
+                    "ready": len(accepted) >= minimum,
+                    "rejected": rejected,
+                }
+
+            self.load()
+
+        evaluation = self.evaluate_templates()
+        calibrations = self.keyword_margin_calibration
+        positive_ready = all(
+            len(self.templates.get(key, [])) >= MIN_TEMPLATES
+            and calibrations.get(key, {}).get("calibrated") is True
+            for key in DEFAULT_KEYWORDS
+        )
+        negative_ready = len(self.templates.get(NEGATIVE_CLASS, [])) >= MIN_NEGATIVE_TEMPLATES
+        report["evaluation"] = evaluation
+        report["status"] = self.status()
+        report["production_ready"] = bool(positive_ready and negative_ready)
+        report["success"] = True
+        return report
+
     def enroll(self, keyword: str, pcm: bytes) -> dict:
-        key = self.normalize_keyword(keyword)
+        key = self._require_active_keyword(keyword)
         features = self.extract_features(pcm)
         if len(features) < 12:
             raise ValueError("Enrollment speech is too short or too quiet.")
@@ -466,6 +642,8 @@ class CustomKeywordEngine:
                 try:
                     key = self.normalize_keyword(folder.name)
                 except ValueError:
+                    continue
+                if key not in ACTIVE_TEMPLATE_KEYS:
                     continue
                 items: List[np.ndarray] = []
                 maximum = MAX_NEGATIVE_TEMPLATES if key == NEGATIVE_CLASS else MAX_TEMPLATES
@@ -856,8 +1034,20 @@ class CustomKeywordEngine:
     def status(self) -> dict:
         with self.lock:
             counts = {key: len(value) for key, value in sorted(self.templates.items())}
+        ignored_template_folders = []
+        try:
+            ignored_template_folders = sorted(
+                path.name
+                for path in self.data_dir.iterdir()
+                if path.is_dir() and path.name not in ACTIVE_TEMPLATE_KEYS
+            )
+        except Exception:
+            pass
         return {
             "engine": "msds-logmel-dtw-v3",
+            "language_scope": LANGUAGE_SCOPE,
+            "active_keywords": list(DEFAULT_KEYWORDS),
+            "ignored_template_folders": ignored_template_folders,
             "feature_version": FEATURE_VERSION,
             "sample_rate": SAMPLE_RATE,
             "features": f"{N_MELS}-bin per-frame-normalized log-Mel",
