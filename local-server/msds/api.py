@@ -16,10 +16,9 @@ from fastapi.responses import Response
 
 from .binaries import (install_hint, lan_ip, no_window_flags, pip_install_command,
                        resolve_exe)
-from .config import AUDIO_ENGINE, HLS_PORT, RTSP_PORT, WHISPER_MODEL
+from .config import AUDIO_ENGINE, HLS_PORT, RTSP_PORT
 from .manager import (CAMERAS, mediamtx_running, snapshot, start_mediamtx,
                       stop_all_cameras, sync_cameras)
-from .whisper_engine import WHISPER
 from .kws_engine import KWS_ENGINE
 
 app = FastAPI(title="MSDSystem multi-camera bridge")
@@ -168,10 +167,10 @@ def status():
         "lan_ip": host,
         "audio_engine": AUDIO_ENGINE,
         "custom_kws": KWS_ENGINE.status(),
-        "whisper": WHISPER.available,
-        "whisper_state": WHISPER.state,
-        "whisper_model": WHISPER_MODEL,
-        "whisper_error": WHISPER.error,
+        "whisper": False,
+        "whisper_state": "disabled",
+        "whisper_model": "",
+        "whisper_error": "Disabled: using trained custom KWS only.",
         "python_exe": sys.executable,
         "install_command": pip_install_command(),
         "cameras": cams,
@@ -245,9 +244,9 @@ def audio_events(camera_id: str, since: Optional[str] = None):
                 "chunks_received": 0, "bytes_received": 0,
                 "last_chunk_at": None, "last_transcription_at": None,
                 "last_transcript": "", "has_audio_track": None,
-                "whisper_available": WHISPER.available,
-                "whisper_state": WHISPER.state,
-                "whisper_error": WHISPER.error,
+                "whisper_available": False,
+                "whisper_state": "disabled",
+                "whisper_error": "Disabled: using trained custom KWS only.",
                 "error": (f"This camera is not registered on the local bridge "
                           f"(id '{camera_id}'). Known ids: "
                           f"{', '.join(CAMERAS) or 'none'}."),
@@ -313,7 +312,7 @@ def kws_clear_keyword(keyword: str):
 @app.post("/cameras/{camera_id}/audio-test")
 @app.get("/cameras/{camera_id}/audio-test")
 def audio_test(camera_id: str):
-    """Independent RTSP-audio diagnostic: probe + 5 s capture + transcription."""
+    """Independent RTSP-audio diagnostic: probe + 5 s capture + trained KWS."""
     cam = find_camera(camera_id)
     if not cam:
         return {"success": False, "error": f"unknown camera id '{camera_id}'",
