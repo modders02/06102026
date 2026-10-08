@@ -5,6 +5,7 @@ import { captureCameraEventSnapshot, captureVideoSnapshot } from '@/lib/cameraEv
 import { detectObjects, loadDetector } from '@/lib/detectionEngine';
 import { computeSaliency, computeSaliencyScore } from '@/lib/saliency';
 import {
+  attentionAlertReason,
   audioIntensityScoreFromRms,
   computeAttentionScore,
   DEFAULT_ATTENTION_THRESHOLD,
@@ -597,12 +598,17 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         // Priority-object evidence or loud active speech/audio becomes a
         // non-emergency attention notification; dedicated fire/distress
         // validators remain responsible for critical alarms.
-        const loudActiveAudio = audioScore >= 60
-          && runtimeRef.current.audio?.custom_kws?.vad_active === true;
-        if (objectScore > 0 || loudActiveAudio) {
-          const reason = objectScore > 0 && loudActiveAudio
+        const alertReason = attentionAlertReason(
+          attentionScore,
+          attentionThreshold,
+          objectScore,
+          audioScore,
+          runtimeRef.current.audio?.custom_kws?.vad_active === true,
+        );
+        if (alertReason) {
+          const reason = alertReason === 'priority-object+loud-audio'
             ? 'priority object + loud audio'
-            : objectScore > 0 ? 'priority object' : 'loud audio';
+            : alertReason === 'priority-object' ? 'priority object' : 'loud audio';
           emit('attention-alert', `Attention alert: ${reason} (α=${attentionScore})`, attentionScore / 100);
         }
       }
