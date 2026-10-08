@@ -31,7 +31,9 @@ export function validateFusionCycle(input: FusionValidationInput): FusionValidat
   const visualUsable = visibility >= 20;
   if (!visualUsable) flags.push('low-light');
 
-  const audioConnected = input.audioConnected !== false;
+  // Unknown/not-yet-polled audio is not evidence. Require an explicit backend
+  // connection before the audio modality can validate a degraded visual cycle.
+  const audioConnected = input.audioConnected === true;
   const audioReady = input.audioReady !== false;
   const audioUsable = audioConnected && audioReady;
   if (!audioConnected) flags.push('audio-unavailable');
