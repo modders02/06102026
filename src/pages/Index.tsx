@@ -40,6 +40,8 @@ import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import { getCameraSession } from '@/lib/cameraSessions';
 import { clipFileName, recordClip, saveClip } from '@/lib/clipRecorder';
 import { CAMERA_HISTORY_LIMIT } from '@/lib/cameraRegistry';
+import { computeMultimodalAttention } from '@/lib/multimodalAttention';
+import { validateSafetyEvent } from '@/lib/safetyValidation';
 import type { CameraRuntime, DetectionEvent } from '@/types/multicam';
 import type { Alert, QualityMode } from '@/types/dashboard';
 import { DEFAULT_PRIORITY_OBJECTS } from '@/types/dashboard';
@@ -175,7 +177,11 @@ export default function Index() {
   const currentRuntime = runtimes[selectedCamera];
   const focusedLiveCamera = slots.some(slot => `slot-${slot.index}` === requestedCamera) ? requestedCamera : null;
   const attention = selectedCamera === 1 && localAudioEnabled
-    ? Math.round((currentRuntime?.saliencyScore ?? 0) * 0.4 + yamnet.distressScore * 0.3 + Math.max(0, ...(currentRuntime?.objects.map(object => object.confidence * 100) || [])) * 0.3)
+    ? computeMultimodalAttention({
+        visual: currentRuntime?.saliencyScore ?? 0,
+        audio: yamnet.distressScore,
+        object: Math.max(0, ...(currentRuntime?.objects.map(object => object.confidence * 100) || [])),
+      })
     : currentRuntime?.attentionScore ?? 0;
   const saliency = currentRuntime?.saliencyScore ?? 0;
   const eventCounts = useMemo(() => {
@@ -288,6 +294,14 @@ export default function Index() {
   }, [storeEvent, logAlert, householdId]);
 
   const handleEvent = useCallback((event: Omit<DetectionEvent, 'id'>) => {
+    // Explicit validation layer: malformed/under-confident emergency events
+    // cannot reach notification, email, emergency UI, or the cloud log.
+    const validation = validateSafetyEvent(event);
+    if (!validation.valid) {
+      console.warn('[MSDS validation] rejected event', validation.reason, event);
+      return;
+    }
+
     // Informational detections belong in Event History only.
     // Emotion events must never enter the alarm, announcement, email, or emergency path.
     if (event.type === 'object' || event.type === 'human' || event.type === 'emotion') {
