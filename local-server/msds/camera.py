@@ -1,4 +1,4 @@
-"""One fully independent pipeline per camera (video + audio + Whisper)."""
+"""One fully independent pipeline per camera (video + trained custom KWS audio)."""
 from __future__ import annotations
 
 import glob
@@ -23,8 +23,14 @@ from .binaries import (MissingExecutable, install_hint, need_exe, no_window_flag
 from .config import (AUDIO_CHUNK_SECONDS, AUDIO_ENGINE, HLS_PORT, HLS_PROBE_TTL,
                      RTSP_PORT, VIDEO_FPS, VIDEO_GOP, VIDEO_MAX_WIDTH,
                      VIDEO_THREADS, WEBRTC_PORT, match_distress)
-from .whisper_engine import WHISPER
 from .kws_engine import KWS_ENGINE, StreamingSpeechSegmenter
+
+# Presentation/runtime configuration is custom-only, so importing this module
+# must not import Faster-Whisper or touch its model/download path.
+if AUDIO_ENGINE != "custom":
+    from .whisper_engine import WHISPER
+else:
+    WHISPER = None
 
 NO_AUDIO_MESSAGE = (
     "This camera's RTSP stream does not expose a usable audio track, so there is "
@@ -622,11 +628,10 @@ class Camera:
         )
 
     def _audio_loop(self):
-        """Continuous RTSP audio capture for custom KWS and optional Whisper.
+        """Continuous RTSP audio capture for the trained custom KWS engine.
 
-        The custom engine consumes small PCM blocks immediately. In hybrid mode
-        the same bytes are also accumulated into deterministic fixed-size WAV
-        chunks for Whisper general transcription.
+        Small 16 kHz mono PCM blocks feed the streaming segmenter immediately.
+        In custom-only mode no Whisper model is imported, downloaded, or called.
         """
         tmpdir = tempfile.mkdtemp(prefix=f"msd-audio-{self.path}-")
         wav_path = os.path.join(tmpdir, "live-chunk.wav")
@@ -831,8 +836,8 @@ class Camera:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
     def audio_test(self) -> dict:
-        """One-shot diagnostic: probe the streams, then try to grab a short WAV
-        from every audio source in turn and transcribe the first good one."""
+        """One-shot diagnostic: probe audio, capture a short sample, and run
+        the trained custom KWS engine on detected speech segments."""
         report: dict = {
             "camera_id": self.id,
             "recognition_engine": AUDIO_ENGINE,
@@ -842,11 +847,7 @@ class Camera:
             "attempts": [],
             "capture": None,
             "source": None,
-            "whisper": {
-                "available": WHISPER.available,
-                "state": WHISPER.state,
-                "error": WHISPER.error,
-            },
+            "custom_kws": KWS_ENGINE.status(),
             "transcript": "",
             "success": False,
             "error": None,
@@ -961,9 +962,8 @@ class Camera:
     def _restart_audio_after(self, previous_audio: threading.Thread) -> None:
         """Finish the previous audio worker, then restart if the slot is live.
 
-        In hybrid mode Faster-Whisper inference is not safely cancellable
-        mid-call. Reconnect therefore waits in a daemon thread instead of
-        clearing stop_flag while the old worker is still running.
+        Reconnect waits in a daemon thread so the old FFmpeg/audio worker cannot
+        resume beside the replacement worker.
         """
         try:
             previous_audio.join()
@@ -994,8 +994,8 @@ class Camera:
 
     def start(self):
         self.error = None
-        # Video does not share the Whisper worker's stop lifecycle, so restore
-        # it immediately even when audio is still finishing an old chunk.
+        # Video has a separate worker lifecycle, so restore it immediately even
+        # when audio is still finishing an old capture block.
         self.start_video()
 
         previous_audio = self.audio_thread
@@ -1012,8 +1012,8 @@ class Camera:
         self.start_audio()
 
     def start_audio(self):
-        """Audio capture runs whenever the camera is enabled — even if Whisper
-        is broken — so the diagnostics can tell capture apart from transcription."""
+        """Audio capture runs whenever the camera is enabled so the trained KWS
+        can listen continuously and diagnostics can distinguish capture failures."""
         if self.stop_flag.is_set():
             return
         if self.audio_thread and self.audio_thread.is_alive():
@@ -1188,10 +1188,10 @@ class Camera:
                 "last_detected_at": self.kws_last_detected_at,
                 "last_processing_ms": self.kws_last_processing_ms,
             },
-            "whisper_available": WHISPER.available,
-            "whisper_state": WHISPER.state,
-            "whisper_model": WHISPER.model_name,
-            "whisper_error": WHISPER.error,
-            "error": error or (WHISPER.error if AUDIO_ENGINE != "custom" else None),
+            "whisper_available": False,
+            "whisper_state": "disabled",
+            "whisper_model": "",
+            "whisper_error": "Disabled: using trained custom KWS only.",
+            "error": error,
             "ffmpeg_error": self.audio_ffmpeg_error,
         }
