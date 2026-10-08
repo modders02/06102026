@@ -8,6 +8,7 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
@@ -274,6 +275,20 @@ def kws_status():
 def kws_evaluate():
     """Audit enrolled keyword templates without recording new audio."""
     return KWS_ENGINE.evaluate_templates()
+
+
+@app.post("/kws/auto-train")
+async def kws_auto_train(request: Request):
+    """Build English-only KWS templates from the labelled local WAV dataset."""
+    body = await request.json() if request.headers.get("content-length") not in (None, "0") else {}
+    default_dir = Path(__file__).resolve().parents[1] / "kws-training-english"
+    dataset_dir = Path(os.environ.get("MSD_KWS_TRAINING_DIR", str(default_dir)))
+    requested = body.get("dataset_dir") if isinstance(body, dict) else None
+    if requested:
+        requested_path = Path(str(requested)).expanduser()
+        dataset_dir = requested_path if requested_path.is_absolute() else default_dir.parent / requested_path
+    reset = bool(body.get("reset", True)) if isinstance(body, dict) else True
+    return KWS_ENGINE.train_from_wav_dataset(dataset_dir, reset=reset)
 
 
 @app.post("/cameras/{camera_id}/kws-enroll/{keyword}")
