@@ -5,27 +5,27 @@ import {
   SMOKE_REGION_MIN_RATIO,
   fireSmokeLabel,
   fireSpeechLabel,
-  fuseFireWithSunog,
+  fuseFireWithSpeech,
   isImmediateFireSmoke,
+  makeFireSpeechSignal,
   makeFireVisualSignal,
-  makeSunogSignal,
 } from '@/lib/fireFusion';
 
 describe('fire verification fusion', () => {
-  it.each(['sunog', 'may sunog', 'amoy sunog', 'nasusunog', 'sonog'])(
-    'recognizes %s as a reserved fire keyword',
+  it.each(['fire', 'there is a fire', 'house on fire', 'FIRE!'])(
+    'recognizes %s as the reserved English fire cue',
     phrase => {
-      expect(makeSunogSignal(phrase, 0.96, 1000)).toEqual({
-        phrase: 'sunog',
+      expect(makeFireSpeechSignal(phrase, 0.96, 1000)).toEqual({
+        phrase: 'fire',
         confidence: 0.96,
         at: 1000,
       });
     },
   );
 
-  it('does not reserve smoke-only or unrelated fire vocabulary as sunog', () => {
-    expect(makeSunogSignal('may usok', 1, 1000)).toBeNull();
-    expect(makeSunogSignal('call the fire department', 1, 1000)).toBeNull();
+  it('does not reserve smoke-only or words that merely contain fire', () => {
+    expect(makeFireSpeechSignal('smoke in the kitchen', 1, 1000)).toBeNull();
+    expect(makeFireSpeechSignal('bonfire', 1, 1000)).toBeNull();
   });
 
   it('accepts a small visual candidate for corroboration', () => {
@@ -40,21 +40,21 @@ describe('fire verification fusion', () => {
     });
   });
 
-  it('requires visual fire plus sunog within the fusion window', () => {
+  it('requires visual fire plus spoken fire within the fusion window', () => {
     const fire = makeFireVisualSignal(true, 0.6, 0.01, 0, 90, 5000)!;
-    const speech = makeSunogSignal('sunog', 0.98, 5000 + FIRE_FUSION_WINDOW_MS)!;
-    expect(fuseFireWithSunog(fire, speech)).toMatchObject({
+    const speech = makeFireSpeechSignal('fire', 0.98, 5000 + FIRE_FUSION_WINDOW_MS)!;
+    expect(fuseFireWithSpeech(fire, speech)).toMatchObject({
       confidence: 0.6,
       at: 5000 + FIRE_FUSION_WINDOW_MS,
     });
-    expect(fireSpeechLabel()).toBe('Verified fire: visual fire + "sunog"');
-    expect(fuseFireWithSunog(null, speech)).toBeNull();
+    expect(fireSpeechLabel()).toBe('Verified fire: visual fire + "fire"');
+    expect(fuseFireWithSpeech(null, speech)).toBeNull();
   });
 
-  it('rejects sunog outside the fusion window', () => {
+  it('rejects spoken fire outside the fusion window', () => {
     const fire = makeFireVisualSignal(true, 0.6, 0.01, 0, 90, 5000)!;
-    const speech = makeSunogSignal('sunog', 0.98, 5000 + FIRE_FUSION_WINDOW_MS + 1)!;
-    expect(fuseFireWithSunog(fire, speech)).toBeNull();
+    const speech = makeFireSpeechSignal('fire', 0.98, 5000 + FIRE_FUSION_WINDOW_MS + 1)!;
+    expect(fuseFireWithSpeech(fire, speech)).toBeNull();
   });
 
   it('immediately verifies fire plus a meaningful smoke region', () => {
