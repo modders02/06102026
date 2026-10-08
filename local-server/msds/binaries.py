@@ -101,4 +101,4 @@ def pip_install_command() -> str:
     req = os.path.join(BASE_DIR, "requirements.txt")
     if os.path.isfile(req):
         return f'"{sys.executable}" -m pip install -r "{req}"'
-    return f'"{sys.executable}" -m pip install faster-whisper'
+    return f'"{sys.executable}" -m pip install fastapi uvicorn python-multipart psutil numpy'
