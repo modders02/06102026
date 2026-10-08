@@ -21,6 +21,18 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
   const stopTalk = talk.stopTalk;
   const status = runtime?.status || 'connecting';
   const customKeywordMode = runtime?.audio?.recognition_engine === 'custom';
+  const kws = runtime?.audio?.custom_kws;
+  const diagnosticTone = kws?.last_decision === 'accepted'
+    ? 'text-success'
+    : kws?.last_decision
+      ? 'text-amber-500'
+      : 'text-muted-foreground';
+  const pct = (value?: number) => typeof value === 'number'
+    ? `${(value * 100).toFixed(1)}%`
+    : '—';
+  const num = (value?: number, digits = 4) => typeof value === 'number'
+    ? value.toFixed(digits)
+    : '—';
 
   useEffect(() => {
     const container = containerRef.current;
@@ -139,6 +151,37 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
           </p>
         </div>
       </div>
+      {kws && (
+        <div className="border-t border-border bg-muted/20 px-4 py-3" data-testid="voice-diagnostics">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <span className="text-xs font-semibold text-foreground">Voice diagnostics</span>
+            <span className={`text-xs font-semibold ${diagnosticTone}`}>
+              {kws.last_decision || 'waiting'}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
+            <span className="text-muted-foreground">Segment</span>
+            <span className="font-mono text-foreground">{kws.last_segment_ms ? `${kws.last_segment_ms} ms` : '—'}</span>
+            <span className="text-muted-foreground">Candidate</span>
+            <span className="font-mono text-foreground">{kws.last_candidate || '—'} {kws.last_candidate ? `(${pct(kws.last_candidate_confidence)})` : ''}</span>
+
+            <span className="text-muted-foreground">Runner-up</span>
+            <span className="font-mono text-foreground">{kws.last_runner_up_keyword || '—'} {kws.last_runner_up_keyword ? `(${pct(kws.last_runner_up_confidence)})` : ''}</span>
+            <span className="text-muted-foreground">Unknown</span>
+            <span className="font-mono text-foreground">{pct(kws.last_negative_confidence)}</span>
+
+            <span className="text-muted-foreground">Class margin</span>
+            <span className="font-mono text-foreground">{num(kws.last_class_margin)} / {num(kws.last_required_margin)}</span>
+            <span className="text-muted-foreground">Duration ratio</span>
+            <span className="font-mono text-foreground">{num(kws.last_duration_ratio, 3)}</span>
+
+            <span className="text-muted-foreground">Accepted keyword</span>
+            <span className="font-mono text-foreground">{kws.last_keyword || '—'}</span>
+            <span className="text-muted-foreground">Processing</span>
+            <span className="font-mono text-foreground">{typeof kws.last_processing_ms === 'number' ? `${kws.last_processing_ms.toFixed(1)} ms` : '—'}</span>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5"><Camera className="h-3.5 w-3.5" />{camera.aiEnabled ? 'AI monitoring on' : 'AI monitoring off'}</span>
         {runtime?.status === 'online' && <span className="font-mono">{runtime.transport === 'webrtc' || runtime.transport === 'local' ? 'Realtime · ' : ''}{runtime.fps} FPS</span>}
