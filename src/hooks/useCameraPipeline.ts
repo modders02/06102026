@@ -480,15 +480,26 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       // intensity, and relevance of configured priority objects. Do not use the
       // strongest arbitrary COCO object or a stale accepted keyword as A(t).
       const objectScore = objectRelevanceScore(objects, settings.priorityObjects);
-      const audioRms = runtimeRef.current.audio?.custom_kws?.vad_last_rms ?? 0;
-      const audioScore = audioIntensityScoreFromRms(audioRms);
+      const kwsStatus = runtimeRef.current.audio?.custom_kws;
+      const audioRms = kwsStatus?.vad_last_rms ?? 0;
+      const rmsAudioScore = audioIntensityScoreFromRms(audioRms);
+      // Chapter III gives active speech/event audio a fixed attention boost on
+      // top of continuous RMS intensity. The camera backend exposes VAD state,
+      // while validated safety audio is already reflected by audioDistress.
+      const audioScore = runtimeRef.current.audioDistress.detected
+        ? Math.max(20, rmsAudioScore)
+        : kwsStatus?.vad_active
+          ? Math.max(10, rmsAudioScore)
+          : rmsAudioScore;
       const attentionScore = computeAttentionScore(saliencyScore, audioScore, objectScore);
 
       const fire = detectFire(frame, fireStateRef.current, objects);
       const validation = validateFusionCycle({
         visibility: fire.visibility,
         audioConnected: runtimeRef.current.audio?.connected,
-        audioReady: runtimeRef.current.audio?.custom_kws?.open_set_ready,
+        // RMS/VAD can support attention even if keyword enrollment is not yet
+        // complete; KWS readiness is a separate speech-recognition concern.
+        audioReady: typeof kwsStatus?.vad_last_rms === 'number',
         objectScore,
         latencyMs: runtimeRef.current.latencyMs,
       });
