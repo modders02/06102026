@@ -22,12 +22,12 @@ import {
   SMOKE_REGION_MIN_RATIO,
   fireSmokeLabel,
   fireSpeechLabel,
-  fuseFireWithSunog,
+  fuseFireWithSpeech,
   isImmediateFireSmoke,
   makeFireVisualSignal,
-  makeSunogSignal,
+  makeFireSpeechSignal,
   type FireVisualSignal,
-  type SunogSignal,
+  type FireSpeechSignal,
 } from '@/lib/fireFusion';
 import {
   fuseDistressSignals,
@@ -151,7 +151,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const recentDistressFaceRef = useRef<DistressFaceSignal | null>(null);
   const recentDistressSpeechRef = useRef<DistressSpeechSignal | null>(null);
   const recentFireVisualRef = useRef<FireVisualSignal | null>(null);
-  const recentSunogRef = useRef<SunogSignal | null>(null);
+  const recentFireSpeechRef = useRef<FireSpeechSignal | null>(null);
 
   const cooldownRef = useRef<Record<string, number>>({});
   const retryRef = useRef(0);
@@ -212,7 +212,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       motionStateRef.current = createMotionAnomalyState();
       recentDistressFaceRef.current = null;
       recentFireVisualRef.current = null;
-      recentSunogRef.current = null;
+      recentFireSpeechRef.current = null;
       patch({
         objects: [], humanCount: 0, saliencyScore: 0, attentionScore: 0,
         fire: { detected: false, candidate: false, confidence: 0 },
@@ -275,10 +275,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   }, [emit]);
 
   const maybeEmitVerifiedFire = useCallback(() => {
-    const verified = fuseFireWithSunog(recentFireVisualRef.current, recentSunogRef.current);
+    const verified = fuseFireWithSpeech(recentFireVisualRef.current, recentFireSpeechRef.current);
     if (!verified) return false;
     recentFireVisualRef.current = null;
-    recentSunogRef.current = null;
+    recentFireSpeechRef.current = null;
     emit('fire', fireSpeechLabel(), verified.confidence);
     return true;
   }, [emit]);
@@ -508,10 +508,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
 
       // A flame-like region identified as content on a TV/phone/laptop must
       // invalidate both halves of fire fusion. This prevents an earlier visual
-      // candidate or a recently spoken "sunog" from verifying screen content.
+      // candidate or a recently spoken "fireSpeech" from verifying screen content.
       if (fire.screenSuppressed) {
         recentFireVisualRef.current = null;
-        recentSunogRef.current = null;
+        recentFireSpeechRef.current = null;
       }
 
       const fireVisual = makeFireVisualSignal(
@@ -536,7 +536,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       const immediateFireSmoke = isImmediateFireSmoke(fireVisual);
       let verifiedFireSpeech = false;
       if (immediateFireSmoke && fireVisual) {
-        recentSunogRef.current = null;
+        recentFireSpeechRef.current = null;
         recentFireVisualRef.current = null;
         emit('fire', fireSmokeLabel(fireVisual), fireVisual.confidence);
       } else if (fireVisual) {
@@ -711,7 +711,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
 
   // Facial expression tracking.
   // Every base expression is non-alerting by itself. Angry/Frightened can
-  // verify help/tulong or a scream. face-api's surprised/shock-like expression
+  // verify help/emergency or a scream. face-api's surprised/shock-like expression
   // is presented as Frightened and participates in the same fusion rule.
   // Sad, Happy, Neutral and Disgust remain informational history only.
   useEffect(() => {
@@ -762,7 +762,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     }
     if (!camera.enabled) {
       recentDistressSpeechRef.current = null;
-      recentSunogRef.current = null;
+      recentFireSpeechRef.current = null;
       lastAudioRef.current = undefined;
       lastShownRef.current = '';
       if (clearTimerRef.current) {
@@ -835,19 +835,19 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
 
             // "help" and "tulong" are intentionally not standalone alarms.
             // Hold them briefly so either speech-first or face-first ordering can
-            // verify the same-camera Angry/Frightened + help/tulong combination.
+            // verify the same-camera Angry/Frightened + help/emergency combination.
             const spokenAt = Number.isNaN(Date.parse(e.timestamp)) ? Date.now() : Date.parse(e.timestamp);
             const sourceText = `${e.transcript || ''} ${e.keyword || ''}`;
             let reservedForFusion = false;
 
-            const sunog = makeSunogSignal(sourceText, confidence, spokenAt);
-            if (sunog) {
+            const fireSpeech = makeFireSpeechSignal(sourceText, confidence, spokenAt);
+            if (fireSpeech) {
               reservedForFusion = true;
               // Store speech only. Fire verification is performed by the next
               // current visual analysis frame, after device-screen suppression.
               // This prevents an older unsuppressed frame from combining with
-              // "sunog" before a TV/phone is recognized on the next frame.
-              recentSunogRef.current = sunog;
+              // "fireSpeech" before a TV/phone is recognized on the next frame.
+              recentFireSpeechRef.current = fireSpeech;
             }
 
             const distressSpeech = makeDistressSpeechSignal(sourceText, confidence, spokenAt);
