@@ -394,12 +394,12 @@ describe('camera snapshots and page-scoped playback', () => {
   });
 
   it.each([
-    ['happy', 'Happy'],
-    ['sad', 'Sad'],
-    ['surprised', 'Frightened'],
-    ['neutral', 'Neutral'],
-    ['disgusted', 'Disgust'],
-  ] as const)('records %s as a non-alert emotion event', async (expression, label) => {
+    ['happy', 'Happy', false],
+    ['sad', 'Sad', false],
+    ['surprised', 'Frightened', true],
+    ['neutral', 'Neutral', false],
+    ['disgusted', 'Disgust', false],
+  ] as const)('records %s as a non-alert emotion event', async (expression, label, distressDetected) => {
     mocked.analyzeFace.mockImplementationOnce(async () => {
       const severeCarryover = ['sad', 'neutral', 'disgusted'].includes(expression);
       mocked.distress = { hasFace: true, expression, probability: 0.94, distressScore: severeCarryover ? 94 : 0, distressLevel: severeCarryover ? 'severe' : 'none' };
@@ -416,7 +416,10 @@ describe('camera snapshots and page-scoped playback', () => {
       cameraId: 'slot-1',
     }));
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress' }));
-    expect(getCameraSession('slot-1').runtime?.faceDistress.detected).toBe(false);
+    expect(getCameraSession('slot-1').runtime?.faceDistress.detected).toBe(distressDetected);
+    if (distressDetected) {
+      expect(getCameraSession('slot-1').runtime?.faceDistress.label).toBe('Frightened');
+    }
   });
 
   it.each([
