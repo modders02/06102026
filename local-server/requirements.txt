@@ -8,11 +8,5 @@ python-multipart>=0.0.9
 psutil>=5.9
 numpy>=1.26
 
-# CCTV microphone -> wake-word transcription.
-# The Whisper model itself is downloaded on first use (needs internet once).
-faster-whisper>=1.0.0
-
-# faster-whisper currently calls av.open(..., metadata_errors="ignore").
-# PyAV 19 removed that keyword, which breaks every transcription at runtime.
-# Keep PyAV on the compatible series until faster-whisper adopts the new API.
-av>=11,<19
+# CCTV microphone recognition uses the trained custom KWS engine implemented
+# with NumPy. No Whisper model/package download is required.
