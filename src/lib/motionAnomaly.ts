@@ -149,7 +149,12 @@ export function detectMotionAnomaly(
 
   state.previousObjects = objects.map(object => ({ ...object, bbox: [...object.bbox] as DetectedObject['bbox'] }));
 
-  if (!kind || state.consecutiveFrames < 2) return none(motionScore, activeRatio);
+  // A semantic fall/collapse already has two-source temporal validation:
+  // the same tracked object changed geometry/position between consecutive
+  // frames. Generic rapid motion has no semantic object evidence, so require
+  // persistence across two analysis cycles to reject one-frame light flashes.
+  const requiredFrames = kind === 'rapid-motion' ? 2 : 1;
+  if (!kind || state.consecutiveFrames < requiredFrames) return none(motionScore, activeRatio);
   return {
     detected: true,
     kind,
