@@ -450,6 +450,50 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
   });
 
+  it('keeps a recent surprised/Frightened face through neutral jitter until tulong arrives', async () => {
+    mocked.getAudioEvents
+      .mockResolvedValueOnce({ events: [], status: null })
+      .mockResolvedValueOnce({ events: [], status: null })
+      .mockResolvedValueOnce({ events: [], status: null })
+      .mockResolvedValueOnce({
+        events: [{ timestamp: '2026-10-02T00:00:04Z', transcript: 'tulong', keyword: 'tulong', confidence: 0.96 }],
+        status: null,
+      });
+
+    mocked.analyzeFace
+      .mockImplementationOnce(async () => {
+        mocked.distress = { hasFace: true, expression: 'surprised', probability: 0.94, distressScore: 90, distressLevel: 'severe' };
+      })
+      .mockImplementationOnce(async () => {
+        mocked.distress = { hasFace: true, expression: 'neutral', probability: 0.91, distressScore: 0, distressLevel: 'none' };
+      });
+
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+
+    expect(getCameraSession('slot-1').runtime?.faceDistress).toMatchObject({
+      detected: true,
+      label: 'Frightened',
+    });
+
+    // A later neutral frame is normal classifier jitter and must not erase the
+    // recent Frightened evidence before the spoken keyword finishes processing.
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(getCameraSession('slot-1').runtime?.faceDistress.detected).toBe(false);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'multimodal-distress',
+      label: 'Verified distress: Frightened + "tulong"',
+      confidence: 0.94,
+      cameraId: 'slot-1',
+    }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress' }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
+  });
+
   it('does not fall back to a facial alarm for weak Angry/Frightened candidates', async () => {
     mocked.analyzeFace.mockImplementationOnce(async () => {
       mocked.distress = { hasFace: true, expression: 'fearful', probability: 0.4, distressScore: 90, distressLevel: 'severe' };
