@@ -508,7 +508,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
 
       // A flame-like region identified as content on a TV/phone/laptop must
       // invalidate both halves of fire fusion. This prevents an earlier visual
-      // candidate or a recently spoken "fireSpeech" from verifying screen content.
+      // candidate or a recently spoken "fire" from verifying screen content.
       if (fire.screenSuppressed) {
         recentFireVisualRef.current = null;
         recentFireSpeechRef.current = null;
@@ -822,7 +822,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             showTranscript(spoken);
           }
           for (const e of fresh) {
-            // Backend keyword list OR the full Tagalog/English safety library.
+            // Backend accepted keyword OR the English-only safety lexicon.
             const safety = matchWakeWord(e.transcript || '');
             const keyword = safety.matched ? safety.phrase : e.keyword;
             const confidence = Math.max(e.confidence || 0, safety.matched ? safety.confidence : 0);
@@ -833,7 +833,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
               },
             });
 
-            // "help" and "tulong" are intentionally not standalone alarms.
+            // "help" and "emergency" are intentionally not standalone alarms.
             // Hold them briefly so either speech-first or face-first ordering can
             // verify the same-camera Angry/Frightened + help/emergency combination.
             const spokenAt = Number.isNaN(Date.parse(e.timestamp)) ? Date.now() : Date.parse(e.timestamp);
@@ -846,7 +846,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
               // Store speech only. Fire verification is performed by the next
               // current visual analysis frame, after device-screen suppression.
               // This prevents an older unsuppressed frame from combining with
-              // "fireSpeech" before a TV/phone is recognized on the next frame.
+              // "fire" before a TV/phone is recognized on the next frame.
               recentFireSpeechRef.current = fireSpeech;
             }
 
