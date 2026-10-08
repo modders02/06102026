@@ -22,6 +22,10 @@ export const PREFETCH_URLS: { label: string; url: string }[] = [
     url: 'https://storage.googleapis.com/tfjs-models/savedmodel/ssdlite_mobilenet_v2/model.json',
   },
   {
+    label: 'YAMNet audio model',
+    url: 'https://tfhub.dev/google/tfjs-models/tfjs/yamnet/tfjs/1/model.json?tfjs-format=file',
+  },
+  {
     label: 'face-api tiny detector',
     url: 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/tiny_face_detector_model-weights_manifest.json',
   },
