@@ -187,6 +187,12 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
               {kws.last_decision || 'waiting'}
             </span>
           </div>
+          {kws.language_scope && (
+            <p className="mb-2 text-xs text-muted-foreground">
+              Scope: <span className="font-semibold text-foreground">English only</span>
+              {kws.active_keywords?.length ? ` · ${kws.active_keywords.join(', ')}` : ''}
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-4">
             <span className="text-muted-foreground">Segment</span>
             <span className="font-mono text-foreground">{kws.last_segment_ms ? `${kws.last_segment_ms} ms` : '—'}</span>
