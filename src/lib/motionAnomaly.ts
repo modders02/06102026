@@ -96,6 +96,9 @@ export function detectMotionAnomaly(
   }
 
   const motionMap = computeSaliency(currentFrame, previousFrame, 'motion', 25);
+  // Test doubles or unsupported canvas paths may not produce a map. Treat that
+  // cycle as unavailable evidence rather than converting it into an anomaly.
+  if (!motionMap?.data) return none();
   const motionScore = computeSaliencyScore(motionMap);
   const activeRatio = activePixelRatio(motionMap);
   const width = currentFrame.width;
