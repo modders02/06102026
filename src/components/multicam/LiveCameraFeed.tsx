@@ -157,6 +157,28 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
           </p>
         </div>
       </div>
+      {runtime?.validation && (
+        <div className="border-t border-border bg-muted/10 px-4 py-2.5" data-testid="fusion-validation">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="font-semibold text-foreground">
+              Validation: {runtime.validation.ready ? (runtime.validation.flags.length ? 'Degraded' : 'Ready') : 'Insufficient input'}
+            </span>
+            <span className="font-mono text-muted-foreground">
+              α {runtime.attentionScore}/100 · V {runtime.saliencyScore} · A {runtime.audioIntensityScore ?? 0} · O {runtime.objectRelevanceScore ?? 0}
+            </span>
+          </div>
+          {runtime.validation.flags.length > 0 && (
+            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+              {runtime.validation.flags.join(' · ')}
+            </p>
+          )}
+          {runtime.motionAnomaly?.detected && (
+            <p className="mt-1 text-xs font-semibold text-destructive">
+              Validated motion anomaly: {runtime.motionAnomaly.label}
+            </p>
+          )}
+        </div>
+      )}
       {kws && (
         <div className="border-t border-border bg-muted/20 px-4 py-3" data-testid="voice-diagnostics">
           <div className="mb-2 flex items-center justify-between gap-3">
