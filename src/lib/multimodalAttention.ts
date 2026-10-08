@@ -1,3 +1,5 @@
+import type { DetectedObject } from '@/types/dashboard';
+
 /**
  * Multimodal attention formula specified in the thesis Scope/Methods.
  *
@@ -31,4 +33,36 @@ export function computeMultimodalAttention({
     + ATTENTION_WEIGHTS.audio * clamp100(audio)
     + ATTENTION_WEIGHTS.object * clamp100(object);
   return Math.round(clamp100(score));
+}
+
+
+/** Safety relevance multipliers used by the semantic object term. */
+export const OBJECT_PRIORITY_WEIGHTS: Record<string, number> = {
+  person: 1.0,
+  knife: 1.0,
+  scissors: 0.8,
+  oven: 0.75,
+  toaster: 0.65,
+  microwave: 0.55,
+  cell_phone: 0.45,
+  'cell phone': 0.45,
+};
+
+/**
+ * Thesis Oweight(t): sum(confidence_i * priority(class_i)), normalized to 0..100.
+ * User-selected priority objects receive full weight unless a safety-specific
+ * weight above is already defined.
+ */
+export function computeObjectImportance(
+  objects: DetectedObject[],
+  priorityObjects: string[] = [],
+): number {
+  const selected = new Set(priorityObjects);
+  let total = 0;
+  for (const object of objects) {
+    if (selected.size && !selected.has(object.label) && object.label !== 'person') continue;
+    const weight = OBJECT_PRIORITY_WEIGHTS[object.label] ?? (selected.has(object.label) ? 1 : 0.5);
+    total += clamp100(object.confidence * 100) * weight;
+  }
+  return Math.round(clamp100(total));
 }
