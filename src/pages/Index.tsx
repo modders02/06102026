@@ -274,7 +274,8 @@ export default function Index() {
   const raiseAlert = useCallback((event: Omit<DetectionEvent, 'id'>, severity: Alert['severity'], alreadyStored = false) => {
     const key = `${event.cameraId}:${event.label}`;
     const now = Date.now();
-    if (now - (alertCooldown.current.get(key) || 0) < (severity === 'critical' ? 3000 : 15000)) return;
+    const cooldownMs = settings.alertCooldownMs ?? 3000;
+    if (now - (alertCooldown.current.get(key) || 0) < cooldownMs) return;
     alertCooldown.current.set(key, now);
     const id = alreadyStored ? crypto.randomUUID() : storeEvent(event);
     const index = Number(event.cameraId.replace('slot-', '')) || 1;
@@ -296,7 +297,7 @@ export default function Index() {
       });
       if (EMERGENCY_TYPES.has(event.type)) setShowEmergency(true);
     }
-  }, [storeEvent, logAlert, householdId]);
+  }, [storeEvent, logAlert, householdId, settings.alertCooldownMs]);
 
   const handleEvent = useCallback((event: Omit<DetectionEvent, 'id'>) => {
     // Informational detections belong in Event History only.
@@ -306,7 +307,12 @@ export default function Index() {
       return;
     }
 
-    raiseAlert(event, event.type === 'fire' || event.type === 'smoke' || event.type === 'multimodal-distress' ? 'critical' : 'high');
+    const severity: Alert['severity'] = event.type === 'attention-alert'
+      ? 'medium'
+      : event.type === 'fire' || event.type === 'smoke' || event.type === 'multimodal-distress'
+        ? 'critical'
+        : 'high';
+    raiseAlert(event, severity);
 
     // A verified face+voice/fire+voice event also passes through the household
     // wake-word database. This records the configured Supabase wake word only
@@ -638,9 +644,10 @@ export default function Index() {
             <div id="tour-alert-log"><AlertLog alerts={alerts} visible={showAlerts} snapshots={alertSnapshots} /></div>
             <ControlsPanel snapshotMode running={running} threshold={settings.saliencyThreshold ?? 40} showBoundingBoxes={showBoundingBoxes} showHeatmap={showHeatmap} showAlerts={showAlerts}
               quality={quality} mirror={mirror} heatmapOpacity={heatmapOpacity} simulationMode={simulationMode} priorityObjects={priorityObjects} minConfidence={Math.round(settings.objectThreshold * 100)}
-              saliencyMode={settings.saliencyMode ?? 'sobel'} attentionThreshold={settings.attentionThreshold ?? 15}
+              saliencyMode={settings.saliencyMode ?? 'sobel'} attentionThreshold={settings.attentionThreshold ?? 15} alertCooldownMs={settings.alertCooldownMs ?? 3000}
               onStart={handleStart} onStop={handleStop} onThresholdChange={value => updateSettings({ saliencyThreshold: value })}
               onSaliencyModeChange={value => updateSettings({ saliencyMode: value })} onAttentionThresholdChange={value => updateSettings({ attentionThreshold: value })}
+              onAlertCooldownChange={value => updateSettings({ alertCooldownMs: value })}
               onToggleBoundingBoxes={() => setShowBoundingBoxes(value => !value)}
               onToggleHeatmap={() => setShowHeatmap(value => !value)} onToggleAlerts={() => setShowAlerts(value => !value)} onQualityChange={setQuality}
               onToggleMirror={() => setMirror(value => !value)} onHeatmapOpacityChange={setHeatmapOpacity} onToggleSimulation={() => setSimulationMode(value => !value)}
