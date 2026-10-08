@@ -4,6 +4,14 @@ import { createPlaybackFrameCounter } from '@/lib/cameraPlayback';
 import { captureCameraEventSnapshot, captureVideoSnapshot } from '@/lib/cameraEventSnapshot';
 import { detectObjects, loadDetector } from '@/lib/detectionEngine';
 import { computeSaliency, computeSaliencyScore } from '@/lib/saliency';
+import {
+  audioIntensityScoreFromRms,
+  computeAttentionScore,
+  DEFAULT_ATTENTION_THRESHOLD,
+  objectRelevanceScore,
+} from '@/lib/attentionFusion';
+import { validateFusionCycle } from '@/lib/signalValidation';
+import { createMotionAnomalyState, detectMotionAnomaly } from '@/lib/motionAnomaly';
 import { createFireState, detectFire } from '@/lib/fireDetection';
 import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/multiCamServer';
 import { useFaceDistress } from '@/hooks/useFaceDistress';
@@ -119,7 +127,7 @@ interface Options {
 /**
  * One fully independent Multimodal Saliency Detection pipeline per camera:
  * its own realtime player, frame queue, fire/saliency state, face session,
- * Whisper audio polling, statistics and fault-tolerant reconnect.
+ * custom-KWS audio polling, validation state, statistics and fault-tolerant reconnect.
  */
 export function useCameraPipeline({ camera, settings, onEvent, managedVideo = false, playbackEnabled = true, sourceStream = null }: Options) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -130,6 +138,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const webRtcRef = useRef<ReturnType<typeof openCameraWebRtc> | null>(null);
   const fireStateRef = useRef(createFireState());
   const prevFrameRef = useRef<ImageData | null>(null);
+  const motionStateRef = useRef(createMotionAnomalyState());
   const busyRef = useRef(false);
   const analysisRevisionRef = useRef(0);
   const faceAnalysisRevisionRef = useRef<number | null>(null);
@@ -199,6 +208,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     if (!camera.enabled || !camera.aiEnabled) {
       prevFrameRef.current = null;
       fireStateRef.current = createFireState();
+      motionStateRef.current = createMotionAnomalyState();
       recentDistressFaceRef.current = null;
       recentFireVisualRef.current = null;
       recentSunogRef.current = null;
@@ -449,17 +459,38 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       if (cancelled()) return;
       const humanCount = objects.filter(o => HUMAN_LABELS.has(o.label)).length;
 
-      const sal = computeSaliency(frame, prevFrameRef.current, 'sobel', settings.saliencyThreshold ?? 40);
-      prevFrameRef.current = frame;
+      const previousFrame = prevFrameRef.current;
+      const sal = computeSaliency(
+        frame,
+        previousFrame,
+        settings.saliencyMode ?? 'sobel',
+        settings.saliencyThreshold ?? 40,
+      );
       const saliencyScore = computeSaliencyScore(sal);
-      const objectScore = objects.length > 0
-        ? Math.max(...objects.map(object => object.confidence * 100)) : 0;
-      const audioScore = runtimeRef.current.audioDistress.detected
-        ? runtimeRef.current.audioDistress.confidence * 100 : 0;
-      const attentionScore = Math.min(100, Math.round(
-        0.5 * saliencyScore + 0.3 * objectScore + 0.2 * audioScore,
-      ));
+      const motionAnomaly = detectMotionAnomaly(
+        frame,
+        previousFrame,
+        objects,
+        motionStateRef.current,
+      );
+      prevFrameRef.current = frame;
+
+      // Chapter III fusion uses the normalized visual saliency, live microphone
+      // intensity, and relevance of configured priority objects. Do not use the
+      // strongest arbitrary COCO object or a stale accepted keyword as A(t).
+      const objectScore = objectRelevanceScore(objects, settings.priorityObjects);
+      const audioRms = runtimeRef.current.audio?.custom_kws?.vad_last_rms ?? 0;
+      const audioScore = audioIntensityScoreFromRms(audioRms);
+      const attentionScore = computeAttentionScore(saliencyScore, audioScore, objectScore);
+
       const fire = detectFire(frame, fireStateRef.current, objects);
+      const validation = validateFusionCycle({
+        visibility: fire.visibility,
+        audioConnected: runtimeRef.current.audio?.connected,
+        audioReady: runtimeRef.current.audio?.custom_kws?.open_set_ready,
+        objectScore,
+        latencyMs: runtimeRef.current.latencyMs,
+      });
       const fireObservedAt = Date.now();
 
       // A flame-like region identified as content on a TV/phone/laptop must
@@ -502,6 +533,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       const previousFire = runtimeRef.current.fire;
       patch({
         objects, humanCount, saliencyScore, attentionScore,
+        audioIntensityScore: audioScore,
+        objectRelevanceScore: objectScore,
+        validation,
+        motionAnomaly,
         frameWidth: canvas.width, frameHeight: canvas.height,
         fire: {
           detected: immediateFireSmoke || verifiedFireSpeech
@@ -535,14 +570,23 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
           && fire.fireDetected && fire.confidence >= settings.fireThreshold) {
         emit('fire', 'Fire detected', fire.confidence);
       }
-      if (saliencyScore > 70) emit('saliency', `High saliency (${saliencyScore})`, saliencyScore / 100);
-      if (attentionScore > 70) emit('saliency', `High attention (${attentionScore})`, attentionScore / 100);
+      if (motionAnomaly.detected && validation.visualUsable) {
+        emit('motion-anomaly', motionAnomaly.label, motionAnomaly.confidence);
+      }
+
+      // Crossing the thesis attention threshold marks a scene as salient. The
+      // renderer stores this as informational history; a validated hazard
+      // detector (fire/distress/motion anomaly) is still required for an alarm.
+      const attentionThreshold = settings.attentionThreshold ?? DEFAULT_ATTENTION_THRESHOLD;
+      if (validation.ready && attentionScore > attentionThreshold) {
+        emit('saliency', `Salient scene (${attentionScore})`, attentionScore / 100);
+      }
     } catch {
       // A detector failure does not interrupt previews, playback, or audio.
     } finally {
       busyRef.current = false;
     }
-  }, [camera.enabled, camera.aiEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.priorityObjects, analyzeFace, drawWorkFrame, patch, emit, maybeEmitVerifiedFire]);
+  }, [camera.enabled, camera.aiEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.saliencyMode, settings.attentionThreshold, settings.priorityObjects, analyzeFace, drawWorkFrame, patch, emit, maybeEmitVerifiedFire]);
   const analyzeFrameRef = useRef(analyzeFrame);
   analyzeFrameRef.current = analyzeFrame;
 
@@ -677,7 +721,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     // erase a recent distress face. Its timestamp expires naturally in fusion.
   }, [camera.enabled, camera.aiEnabled, face.distress, patch, emit, maybeEmitVerifiedDistress]);
 
-  // ---- Audio: RTSP audio -> ffmpeg -> Whisper on the backend ---------------
+  // ---- Audio: RTSP audio -> ffmpeg -> trained custom KWS on the backend -----
   // The browser never opens a microphone. Listening runs whenever the camera is
   // connected, independently of the AI detection switch.
   useEffect(() => {
