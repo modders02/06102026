@@ -396,7 +396,7 @@ describe('camera snapshots and page-scoped playback', () => {
   it.each([
     ['happy', 'Happy'],
     ['sad', 'Sad'],
-    ['surprised', 'Shock'],
+    ['surprised', 'Frightened'],
     ['neutral', 'Neutral'],
     ['disgusted', 'Disgust'],
   ] as const)('records %s as a non-alert emotion event', async (expression, label) => {
