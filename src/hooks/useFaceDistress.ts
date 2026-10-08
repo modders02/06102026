@@ -39,10 +39,12 @@ export function useFaceDistress(active: boolean) {
   const [distress, setDistress] = useState<FaceDistress>(EMPTY);
   const busyRef = useRef(false);
   const historyRef = useRef<number[]>([]);
+  const expressionHistoryRef = useRef<Record<string, number>[]>([]);
 
   useEffect(() => {
     if (!active) {
       historyRef.current = [];
+      expressionHistoryRef.current = [];
       setDistress(EMPTY);
       return;
     }
@@ -66,6 +68,7 @@ export function useFaceDistress(active: boolean) {
 
       if (!detections.length) {
         historyRef.current = [];
+        expressionHistoryRef.current = [];
         setDistress(EMPTY);
         return;
       }
@@ -93,9 +96,21 @@ export function useFaceDistress(active: boolean) {
         historyRef.current.reduce((a, b) => a + b, 0) / historyRef.current.length
       );
 
+      // Average expression probabilities over the last three valid face frames.
+      // Real indoor video contains compression noise, head turns and shadows;
+      // one unstable frame must not become a safety expression.
+      expressionHistoryRef.current.push({ ...expr });
+      if (expressionHistoryRef.current.length > 3) expressionHistoryRef.current.shift();
+      const averaged: Record<string, number> = {};
+      for (const sample of expressionHistoryRef.current) {
+        for (const [key, value] of Object.entries(sample)) {
+          averaged[key] = (averaged[key] ?? 0) + value / expressionHistoryRef.current.length;
+        }
+      }
+
       let dominant = 'neutral';
       let dominantProb = 0;
-      for (const [k, v] of Object.entries(expr)) {
+      for (const [k, v] of Object.entries(averaged)) {
         if (v > dominantProb) { dominantProb = v; dominant = k; }
       }
 
