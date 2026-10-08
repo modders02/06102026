@@ -11,9 +11,9 @@ import { historyEmotionMeta } from '@/lib/emotionEvents';
 
 const typeIcon: Record<DetectionType, string> = {
   fire: '🔥', smoke: '💨', human: '🧍', object: '📦',
-  'face-distress': '😨', 'audio-distress': '🗣', 'multimodal-distress': '🆘', 'motion-anomaly': '⚠️', emotion: '🙂', saliency: '✨',
+  'face-distress': '😨', 'audio-distress': '🗣', 'multimodal-distress': '🆘', 'motion-anomaly': '⚠️', 'attention-alert': '🔔', emotion: '🙂', saliency: '✨',
 };
-const EMERGENCY_TYPES = new Set<DetectionType>(['fire', 'smoke', 'face-distress', 'audio-distress', 'multimodal-distress', 'motion-anomaly']);
+const EMERGENCY_TYPES = new Set<DetectionType>(['fire', 'smoke', 'face-distress', 'audio-distress', 'multimodal-distress', 'motion-anomaly', 'attention-alert']);
 
 /** Camera alerts, past detections, and emergency clips shown beside live feeds. */
 export default function DashboardEvents({ initialFilter }: { initialFilter?: string }) {
