@@ -30,6 +30,12 @@ import { sendAlertEmail } from '@/lib/alertEmail';
 import { stopAll as stopAllCameras, stopCamera } from '@/lib/multiCamServer';
 import { matchWakeWord } from '@/lib/safetyLexicon';
 import {
+  audioEventScore,
+  audioIntensityScoreFromDb,
+  computeAttentionScore,
+  objectRelevanceScore,
+} from '@/lib/attentionFusion';
+import {
   fireSpeechLabel,
   fuseFireWithSunog,
   makeFireVisualSignal,
@@ -45,7 +51,7 @@ import type { Alert, QualityMode } from '@/types/dashboard';
 import { DEFAULT_PRIORITY_OBJECTS } from '@/types/dashboard';
 
 const monitoringSession = { running: false };
-const EMERGENCY_TYPES = new Set<DetectionEvent['type']>(['fire', 'smoke', 'face-distress', 'audio-distress', 'multimodal-distress']);
+const EMERGENCY_TYPES = new Set<DetectionEvent['type']>(['fire', 'smoke', 'face-distress', 'audio-distress', 'multimodal-distress', 'motion-anomaly']);
 
 const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   vision: [
@@ -174,8 +180,13 @@ export default function Index() {
   const pipelineSettings = useMemo(() => ({ ...settings, priorityObjects }), [settings, priorityObjects]);
   const currentRuntime = runtimes[selectedCamera];
   const focusedLiveCamera = slots.some(slot => `slot-${slot.index}` === requestedCamera) ? requestedCamera : null;
+  const localAudioScore = audioEventScore(
+    audioFeatures.audioEvent,
+    audioIntensityScoreFromDb(audioFeatures.decibel),
+  );
+  const localObjectScore = objectRelevanceScore(currentRuntime?.objects ?? [], priorityObjects);
   const attention = selectedCamera === 1 && localAudioEnabled
-    ? Math.round((currentRuntime?.saliencyScore ?? 0) * 0.4 + yamnet.distressScore * 0.3 + Math.max(0, ...(currentRuntime?.objects.map(object => object.confidence * 100) || [])) * 0.3)
+    ? computeAttentionScore(currentRuntime?.saliencyScore ?? 0, localAudioScore, localObjectScore)
     : currentRuntime?.attentionScore ?? 0;
   const saliency = currentRuntime?.saliencyScore ?? 0;
   const eventCounts = useMemo(() => {
@@ -290,7 +301,7 @@ export default function Index() {
   const handleEvent = useCallback((event: Omit<DetectionEvent, 'id'>) => {
     // Informational detections belong in Event History only.
     // Emotion events must never enter the alarm, announcement, email, or emergency path.
-    if (event.type === 'object' || event.type === 'human' || event.type === 'emotion') {
+    if (event.type === 'object' || event.type === 'human' || event.type === 'emotion' || event.type === 'saliency') {
       storeEvent(event);
       return;
     }
@@ -609,7 +620,10 @@ export default function Index() {
             <div id="tour-alert-log"><AlertLog alerts={alerts} visible={showAlerts} snapshots={alertSnapshots} /></div>
             <ControlsPanel snapshotMode running={running} threshold={settings.saliencyThreshold ?? 40} showBoundingBoxes={showBoundingBoxes} showHeatmap={showHeatmap} showAlerts={showAlerts}
               quality={quality} mirror={mirror} heatmapOpacity={heatmapOpacity} simulationMode={simulationMode} priorityObjects={priorityObjects} minConfidence={Math.round(settings.objectThreshold * 100)}
-              onStart={handleStart} onStop={handleStop} onThresholdChange={value => updateSettings({ saliencyThreshold: value })} onToggleBoundingBoxes={() => setShowBoundingBoxes(value => !value)}
+              saliencyMode={settings.saliencyMode ?? 'sobel'} attentionThreshold={settings.attentionThreshold ?? 15}
+              onStart={handleStart} onStop={handleStop} onThresholdChange={value => updateSettings({ saliencyThreshold: value })}
+              onSaliencyModeChange={value => updateSettings({ saliencyMode: value })} onAttentionThresholdChange={value => updateSettings({ attentionThreshold: value })}
+              onToggleBoundingBoxes={() => setShowBoundingBoxes(value => !value)}
               onToggleHeatmap={() => setShowHeatmap(value => !value)} onToggleAlerts={() => setShowAlerts(value => !value)} onQualityChange={setQuality}
               onToggleMirror={() => setMirror(value => !value)} onHeatmapOpacityChange={setHeatmapOpacity} onToggleSimulation={() => setSimulationMode(value => !value)}
               onPriorityObjectsChange={setPriorityObjects} onMinConfidenceChange={value => updateSettings({ objectThreshold: value / 100 })} onExportCSV={exportCSV} />
