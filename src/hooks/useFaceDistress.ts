@@ -77,12 +77,14 @@ export function useFaceDistress(active: boolean) {
       });
 
       const expr = main.expressions as unknown as Record<string, number>;
-      // Safety distress score uses only expressions that participate in the
-      // multimodal rules. Disgust and neutral are never safety triggers.
+      // Safety distress score keeps the original sadness/fear/anger signal and
+      // treats face-api's "surprised" expression as the UI's Frightened state.
+      // Disgust and neutral remain non-distress signals.
       const sad = expr.sad ?? 0;
       const fearful = expr.fearful ?? 0;
+      const surprised = expr.surprised ?? 0;
       const angry = expr.angry ?? 0;
-      const distressRaw = sad * 1.0 + fearful * 1.4 + angry * 0.8;
+      const distressRaw = sad * 1.0 + fearful * 1.4 + surprised * 1.2 + angry * 0.8;
       const instant = Math.min(100, Math.round(distressRaw * 100));
       // Temporal smoothing — rolling avg over last 5 samples to suppress flicker
       historyRef.current.push(instant);
