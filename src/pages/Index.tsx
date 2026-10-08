@@ -294,20 +294,46 @@ export default function Index() {
       storeEvent(event);
       return;
     }
+
     raiseAlert(event, event.type === 'fire' || event.type === 'smoke' || event.type === 'multimodal-distress' ? 'critical' : 'high');
-  }, [storeEvent, raiseAlert]);
+
+    // A verified face+voice/fire+voice event also passes through the household
+    // wake-word database. This records the configured Supabase wake word only
+    // after multimodal verification; an unaccepted KWS candidate never reaches
+    // this database/notification path.
+    if (event.type === 'multimodal-distress'
+        || (event.type === 'fire' && /sunog/i.test(event.label))) {
+      const match = checkForWakeWord(event.label);
+      if (match.matched) {
+        void logNotification(match.wakeWordId, match.phrase, match.actionType, match.isEmergency);
+      }
+    }
+  }, [storeEvent, raiseAlert, checkForWakeWord, logNotification]);
 
   const handleMetrics = useCallback((index: number, runtime: CameraRuntime) => {
     setRuntimes(previous => previous[index] === runtime ? previous : { ...previous, [index]: runtime });
-    // CCTV help/tulong and sunog are reserved for same-camera multimodal
-    // verification inside useCameraPipeline. Never promote them as speech-only
-    // wake-word alerts here.
-    if (runtime.transcript && (
-      makeDistressSpeechSignal(runtime.transcript)
-      || makeSunogSignal(runtime.transcript)
-    )) return;
-    const match = runtime.transcript ? checkForWakeWord(runtime.transcript) : null;
-    if (!match?.matched) return;
+
+    // In custom mode only an ACCEPTED KWS result is allowed into the household
+    // wake-word database. last_candidate is diagnostic and may be rejected.
+    const customMode = runtime.audio?.recognition_engine === 'custom';
+    const kws = runtime.audio?.custom_kws;
+    const acceptedCustomKeyword = customMode && kws?.last_decision === 'accepted'
+      ? (kws.last_keyword || '').trim()
+      : '';
+    const recognizedSpeech = customMode ? acceptedCustomKeyword : runtime.transcript.trim();
+    if (!recognizedSpeech) return;
+
+    // Always check accepted speech against the household Supabase wake_words
+    // table first. help/tulong/sunog remain reserved from standalone alarms;
+    // their database notification is logged only after face/fire verification
+    // in handleEvent above.
+    const match = checkForWakeWord(recognizedSpeech);
+    if (
+      makeDistressSpeechSignal(recognizedSpeech)
+      || makeSunogSignal(recognizedSpeech)
+    ) return;
+
+    if (!match.matched) return;
     const previous = householdMatches.current.get(index);
     const now = Date.now();
     if (previous?.phrase === match.phrase && now - previous.at < 15000) return;
