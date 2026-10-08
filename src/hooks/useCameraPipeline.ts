@@ -244,7 +244,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     (type: DetectionEvent['type'], label: string, confidence: number) => {
       const now = Date.now();
       const key = type === 'fire' ? 'fire' : `${type}:${label}`;
-      if (cooldownRef.current[key] && now - cooldownRef.current[key] < 15000) return;
+      const cooldownMs = settings.alertCooldownMs ?? 3000;
+      if (cooldownRef.current[key] && now - cooldownRef.current[key] < cooldownMs) return;
       cooldownRef.current[key] = now;
       runtimeRef.current.alerts += 1;
       onEventRef.current?.({
@@ -258,7 +259,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         snapshot: snapshot(),
       });
     },
-    [camera.id, camera.name, camera.location, snapshot],
+    [camera.id, camera.name, camera.location, snapshot, settings.alertCooldownMs],
   );
 
   const maybeEmitVerifiedDistress = useCallback(() => {
@@ -580,13 +581,26 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       const attentionThreshold = settings.attentionThreshold ?? DEFAULT_ATTENTION_THRESHOLD;
       if (validation.ready && attentionScore > attentionThreshold) {
         emit('saliency', `Salient scene (${attentionScore})`, attentionScore / 100);
+
+        // Chapter III evaluates an alert condition only after α(t) crosses τ.
+        // Priority-object evidence or loud active speech/audio becomes a
+        // non-emergency attention notification; dedicated fire/distress
+        // validators remain responsible for critical alarms.
+        const loudActiveAudio = audioScore >= 60
+          && runtimeRef.current.audio?.custom_kws?.vad_active === true;
+        if (objectScore > 0 || loudActiveAudio) {
+          const reason = objectScore > 0 && loudActiveAudio
+            ? 'priority object + loud audio'
+            : objectScore > 0 ? 'priority object' : 'loud audio';
+          emit('attention-alert', `Attention alert: ${reason} (α=${attentionScore})`, attentionScore / 100);
+        }
       }
     } catch {
       // A detector failure does not interrupt previews, playback, or audio.
     } finally {
       busyRef.current = false;
     }
-  }, [camera.enabled, camera.aiEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.saliencyMode, settings.attentionThreshold, settings.priorityObjects, analyzeFace, drawWorkFrame, patch, emit, maybeEmitVerifiedFire]);
+  }, [camera.enabled, camera.aiEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.saliencyMode, settings.attentionThreshold, settings.alertCooldownMs, settings.priorityObjects, analyzeFace, drawWorkFrame, patch, emit, maybeEmitVerifiedFire]);
   const analyzeFrameRef = useRef(analyzeFrame);
   analyzeFrameRef.current = analyzeFrame;
 
