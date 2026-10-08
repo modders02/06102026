@@ -143,8 +143,8 @@ describe('shared live camera views', () => {
           last_required_margin: 0.0341,
           last_negative_confidence: 0.895,
           last_duration_ratio: 1.12,
-          last_decision: 'accepted',
-          last_keyword: 'help',
+          last_decision: 'duration_mismatch',
+          last_keyword: 'tulong',
           last_processing_ms: 205.95,
         },
         error: null,
@@ -161,15 +161,15 @@ describe('shared live camera views', () => {
     );
 
     expect(screen.getByText('Safety keyword detection')).toBeInTheDocument();
-    expect(screen.getByText('Listening for trained safety keywords…')).toBeInTheDocument();
+    expect(screen.getByText('Candidate: help (93.4%) · duration_mismatch')).toBeInTheDocument();
     expect(screen.queryByText('Listening… no speech heard yet.')).not.toBeInTheDocument();
     const diagnostics = screen.getByTestId('voice-diagnostics');
     expect(within(diagnostics).getByText('Voice diagnostics')).toBeInTheDocument();
-    expect(within(diagnostics).getByText('accepted')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('duration_mismatch')).toBeInTheDocument();
     expect(within(diagnostics).getByText(/help \(93\.4%\)/)).toBeInTheDocument();
     expect(within(diagnostics).getByText(/tulong \(89\.8%\)/)).toBeInTheDocument();
     expect(within(diagnostics).getByText('0.0354 / 0.0341')).toBeInTheDocument();
-    expect(within(diagnostics).getByText('help', { selector: 'span.font-mono' })).toBeInTheDocument();
+    expect(within(diagnostics).getByText('tulong', { selector: 'span.font-mono' })).toBeInTheDocument();
   });
 
   it('changes focused camera and layout without changing configured slots', () => {
