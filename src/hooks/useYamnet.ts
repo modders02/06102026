@@ -140,7 +140,7 @@ export function useYamnet(enabled: boolean) {
           for (let i = 0; i < window.length; i++) sumSq += window[i] * window[i];
           const rms = Math.sqrt(sumSq / window.length);
           if (rms < 0.004) {
-            setResult(r => (r.distressScore === 0 && r.topLabel === 'silence'
+            setResult(r => (r.distressScore === 0 && r.fireScore === 0 && r.topLabel === 'silence'
               ? r
               : { ...r, topLabel: 'silence', topScore: 0, distressScore: 0, fireScore: 0, fireLabel: '—', fireAlarm: false, ready: true }));
             return;
