@@ -4,7 +4,7 @@
  * Responsibilities:
  *  - Create the desktop window and load the existing React build (dist/index.html)
  *    in production, or the Vite dev server in development.
- *  - Own the local machine privileges (FFmpeg, RTSP, Whisper) that a browser cannot have.
+ *  - Own the local machine privileges (FFmpeg, RTSP, trained custom KWS) that a browser cannot have.
  *
  * Security: contextIsolation ON, nodeIntegration OFF. The renderer talks to the
  * main process only through the typed bridge exposed in preload.cjs.
