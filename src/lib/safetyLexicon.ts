@@ -411,32 +411,26 @@ const TL_CHILD_AWARENESS: SafetyPhrase[] = [
   P('nakakulong ako sa labas', 'tl', 'awareness', 'medium', 0.72),
 ];
 
-export const SAFETY_LEXICON: SafetyPhrase[] = [
+const ALL_SAFETY_LEXICON: SafetyPhrase[] = [
   ...EN_HELP, ...EN_EMERGENCY, ...EN_MEDICAL, ...EN_FALL, ...EN_FIRE,
   ...EN_GAS_ELEC_WATER, ...EN_INTRUDER, ...EN_VIOLENCE, ...EN_CHILD_AWARENESS,
   ...TL_HELP, ...TL_EMERGENCY, ...TL_MEDICAL, ...TL_FALL, ...TL_FIRE,
   ...TL_GAS_ELEC_WATER, ...TL_INTRUDER, ...TL_VIOLENCE, ...TL_CHILD_AWARENESS,
 ];
 
+/** Chapter I language scope for the panelist-compliance runtime. */
+export const SAFETY_LANGUAGE_SCOPE = 'en' as const;
+
 /**
- * Common Whisper spellings / regional variants that should resolve to the
- * same entry. Keys are written exactly as they may appear in a transcript.
+ * Only English entries are indexed on this branch. The bilingual/Tagalog
+ * runtime remains preserved on tagalog-kws-experimental.
  */
+export const SAFETY_LEXICON: SafetyPhrase[] = ALL_SAFETY_LEXICON.filter(
+  phrase => phrase.lang === SAFETY_LANGUAGE_SCOPE,
+);
+
 const VARIANTS: Record<string, string> = {
-  'tulong po ako': 'tulong po',
-  'tulungan po ninyo ako': 'tulungan niyo ako',
-  'tulungan nyo ako': 'tulungan niyo ako',
-  'sakloloo': 'saklolo',
-  'saklolo ako': 'saklolo',
-  'may sonog': 'may sunog',
-  'sonog': 'sunog',
-  'wag po': 'huwag po',
-  'wag': 'huwag',
-  'aray ko po': 'aray ko',
-  'help po': 'help me',
   'help help': 'help me',
-  'nakakuryente ako': 'nakuryente ako',
-  'hold up': 'holdap',
   'nine one one': 'call 911',
 };
 
@@ -458,7 +452,7 @@ const INDEX: { key: string; entry: SafetyPhrase }[] = SAFETY_LEXICON
       return entry ? [{ key: normalize(variant), entry }] : [];
     }),
   )
-  // Longest phrases first so "tulungan mo ako" beats bare "tulong".
+  // Longest English phrases first so a specific emergency phrase wins over a shorter token.
   .sort((a, b) => b.key.length - a.key.length);
 
 export interface SafetyMatch {
@@ -518,8 +512,7 @@ export const SAFETY_LEXICON_SIZE = SAFETY_LEXICON.length;
 /**
  * Wake words: the safety-only subset. Everyday awareness chatter ("be careful",
  * "someone is at the door") never wakes the system — only urgent, safety
- * phrases such as help, help me, police, call the police, tulong, pulis,
- * tumawag kayo ng pulis do.
+ * phrases such as help, help me, police, call the police, fire, and emergency do.
  */
 export const SAFETY_WAKE_WORDS: SafetyPhrase[] = SAFETY_LEXICON.filter(
   p => p.severity === 'critical' || p.severity === 'high',
