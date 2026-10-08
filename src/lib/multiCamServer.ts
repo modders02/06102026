@@ -78,9 +78,20 @@ export interface CctvAudioStatus {
       keyword?: string;
       message?: string;
     } | null;
+    last_segment_ms?: number;
+    last_candidate?: string | null;
+    last_candidate_confidence?: number;
+    last_runner_up_keyword?: string | null;
+    last_runner_up_confidence?: number;
+    last_class_margin?: number;
+    last_required_margin?: number;
+    last_negative_confidence?: number;
+    last_duration_ratio?: number;
+    last_decision?: string | null;
     last_keyword?: string | null;
     last_confidence?: number;
-    last_decision?: string | null;
+    last_detected_at?: string | null;
+    last_processing_ms?: number;
   };
 
   whisper_available?: boolean;
