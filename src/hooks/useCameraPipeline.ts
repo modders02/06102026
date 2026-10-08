@@ -4,7 +4,7 @@ import { createPlaybackFrameCounter } from '@/lib/cameraPlayback';
 import { captureCameraEventSnapshot, captureVideoSnapshot } from '@/lib/cameraEventSnapshot';
 import { detectObjects, loadDetector } from '@/lib/detectionEngine';
 import { computeSaliency, computeSaliencyScore } from '@/lib/saliency';
-import { computeMultimodalAttention } from '@/lib/multimodalAttention';
+import { computeMultimodalAttention, computeObjectImportance } from '@/lib/multimodalAttention';
 import { createFireState, detectFire } from '@/lib/fireDetection';
 import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/multiCamServer';
 import { useFaceDistress } from '@/hooks/useFaceDistress';
@@ -453,8 +453,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       const sal = computeSaliency(frame, prevFrameRef.current, 'sobel', settings.saliencyThreshold ?? 40);
       prevFrameRef.current = frame;
       const saliencyScore = computeSaliencyScore(sal);
-      const objectScore = objects.length > 0
-        ? Math.max(...objects.map(object => object.confidence * 100)) : 0;
+      const objectScore = computeObjectImportance(objects, settings.priorityObjects ?? []);
       const audioScore = runtimeRef.current.audioDistress.detected
         ? runtimeRef.current.audioDistress.confidence * 100 : 0;
       const attentionScore = computeMultimodalAttention({
