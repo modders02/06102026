@@ -37,8 +37,8 @@ const CORE_ALGORITHMS: AlgorithmCard[] = [
   {
     id: 'speech',
     name: 'CCTV Speech + Safety Words',
-    file: 'camera.py · whisper_engine.py · safetyLexicon.ts',
-    summary: 'Transcribes the camera microphone in English or Tagalog, then checks the full sentence for safety phrases.',
+    file: 'camera.py · kws_engine.py · safetyLexicon.ts',
+    summary: 'Runs trained custom keyword spotting on CCTV microphone audio, then sends only accepted safety-word events into multimodal validation.',
     icon: ShieldAlert,
   },
   {
