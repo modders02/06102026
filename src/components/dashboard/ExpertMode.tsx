@@ -37,15 +37,15 @@ const CORE_ALGORITHMS: AlgorithmCard[] = [
   {
     id: 'speech',
     name: 'CCTV Speech + Safety Words',
-    file: 'camera.py · whisper_engine.py · safetyLexicon.ts',
-    summary: 'Transcribes the camera microphone in English or Tagalog, then checks the full sentence for safety phrases.',
+    file: 'camera.py · kws_engine.py · safetyLexicon.ts',
+    summary: 'Processes the CCTV microphone locally with the trained custom keyword engine, then validates accepted safety cues before fusion.',
     icon: ShieldAlert,
   },
   {
     id: 'audio',
     name: 'Sound Distress',
     file: 'useYamnet.ts',
-    summary: 'Classifies sounds such as screaming, crying, and shouting, while ignoring ordinary sound and silence.',
+    summary: 'Classifies distress sounds plus fire, crackle, smoke-alarm, and fire-alarm cues while suppressing ordinary vocalisation and silence.',
     icon: Volume2,
   },
 ];
