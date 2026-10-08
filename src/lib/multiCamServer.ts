@@ -64,8 +64,8 @@ export interface CctvAudioStatus {
   audio_source?: string | null;
   audio_sources_tried?: string[];
   chunk_seconds?: number;
-  /** hybrid = custom safety keywords + Whisper text; custom = keyword spotting only. */
-  recognition_engine?: 'hybrid' | 'custom' | string;
+  /** Trained custom keyword spotting is the active CCTV speech recognizer. */
+  recognition_engine?: 'custom' | string;
   custom_kws?: {
     engine?: string;
     feature_version?: string;
@@ -103,20 +103,20 @@ export interface CctvAudioStatus {
   available_camera_ids?: string[];
 }
 
-/** One short, human-readable line describing why transcription is (not) working. */
+/** One short, human-readable line describing trained CCTV keyword detection. */
 export function describeAudioStatus(
   status: CctvAudioStatus | null,
   reachable: boolean,
 ): { message: string; tone: 'ok' | 'wait' | 'error' } {
   if (!reachable || !status) {
     return {
-      message: 'Cannot reach the local camera service — transcription is paused.',
+      message: 'Cannot reach the local camera service — keyword detection is paused.',
       tone: 'error',
     };
   }
   if (status.has_audio_track === false) {
     return {
-      message: 'This camera does not send sound over its network stream, so there is nothing to transcribe.',
+      message: 'This camera does not send sound over its network stream, so there is nothing to analyze.',
       tone: 'error',
     };
   }
@@ -154,7 +154,7 @@ export function describeAudioStatus(
   if (customOnly) {
     if (!status.custom_kws?.open_set_ready) {
       return {
-        message: 'Custom keyword mode — training is incomplete; no general speech transcription is running.',
+        message: 'Trained keyword detection is not ready yet — finish keyword and UNKNOWN enrollment.',
         tone: 'wait',
       };
     }
@@ -269,7 +269,7 @@ export const testCamera = (server: string, rtsp: string) =>
   req<{ success: boolean; error?: string; info?: string }>(
     `${base(server)}/test-connection`, json({ rtsp }), 25000);
 
-/** Audio distress events produced by ffmpeg -> Whisper on the backend. */
+/** Accepted trained keyword and distress-sound events from the CCTV audio backend. */
 export const getAudioEvents = (server: string, id: string, since?: string) =>
   req<{ events: AudioEvent[]; status: CctvAudioStatus }>(
     `${base(server)}/cameras/${id}/audio-events${since ? `?since=${encodeURIComponent(since)}` : ''}`,
@@ -290,7 +290,7 @@ export interface AudioTestReport {
   available_camera_ids?: string[];
 }
 
-/** One-shot diagnostic of a camera's RTSP audio path (probe + capture + Whisper). */
+/** One-shot diagnostic of the RTSP audio path and trained custom KWS. */
 export const testCameraAudio = (server: string, id: string) =>
   req<AudioTestReport>(`${base(server)}/cameras/${id}/audio-test`, { method: 'POST' }, 60000);
 
