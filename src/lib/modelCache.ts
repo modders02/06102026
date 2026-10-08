@@ -23,7 +23,7 @@ export const PREFETCH_URLS: { label: string; url: string }[] = [
   },
   {
     label: 'YAMNet audio model',
-    url: 'https://tfhub.dev/google/tfjs-models/tfjs/yamnet/tfjs/1/model.json?tfjs-format=file',
+    url: 'https://tfhub.dev/google/tfjs-model/yamnet/tfjs/1/model.json?tfjs-format=file',
   },
   {
     label: 'face-api tiny detector',
