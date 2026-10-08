@@ -71,7 +71,7 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   fire: [
     {
       selector: '#tour-fire-analysis', placement: 'top', title: 'Fire and smoke analysis',
-      body: 'The system combines visual fire candidates, smoke-region coverage, visibility, and speech corroboration. “FireSpeech” alone never alarms; a visual fire candidate + “fire”, or visual fire + a smoke region/low visibility, triggers immediately.',
+      body: 'The system combines visual fire candidates, smoke-region coverage, visibility, and speech corroboration. “Fire” alone never alarms; a visual fire candidate + “fire”, or visual fire + a smoke region/low visibility, triggers immediately.',
       implementation: 'src/lib/fireDetection.ts',
       code: `if (visualFire && fireSpeechWithin10s) alert();\nif (visualFire && (smokeRegion || lowVisibility)) alert();`,
     },
@@ -79,7 +79,7 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   face: [
     {
       selector: '#tour-face-distress', placement: 'top', title: 'Facial distress',
-      body: 'TinyFaceDetector finds the main face. The model\'s surprised/shock-like expression is presented as Frightened. Facial expressions never alarm by themselves: Angry or Frightened can verify help, tulong, or screaming within the fusion window.',
+      body: 'TinyFaceDetector finds the main face. The model\'s surprised/shock-like expression is presented as Frightened. Facial expressions never alarm by themselves: Angry or Frightened can verify help, emergency, or screaming within the fusion window.',
       implementation: 'src/hooks/useFaceDistress.ts',
       code: `frightened = fearful || surprised;\nalert = fuse(angryOrFrightened, helpOrEmergencyOrScream, 10_000);`,
     },
@@ -341,7 +341,7 @@ export default function Index() {
     if (!recognizedSpeech) return;
 
     // Always check accepted speech against the household Supabase wake_words
-    // table first. help/emergency/fireSpeech remain reserved from standalone alarms;
+    // table first. help/emergency/fire remain reserved from standalone alarms;
     // their database notification is logged only after face/fire verification
     // in handleEvent above.
     const match = checkForWakeWord(recognizedSpeech);
