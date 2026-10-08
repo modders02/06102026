@@ -27,7 +27,9 @@ export interface VerifiedMultimodalDistress {
 export function isMultimodalDistressExpression(expression: string | null | undefined) {
   const normalized = (expression ?? '').trim().toLowerCase();
   return normalized === 'angry' || normalized === 'anger'
-    || normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened';
+    || normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
+    || normalized === 'surprised' || normalized === 'surprise'
+    || normalized === 'shock' || normalized === 'shocked';
 }
 
 export function makeDistressFaceSignal(
@@ -40,7 +42,11 @@ export function makeDistressFaceSignal(
   if (normalized === 'angry' || normalized === 'anger') {
     return { label: 'Angry', confidence, at };
   }
-  if (normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened') {
+  if (
+    normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
+    || normalized === 'surprised' || normalized === 'surprise'
+    || normalized === 'shock' || normalized === 'shocked'
+  ) {
     return { label: 'Frightened', confidence, at };
   }
   return null;
