@@ -12,15 +12,15 @@ export interface FireVisualSignal {
   lowVisibilityCorroborated: boolean;
 }
 
-export interface SunogSignal {
+export interface FireSpeechSignal {
   confidence: number;
   at: number;
-  phrase: 'sunog';
+  phrase: 'fire';
 }
 
 export interface VerifiedFireSpeech {
   fire: FireVisualSignal;
-  speech: SunogSignal;
+  speech: FireSpeechSignal;
   confidence: number;
   at: number;
 }
@@ -58,12 +58,12 @@ export function makeFireVisualSignal(
   };
 }
 
-/** Reserve only the explicit Tagalog fire keyword family for visual verification. */
-export function makeSunogSignal(
+/** English-only spoken fire cue reserved for visual verification. */
+export function makeFireSpeechSignal(
   transcript: string | null | undefined,
   confidence = 1,
   at = Date.now(),
-): SunogSignal | null {
+): FireSpeechSignal | null {
   const normalized = (transcript ?? '')
     .toLocaleLowerCase()
     .normalize('NFKD')
@@ -71,20 +71,13 @@ export function makeSunogSignal(
     .replace(/[^a-z]+/g, ' ')
     .trim();
 
-  // Covers "sunog", "may sunog", "amoy sunog", Whisper's common "sonog",
-  // and "nasusunog" while avoiding unrelated fire vocabulary such as "usok".
-  const matched =
-    /(^| )sunog( |$)/.test(normalized)
-    || /(^| )sonog( |$)/.test(normalized)
-    || /(^| )nasusunog( |$)/.test(normalized);
-
-  if (!matched) return null;
-  return { phrase: 'sunog', confidence: clamp01(confidence), at };
+  if (!/(^| )fire( |$)/.test(normalized)) return null;
+  return { phrase: 'fire', confidence: clamp01(confidence), at };
 }
 
-export function fuseFireWithSunog(
+export function fuseFireWithSpeech(
   fire: FireVisualSignal | null | undefined,
-  speech: SunogSignal | null | undefined,
+  speech: FireSpeechSignal | null | undefined,
   windowMs = FIRE_FUSION_WINDOW_MS,
 ): VerifiedFireSpeech | null {
   if (!fire || !speech || Math.abs(fire.at - speech.at) > windowMs) return null;
@@ -111,7 +104,7 @@ export function isImmediateFireSmoke(
 }
 
 export function fireSpeechLabel() {
-  return 'Verified fire: visual fire + "sunog"';
+  return 'Verified fire: visual fire + "fire"';
 }
 
 export function fireSmokeLabel(fire: FireVisualSignal) {
