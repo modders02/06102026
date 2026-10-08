@@ -4,6 +4,7 @@ import { createPlaybackFrameCounter } from '@/lib/cameraPlayback';
 import { captureCameraEventSnapshot, captureVideoSnapshot } from '@/lib/cameraEventSnapshot';
 import { detectObjects, loadDetector } from '@/lib/detectionEngine';
 import { computeSaliency, computeSaliencyScore } from '@/lib/saliency';
+import { computeMultimodalAttention } from '@/lib/multimodalAttention';
 import { createFireState, detectFire } from '@/lib/fireDetection';
 import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/multiCamServer';
 import { useFaceDistress } from '@/hooks/useFaceDistress';
@@ -119,7 +120,7 @@ interface Options {
 /**
  * One fully independent Multimodal Saliency Detection pipeline per camera:
  * its own realtime player, frame queue, fire/saliency state, face session,
- * Whisper audio polling, statistics and fault-tolerant reconnect.
+ * custom KWS audio polling, statistics and fault-tolerant reconnect.
  */
 export function useCameraPipeline({ camera, settings, onEvent, managedVideo = false, playbackEnabled = true, sourceStream = null }: Options) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -456,9 +457,11 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         ? Math.max(...objects.map(object => object.confidence * 100)) : 0;
       const audioScore = runtimeRef.current.audioDistress.detected
         ? runtimeRef.current.audioDistress.confidence * 100 : 0;
-      const attentionScore = Math.min(100, Math.round(
-        0.5 * saliencyScore + 0.3 * objectScore + 0.2 * audioScore,
-      ));
+      const attentionScore = computeMultimodalAttention({
+        visual: saliencyScore,
+        audio: audioScore,
+        object: objectScore,
+      });
       const fire = detectFire(frame, fireStateRef.current, objects);
       const fireObservedAt = Date.now();
 
@@ -677,7 +680,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     // erase a recent distress face. Its timestamp expires naturally in fusion.
   }, [camera.enabled, camera.aiEnabled, face.distress, patch, emit, maybeEmitVerifiedDistress]);
 
-  // ---- Audio: RTSP audio -> ffmpeg -> Whisper on the backend ---------------
+  // ---- Audio: RTSP audio -> ffmpeg -> trained custom KWS on the backend ----
   // The browser never opens a microphone. Listening runs whenever the camera is
   // connected, independently of the AI detection switch.
   useEffect(() => {
