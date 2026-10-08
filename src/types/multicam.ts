@@ -1,4 +1,4 @@
-import type { DetectedObject } from '@/types/dashboard';
+import type { DetectedObject, SaliencyMode } from '@/types/dashboard';
 import type { CctvAudioStatus } from '@/lib/multiCamServer';
 import { cameraPlaybackUrl } from '@/lib/cameraStreamEndpoints';
 
@@ -33,6 +33,10 @@ export interface MultiCamSettings {
   fireThreshold: number;      // 0..1
   objectThreshold: number;    // 0..1
   saliencyThreshold?: number; // image edge threshold, default 40
+  /** User-selectable saliency operator from the Chapter III algorithm. */
+  saliencyMode?: SaliencyMode;
+  /** Unified attention threshold τ on the normalized 0..100 score. */
+  attentionThreshold?: number;
   /** Limit object history to these labels; people are always included. */
   priorityObjects?: string[];
   audioThreshold: number;     // 0..1
@@ -50,7 +54,8 @@ export type DetectionType =
   | 'audio-distress'
   | 'multimodal-distress'
   | 'emotion'
-  | 'saliency';
+  | 'saliency'
+  | 'motion-anomaly';
 
 export interface DetectionEvent {
   id: string;
@@ -80,8 +85,28 @@ export interface CameraRuntime {
   transport?: 'webrtc' | 'hls' | 'local';
   playbackWarning?: string | null;
   saliencyScore: number;
-  /** Per-camera multimodal score: visual saliency + objects + CCTV audio distress. */
+  /** SOP weighted fusion score: 0.4 visual + 0.3 audio + 0.3 object. */
   attentionScore: number;
+  /** Normalized A(t) from the camera microphone RMS/intensity. */
+  audioIntensityScore?: number;
+  /** Normalized Oweight(t) from configured priority object confidences. */
+  objectRelevanceScore?: number;
+  /** Validation-layer status for degraded lighting/audio/latency. */
+  validation?: {
+    ready: boolean;
+    visualUsable: boolean;
+    audioUsable: boolean;
+    objectUsable: boolean;
+    flags: string[];
+  };
+  motionAnomaly?: {
+    detected: boolean;
+    kind: string | null;
+    label: string;
+    confidence: number;
+    motionScore: number;
+    activeRatio: number;
+  };
   objects: DetectedObject[];
   /** Coordinate system used for detection boxes. */
   frameWidth?: number;
@@ -125,6 +150,8 @@ export const DEFAULT_SETTINGS: MultiCamSettings = {
   fireThreshold: 0.55,
   objectThreshold: 0.45,
   audioThreshold: 0.6,
+  saliencyMode: 'sobel',
+  attentionThreshold: 15,
   maxCameras: 16,
   gridLayout: '2x2',
   streamQuality: 'auto',
