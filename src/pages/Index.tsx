@@ -80,14 +80,14 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   ],
   speech: [
     {
-      selector: '#tour-live-transcription', placement: 'bottom', title: 'CCTV speech transcription',
-      body: 'Sound comes from the CCTV RTSP stream. FFmpeg creates 16 kHz mono WAV chunks, then local Whisper returns the complete English or Tagalog sentence.',
-      implementation: 'local-server/msds/camera.py · local-server/msds/whisper_engine.py',
-      code: `RTSP audio → FFmpeg WAV chunks → Whisper sentence`,
+      selector: '#tour-live-transcription', placement: 'bottom', title: 'Trained safety keyword detection',
+      body: 'Sound comes from the CCTV RTSP stream. FFmpeg converts it to 16 kHz mono PCM, then the trained custom KWS engine evaluates speech segments against the enrolled safety-word templates.',
+      implementation: 'local-server/msds/camera.py · local-server/msds/kws_engine.py',
+      code: `RTSP audio → 16 kHz PCM → VAD → log-Mel + DTW → trained keyword decision`,
     },
     {
       selector: '#tour-live-transcription', placement: 'bottom', title: 'Safety phrase matching',
-      body: 'The complete sentence stays visible. “Help” and “tulong” require a recent Angry/Frightened face; “sunog” requires a recent visual fire candidate. Other urgent safety phrases keep their existing alert rules.',
+      body: 'Only accepted trained safety keywords are published. “Help” and “tulong” require a recent Angry/Frightened face, while “sunog” requires a recent visual fire candidate.',
       implementation: 'src/lib/safetyLexicon.ts',
       code: `if (angryOrFrightened && hasHelpOrTulong && within10Seconds) raiseVerifiedAlert();`,
     },
@@ -103,7 +103,7 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   hybrid: [
     {
       selector: '#tour-fused-view', placement: 'bottom', title: '1. Observe every signal',
-      body: 'The hybrid system watches visual saliency and objects while listening for sound distress and English or Tagalog safety speech. It also checks faces, fire, smoke, and visibility.',
+      body: 'The multimodal system watches visual saliency and objects while the trained custom KWS listens for enrolled safety keywords. It also checks faces, fire, smoke, visibility, and distress sounds.',
       implementation: 'src/hooks/useCameraPipeline.ts',
       code: `vision + objects + sound + speech + face + fire + smoke`,
     },
@@ -515,7 +515,7 @@ export default function Index() {
   const tutorialSteps: TutorialStep[] = [
     { selector: '#tour-header', title: 'Monitoring dashboard', placement: 'bottom', body: 'Connect your cameras and review their latest snapshots here.' },
     { selector: '#tour-cams', title: 'Last-seen images', placement: 'bottom', body: 'Each card holds the last image captured from its camera. Open a connected camera for realtime video; offline cards open connection settings.' },
-    { selector: '#tour-live-transcription', title: 'Camera audio', placement: 'bottom', body: 'CCTV speech and safety triggers continue while the dashboard displays snapshots. Muting live playback does not stop listening.' },
+    { selector: '#tour-live-transcription', title: 'Camera audio', placement: 'bottom', body: 'The trained CCTV safety-keyword detector continues while the dashboard displays snapshots. Muting live playback does not stop listening.' },
     { selector: '#tour-alert-log', title: 'Safety alerts', placement: 'left', body: 'Urgent safety triggers appear here. Each card’s Events button opens detailed alerts and history on the Cameras page.' },
     { selector: '#tour-start', title: 'Monitoring controls', placement: 'left', body: 'Use Start and Stop to control monitoring. Live video plays only on the Cameras page.' },
   ];
