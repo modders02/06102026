@@ -37,9 +37,9 @@ import {
 } from '@/lib/attentionFusion';
 import {
   fireSpeechLabel,
-  fuseFireWithSunog,
+  fuseFireWithSpeech,
   makeFireVisualSignal,
-  makeSunogSignal,
+  makeFireSpeechSignal,
 } from '@/lib/fireFusion';
 import { makeDistressFaceSignal, makeDistressSoundSignal, makeDistressSpeechSignal, multimodalDistressLabel, fuseDistressSignals } from '@/lib/multimodalDistress';
 import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
@@ -71,9 +71,9 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   fire: [
     {
       selector: '#tour-fire-analysis', placement: 'top', title: 'Fire and smoke analysis',
-      body: 'The system combines visual fire candidates, smoke-region coverage, visibility, and speech corroboration. “Sunog” alone never alarms; a visual fire candidate + “sunog”, or visual fire + a smoke region/low visibility, triggers immediately.',
+      body: 'The system combines visual fire candidates, smoke-region coverage, visibility, and speech corroboration. “FireSpeech” alone never alarms; a visual fire candidate + “fire”, or visual fire + a smoke region/low visibility, triggers immediately.',
       implementation: 'src/lib/fireDetection.ts',
-      code: `if (visualFire && sunogWithin10s) alert();\nif (visualFire && (smokeRegion || lowVisibility)) alert();`,
+      code: `if (visualFire && fireSpeechWithin10s) alert();\nif (visualFire && (smokeRegion || lowVisibility)) alert();`,
     },
   ],
   face: [
@@ -81,7 +81,7 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
       selector: '#tour-face-distress', placement: 'top', title: 'Facial distress',
       body: 'TinyFaceDetector finds the main face. The model\'s surprised/shock-like expression is presented as Frightened. Facial expressions never alarm by themselves: Angry or Frightened can verify help, tulong, or screaming within the fusion window.',
       implementation: 'src/hooks/useFaceDistress.ts',
-      code: `frightened = fearful || surprised;\nalert = fuse(angryOrFrightened, helpOrTulongOrScream, 10_000);`,
+      code: `frightened = fearful || surprised;\nalert = fuse(angryOrFrightened, helpOrEmergencyOrScream, 10_000);`,
     },
   ],
   speech: [
@@ -93,9 +93,9 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
     },
     {
       selector: '#tour-live-transcription', placement: 'bottom', title: 'Safety phrase matching',
-      body: 'Only accepted trained safety keywords are published. “Help” and “tulong” require a recent Angry/Frightened face, while “sunog” requires a recent visual fire candidate.',
+      body: 'Only accepted trained safety keywords are published. “Help” and “emergency” require a recent Angry/Frightened face, while “fire” requires a recent visual fire candidate.',
       implementation: 'src/lib/safetyLexicon.ts',
-      code: `if (angryOrFrightened && hasHelpOrTulong && within10Seconds) raiseVerifiedAlert();`,
+      code: `if (angryOrFrightened && hasHelpOrEmergency && within10Seconds) raiseVerifiedAlert();`,
     },
   ],
   audio: [
@@ -319,7 +319,7 @@ export default function Index() {
     // after multimodal verification; an unaccepted KWS candidate never reaches
     // this database/notification path.
     if (event.type === 'multimodal-distress'
-        || (event.type === 'fire' && /sunog/i.test(event.label))) {
+        || (event.type === 'fire' && /\bfire\b/i.test(event.label))) {
       const match = checkForWakeWord(event.label);
       if (match.matched) {
         void logNotification(match.wakeWordId, match.phrase, match.actionType, match.isEmergency);
@@ -341,13 +341,13 @@ export default function Index() {
     if (!recognizedSpeech) return;
 
     // Always check accepted speech against the household Supabase wake_words
-    // table first. help/tulong/sunog remain reserved from standalone alarms;
+    // table first. help/emergency/fireSpeech remain reserved from standalone alarms;
     // their database notification is logged only after face/fire verification
     // in handleEvent above.
     const match = checkForWakeWord(recognizedSpeech);
     if (
       makeDistressSpeechSignal(recognizedSpeech)
-      || makeSunogSignal(recognizedSpeech)
+      || makeFireSpeechSignal(recognizedSpeech)
     ) return;
 
     if (!match.matched) return;
@@ -369,8 +369,8 @@ export default function Index() {
     const text = `${speech.transcript} ${speech.interimTranscript}`.trim();
     const runtime = runtimes[1];
 
-    const sunog = makeSunogSignal(text);
-    if (sunog) {
+    const fireSpeech = makeFireSpeechSignal(text);
+    if (fireSpeech) {
       const fireState = runtime?.fire;
       const candidateAt = fireState?.candidateAt ?? 0;
       const recentCandidate = candidateAt > 0 && Date.now() - candidateAt <= 10_000;
@@ -382,7 +382,7 @@ export default function Index() {
         fireState.visibility ?? 100,
         candidateAt || Date.now(),
       ) : null;
-      const verifiedFire = fuseFireWithSunog(fireVisual, sunog);
+      const verifiedFire = fuseFireWithSpeech(fireVisual, fireSpeech);
       if (verifiedFire) {
         const slot = slots[0];
         raiseAlert({
@@ -396,7 +396,7 @@ export default function Index() {
           snapshot: captureCameraEventSnapshot('slot-1'),
         }, 'critical');
       }
-      // "sunog" is reserved for fire verification and must never continue to
+      // "fire" is reserved for fire verification and must never continue to
       // the generic wake-word path when visual fire is absent.
       return;
     }
