@@ -133,6 +133,8 @@ describe('shared live camera views', () => {
         recognition_engine: 'custom',
         custom_kws: {
           open_set_ready: true,
+          language_scope: 'en',
+          active_keywords: ['help', 'fire', 'emergency', 'danger', 'intruder', 'police', 'ambulance', 'stop'],
           ready_keywords: ['help'],
           last_segment_ms: 620,
           last_candidate: 'help',
@@ -165,6 +167,7 @@ describe('shared live camera views', () => {
     expect(screen.queryByText('Listening… no speech heard yet.')).not.toBeInTheDocument();
     const diagnostics = screen.getByTestId('voice-diagnostics');
     expect(within(diagnostics).getByText('Voice diagnostics')).toBeInTheDocument();
+    expect(within(diagnostics).getByText(/Scope:/)).toHaveTextContent('English only');
     expect(within(diagnostics).getByText('duration_mismatch')).toBeInTheDocument();
     expect(within(diagnostics).getByText(/help \(93\.4%\)/)).toBeInTheDocument();
     expect(within(diagnostics).getByText(/fire \(89\.8%\)/)).toBeInTheDocument();
