@@ -461,6 +461,24 @@ export default function Index() {
   }, [running, localCameras.length, connected.length, audioFeatures.audioEvent, slots, raiseAlert, runtimes]);
 
   useEffect(() => {
+    if (!localAudioEnabled) return;
+    // A smoke/fire alarm is a strong semantic cue. Generic Fire/Crackle is
+    // noisier in a household, so require substantially stronger evidence.
+    const threshold = yamnet.fireAlarm ? 35 : 60;
+    if (yamnet.fireScore < threshold) return;
+    raiseAlert({
+      cameraId: 'slot-1',
+      cameraName: slots[0].name,
+      location: 'Local microphone',
+      type: 'fire',
+      label: `Fire-related sound: ${yamnet.fireLabel} (${yamnet.fireScore}%)`,
+      confidence: yamnet.fireScore / 100,
+      timestamp: new Date().toISOString(),
+      snapshot: captureCameraEventSnapshot('slot-1'),
+    }, yamnet.fireAlarm ? 'critical' : 'high');
+  }, [localAudioEnabled, yamnet.fireAlarm, yamnet.fireScore, yamnet.fireLabel, slots, raiseAlert]);
+
+  useEffect(() => {
     if (!localAudioEnabled || yamnet.distressScore < 35) return;
 
     if (yamnet.topLabel === 'Screaming') {
