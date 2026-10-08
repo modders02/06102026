@@ -70,6 +70,9 @@ export interface CctvAudioStatus {
     engine?: string;
     feature_version?: string;
     ready_keywords?: string[];
+    language_scope?: string;
+    active_keywords?: string[];
+    ignored_template_folders?: string[];
     negative_ready?: boolean;
     open_set_ready?: boolean;
     pending_enrollment?: string | null;
@@ -157,7 +160,7 @@ export function describeAudioStatus(
   if (customOnly) {
     if (!status.custom_kws?.open_set_ready) {
       return {
-        message: 'Trained keyword detection is not ready yet — finish keyword and UNKNOWN enrollment.',
+        message: 'English keyword detection is not ready yet — run dataset auto-training and validate UNKNOWN.',
         tone: 'wait',
       };
     }
