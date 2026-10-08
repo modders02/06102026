@@ -73,6 +73,9 @@ export interface CctvAudioStatus {
     negative_ready?: boolean;
     open_set_ready?: boolean;
     pending_enrollment?: string | null;
+    /** Streaming VAD RMS from the 16 kHz CCTV PCM path (0..1). */
+    vad_last_rms?: number;
+    vad_active?: boolean;
     enrollment?: {
       state?: string;
       keyword?: string;
