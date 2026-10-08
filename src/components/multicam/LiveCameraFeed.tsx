@@ -33,6 +33,12 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
   const num = (value?: number, digits = 4) => typeof value === 'number'
     ? value.toFixed(digits)
     : '—';
+  const customSpeechText = customKeywordMode && kws?.last_candidate
+    ? kws.last_decision === 'accepted'
+      ? (kws.last_keyword || kws.last_candidate)
+      : `Candidate: ${kws.last_candidate} (${pct(kws.last_candidate_confidence)}) · ${kws.last_decision || 'evaluating'}`
+    : '';
+  const speechText = customSpeechText || runtime?.transcript || '';
 
   useEffect(() => {
     const container = containerRef.current;
@@ -141,9 +147,9 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
             aria-live="polite"
             aria-atomic="true"
             className="min-w-0 flex-1 truncate text-sm text-foreground"
-            title={runtime?.transcript || runtime?.audioMessage || 'Listening…'}
+            title={speechText || runtime?.audioMessage || 'Listening…'}
           >
-            {runtime?.transcript || (
+            {speechText || (
               <span className={runtime?.audioTone === 'error' ? 'text-destructive' : 'text-muted-foreground'}>
                 {runtime?.audioMessage || 'Listening…'}
               </span>
