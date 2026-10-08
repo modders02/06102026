@@ -37,6 +37,8 @@ export interface MultiCamSettings {
   saliencyMode?: SaliencyMode;
   /** Unified attention threshold τ on the normalized 0..100 score. */
   attentionThreshold?: number;
+  /** Same-event alert cooldown from Chapter III; default 3000 ms. */
+  alertCooldownMs?: number;
   /** Limit object history to these labels; people are always included. */
   priorityObjects?: string[];
   audioThreshold: number;     // 0..1
@@ -55,6 +57,7 @@ export type DetectionType =
   | 'multimodal-distress'
   | 'emotion'
   | 'saliency'
+  | 'attention-alert'
   | 'motion-anomaly';
 
 export interface DetectionEvent {
@@ -152,6 +155,7 @@ export const DEFAULT_SETTINGS: MultiCamSettings = {
   audioThreshold: 0.6,
   saliencyMode: 'sobel',
   attentionThreshold: 15,
+  alertCooldownMs: 3000,
   maxCameras: 16,
   gridLayout: '2x2',
   streamQuality: 'auto',
