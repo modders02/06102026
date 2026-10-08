@@ -91,7 +91,7 @@ afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstub
 const helpSafetyEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'help me', keyword: 'help', confidence: 0.99 };
 const standaloneSafetyEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'call police', keyword: 'police', confidence: 0.99 };
 const screamAudioEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: '', keyword: 'scream', confidence: 0.93 };
-const sunogAudioEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'may sunog', keyword: 'sunog', confidence: 0.98 };
+const fireAudioEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'fire', keyword: 'fire', confidence: 0.98 };
 
 describe('camera snapshots and page-scoped playback', () => {
   it.each([1, 2])('uses stills for camera %s on Dashboard while visual and audio triggers continue', async index => {
@@ -424,9 +424,9 @@ describe('camera snapshots and page-scoped playback', () => {
 
   it.each([
     ['angry', 'help me', 'help', 'Angry'],
-    ['fearful', 'tulong po', 'tulong', 'Frightened'],
+    ['fearful', 'emergency', 'emergency', 'Frightened'],
     ['surprised', 'help me', 'help', 'Frightened'],
-    ['shock', 'tulong po', 'tulong', 'Frightened'],
+    ['shock', 'emergency', 'emergency', 'Frightened'],
   ] as const)('verifies %s + %s as one multimodal alert', async (expression, transcript, keyword, faceLabel) => {
     mocked.getAudioEvents.mockResolvedValueOnce({
       events: [{ timestamp: '2026-10-02T00:00:01Z', transcript, keyword, confidence: 0.96 }],
@@ -450,13 +450,13 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
   });
 
-  it('keeps a recent surprised/Frightened face through neutral jitter until tulong arrives', async () => {
+  it('keeps a recent surprised/Frightened face through neutral jitter until emergency arrives', async () => {
     mocked.getAudioEvents
       .mockResolvedValueOnce({ events: [], status: null })
       .mockResolvedValueOnce({ events: [], status: null })
       .mockResolvedValueOnce({ events: [], status: null })
       .mockResolvedValueOnce({
-        events: [{ timestamp: '2026-10-02T00:00:04Z', transcript: 'tulong', keyword: 'tulong', confidence: 0.96 }],
+        events: [{ timestamp: '2026-10-02T00:00:04Z', transcript: 'emergency', keyword: 'emergency', confidence: 0.96 }],
         status: null,
       });
 
@@ -486,7 +486,7 @@ describe('camera snapshots and page-scoped playback', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: 'multimodal-distress',
-      label: 'Verified distress: Frightened + "tulong"',
+      label: 'Verified distress: Frightened + "emergency"',
       confidence: 0.94,
       cameraId: 'slot-1',
     }));
@@ -506,7 +506,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
   });
 
-  it('does not alarm on Angry without help or tulong', async () => {
+  it('does not alarm on Angry without help or emergency', async () => {
     mocked.analyzeFace.mockImplementationOnce(async () => {
       mocked.distress = { hasFace: true, expression: 'angry', probability: 0.95, distressScore: 90, distressLevel: 'severe' };
     });
@@ -529,8 +529,8 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
   });
 
-  it('does not alarm on sunog without a visual fire candidate', async () => {
-    mocked.getAudioEvents.mockResolvedValueOnce({ events: [sunogAudioEvent], status: null });
+  it('does not alarm on fire without a visual fire candidate', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     const onEvent = vi.fn();
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
@@ -539,8 +539,8 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
   });
 
-  it('verifies a small visual fire candidate plus sunog on a current visual frame', async () => {
-    mocked.getAudioEvents.mockResolvedValueOnce({ events: [sunogAudioEvent], status: null });
+  it('verifies a small visual fire candidate plus fire on a current visual frame', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
     mocked.detectFire.mockReturnValue({
       fireCandidate: true,
       fireDetected: false,
@@ -557,17 +557,17 @@ describe('camera snapshots and page-scoped playback', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: 'fire',
-      label: 'Verified fire: visual fire + "sunog"',
+      label: 'Verified fire: visual fire + "fire"',
       cameraId: 'slot-1',
       snapshot: 'data:image/jpeg;base64,preview',
     }));
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
   });
 
-  it('does not let a stale fire candidate plus sunog verify fire once a device screen is recognized', async () => {
+  it('does not let a stale fire candidate plus fire verify fire once a device screen is recognized', async () => {
     mocked.getAudioEvents
       .mockResolvedValueOnce({ events: [], status: null })
-      .mockResolvedValueOnce({ events: [sunogAudioEvent], status: null });
+      .mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
     mocked.detectFire
       .mockReturnValueOnce({
         fireCandidate: true,
