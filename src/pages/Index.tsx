@@ -73,9 +73,9 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   face: [
     {
       selector: '#tour-face-distress', placement: 'top', title: 'Facial distress',
-      body: 'TinyFaceDetector finds the nearest face. Expressions are smoothed for stability, but facial expressions never alarm by themselves. Angry/Frightened can verify help or tulong, while Angry/Frightened/Sad can verify screaming.',
+      body: 'TinyFaceDetector finds the main face. The model\'s surprised/shock-like expression is presented as Frightened. Facial expressions never alarm by themselves: Angry or Frightened can verify help, tulong, or screaming within the fusion window.',
       implementation: 'src/hooks/useFaceDistress.ts',
-      code: `distress = sad + 1.4*fearful + 0.8*angry;\nalert = fuse(face, speechOrScream, 10_000);`,
+      code: `frightened = fearful || surprised;\nalert = fuse(angryOrFrightened, helpOrTulongOrScream, 10_000);`,
     },
   ],
   speech: [
