@@ -21,8 +21,8 @@ Use this sheet during controlled household testing. Record one row per trial, no
 | F03 | Visual flame-like region without corroboration | Candidate only unless visual detector reaches independent fire criteria | fire-candidate | | | | |
 | F04 | Visual fire + temporal smoke region | Critical fire alert | fire | | | | |
 | F05 | Visual fire + low visibility/smoke obstruction | Critical fire alert | fire | | | | |
-| F06 | Accepted "sunog" with no visual fire | No fire alert | negative | | | | |
-| F07 | Visual fire + accepted "sunog" within fusion window | Critical verified-fire alert | fire | | | | |
+| F06 | Accepted "fire" with no visual fire | No fire alert | negative | | | | |
+| F07 | Visual fire + accepted "fire" within fusion window | Critical verified-fire alert | fire | | | | |
 | A01 | Ordinary conversation | No distress alert | negative | | | | |
 | A02 | Fan/appliance noise only | No distress alert | negative | | | | |
 | A03 | Smoke-detector/fire-alarm sound on local microphone | Fire-related sound alert | fire-audio | | | | |
@@ -31,12 +31,14 @@ Use this sheet during controlled household testing. Record one row per trial, no
 | D02 | Sad face + accepted "help" | No multimodal distress alert | negative | | | | |
 | D03 | Angry face + accepted "help" within 10 s | Critical verified distress alert | distress | | | | |
 | D04 | Frightened face + accepted "help" within 10 s | Critical verified distress alert | distress | | | | |
-| D05 | Frightened face + accepted "tulong" within 10 s | Critical verified distress alert (only if Tagalog remains in approved scope) | distress | | | | |
+| D05 | Frightened face + accepted "emergency" within 10 s | Critical verified distress alert | distress | | | | |
 | D06 | Frightened face + scream within 10 s | Critical verified distress alert | distress | | | | |
 | D07 | One unstable Frightened face frame followed by neutral frames | Facial smoothing should reduce flicker; no face-only alert | negative | | | | |
 | K01 | Rejected KWS candidate below threshold | Diagnostic candidate only; no alert/database notification | negative | | | | |
 | K02 | KWS candidate too close to UNKNOWN | Reject; no alert | negative | | | | |
 | K03 | KWS candidate too close to another safety word | Reject as ambiguous; no wrong keyword alert | negative | | | | |
+| K04 | Tagalog keyword spoken on English-only branch | No accepted KWS event | negative | | | | |
+| K05 | English KWS auto-training with insufficient/unclean class samples | `production_ready = false`; do not claim model validation | degraded | | | | |
 | P01 | Processing latency >1500 ms | Validation flags high latency | degraded | | | | |
 
 ## Minimum condition variations
