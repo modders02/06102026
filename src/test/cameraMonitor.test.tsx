@@ -422,6 +422,8 @@ describe('camera snapshots and page-scoped playback', () => {
   it.each([
     ['angry', 'help me', 'help', 'Angry'],
     ['fearful', 'tulong po', 'tulong', 'Frightened'],
+    ['surprised', 'help me', 'help', 'Frightened'],
+    ['shock', 'tulong po', 'tulong', 'Frightened'],
   ] as const)('verifies %s + %s as one multimodal alert', async (expression, transcript, keyword, faceLabel) => {
     mocked.getAudioEvents.mockResolvedValueOnce({
       events: [{ timestamp: '2026-10-02T00:00:01Z', transcript, keyword, confidence: 0.96 }],
@@ -652,6 +654,7 @@ describe('camera snapshots and page-scoped playback', () => {
   it.each([
     ['angry', 'Angry'],
     ['fearful', 'Frightened'],
+    ['surprised', 'Frightened'],
   ] as const)('verifies screaming + %s as one multimodal alert', async (expression, faceLabel) => {
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [screamAudioEvent], status: null });
     mocked.analyzeFace.mockImplementationOnce(async () => {
