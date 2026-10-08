@@ -141,8 +141,8 @@ function run(exe, args, opts, timeoutMs = 15 * 60 * 1000) {
 const sha1 = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);
 
 /**
- * Make sure the bridge can actually run: a virtualenv exists, requirements are
- * installed (faster-whisper included) and ffmpeg/ffprobe/mediamtx are present.
+ * Make sure the bridge can actually run: a virtualenv exists, custom-KWS
+ * dependencies are installed, and ffmpeg/ffprobe/mediamtx are present.
  *
  * Everything is idempotent and guarded by a marker file, so only the very first
  * launch pays the download cost. Failures are non-fatal: we still try to start
@@ -204,7 +204,7 @@ async function bootstrapEnvironment(dir, runtimeDir = dir) {
         fs.writeFileSync(marker, wanted);
       } catch { /* marker is an optimisation only */ }
     } else {
-      logErr('pip install failed — CCTV audio (Whisper) may be unavailable.');
+      logErr('pip install failed — trained CCTV keyword detection may be unavailable.');
     }
   }
 
@@ -395,7 +395,7 @@ async function startLocalServer() {
 
   const error = childError ||
     'Local camera server did not answer /status within 30s. The app will open, but CCTV ' +
-    'streaming/Whisper will be unavailable until it starts. Check the log above, or run ' +
+    'streaming/custom keyword detection will be unavailable until it starts. Check the log above, or run ' +
     'local-server\\start_server.bat manually.';
   logErr(error);
   bootstrap = { ...bootstrap, phase: 'error', message: error };
