@@ -1,4 +1,4 @@
-import type { QualityMode } from '@/types/dashboard';
+import type { QualityMode, SaliencyMode } from '@/types/dashboard';
 import { INDOOR_OBJECTS, DEFAULT_PRIORITY_OBJECTS } from '@/types/dashboard';
 
 interface ControlsPanelProps {
@@ -14,9 +14,13 @@ interface ControlsPanelProps {
   simulationMode: boolean;
   minConfidence: number;
   priorityObjects: string[];
+  saliencyMode: SaliencyMode;
+  attentionThreshold: number;
   onStart: () => void;
   onStop: () => void;
   onThresholdChange: (v: number) => void;
+  onSaliencyModeChange: (mode: SaliencyMode) => void;
+  onAttentionThresholdChange: (v: number) => void;
   onToggleBoundingBoxes: () => void;
   onToggleHeatmap: () => void;
   onToggleAlerts: () => void;
@@ -33,7 +37,8 @@ export default function ControlsPanel(props: ControlsPanelProps) {
   const {
     snapshotMode = false, running, threshold, showBoundingBoxes, showHeatmap, showAlerts,
     quality, mirror, heatmapOpacity, simulationMode, priorityObjects, minConfidence,
-    onStart, onStop, onThresholdChange,
+    saliencyMode, attentionThreshold,
+    onStart, onStop, onThresholdChange, onSaliencyModeChange, onAttentionThresholdChange,
     onToggleBoundingBoxes, onToggleHeatmap, onToggleAlerts,
     onQualityChange, onToggleMirror, onHeatmapOpacityChange,
     onToggleSimulation, onPriorityObjectsChange, onMinConfidenceChange, onExportCSV,
@@ -92,6 +97,26 @@ export default function ControlsPanel(props: ControlsPanelProps) {
         ))}
       </div>
 
+      {/* Saliency mode from the Chapter III visual algorithm. */}
+      <div className="space-y-1">
+        <span className="text-[10px] font-mono text-muted-foreground">Saliency mode</span>
+        <div className="grid grid-cols-3 gap-1">
+          {(['sobel', 'laplacian', 'motion'] as SaliencyMode[]).map(mode => (
+            <button
+              key={mode}
+              onClick={() => onSaliencyModeChange(mode)}
+              className={`text-[9px] font-mono py-1 rounded border transition-all ${
+                saliencyMode === mode
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border text-muted-foreground'
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Threshold */}
       <div className="space-y-1">
         <div className="flex justify-between">
@@ -104,6 +129,22 @@ export default function ControlsPanel(props: ControlsPanelProps) {
           max={255}
           value={threshold}
           onChange={e => onThresholdChange(Number(e.target.value))}
+          className="w-full h-1 bg-secondary rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:cursor-pointer"
+        />
+      </div>
+
+      {/* Unified attention threshold τ from the thesis fusion algorithm. */}
+      <div className="space-y-1">
+        <div className="flex justify-between">
+          <span className="text-[10px] font-mono text-muted-foreground">Attention threshold</span>
+          <span className="text-[10px] font-mono text-foreground">{attentionThreshold}/100</span>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={attentionThreshold}
+          onChange={e => onAttentionThresholdChange(Number(e.target.value))}
           className="w-full h-1 bg-secondary rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:cursor-pointer"
         />
       </div>
