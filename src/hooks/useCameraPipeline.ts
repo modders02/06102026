@@ -220,9 +220,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       });
     }
     return () => { analysisRevisionRef.current += 1; };
-  }, [camera.enabled, camera.aiEnabled, camera.id, sourceStream, playbackEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.priorityObjects, patch]);
+  }, [camera.enabled, camera.aiEnabled, camera.id, sourceStream, playbackEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.saliencyMode, settings.attentionThreshold, settings.priorityObjects, patch]);
 
-  /** Newest Whisper sentence replaces the old one and clears after 5 s. */
+  /** Newest accepted camera-audio event replaces the old one and clears after 5 s. */
   const showTranscript = useCallback((text: string) => {
     patch({ transcript: text });
     if (clearTimerRef.current) window.clearTimeout(clearTimerRef.current);
