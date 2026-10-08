@@ -7,10 +7,10 @@ import {
   makeDistressSpeechSignal,
 } from '@/lib/multimodalDistress';
 import {
-  fuseFireWithSunog,
+  fuseFireWithSpeech,
   isImmediateFireSmoke,
   makeFireVisualSignal,
-  makeSunogSignal,
+  makeFireSpeechSignal,
 } from '@/lib/fireFusion';
 
 describe('panelist realistic-condition scenario matrix', () => {
@@ -45,8 +45,8 @@ describe('panelist realistic-condition scenario matrix', () => {
   it('fire-colored visuals need corroboration when they are only candidates', () => {
     const candidate = makeFireVisualSignal(true, 0.4, 0.002, 0.03, 80, 1000);
     expect(isImmediateFireSmoke(candidate)).toBe(false);
-    expect(fuseFireWithSunog(candidate, null)).toBeNull();
-    expect(fuseFireWithSunog(candidate, makeSunogSignal('sunog', 0.95, 1500))).not.toBeNull();
+    expect(fuseFireWithSpeech(candidate, null)).toBeNull();
+    expect(fuseFireWithSpeech(candidate, makeFireSpeechSignal('fire', 0.95, 1500))).not.toBeNull();
   });
 
   it('visual fire + temporal smoke evidence remains valid without speech', () => {
