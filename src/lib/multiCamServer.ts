@@ -20,6 +20,14 @@ export interface BackendStatus {
   mediamtx: boolean;
   hls_port: number;
   lan_ip: string;
+  /** Active CCTV speech engine reported by the local bridge. */
+  audio_engine?: 'custom' | string;
+  custom_kws?: {
+    open_set_ready?: boolean;
+    ready_keywords?: string[];
+    negative_ready?: boolean;
+  };
+  /** Legacy compatibility field. Whisper is disabled in custom-only mode. */
   whisper: boolean;
   /** "package_missing" | "model_error" | "ready" | "idle" */
   whisper_state?: string;
