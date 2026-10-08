@@ -248,186 +248,17 @@ const EN_CHILD_AWARENESS: SafetyPhrase[] = [
   P('i am alone', 'en', 'awareness', 'medium', 0.7),
 ];
 
-/* ------------------------------------------------------------------ */
-/* TAGALOG / FILIPINO                                                  */
-/* ------------------------------------------------------------------ */
-
-const TL_HELP: SafetyPhrase[] = [
-  P('tulong', 'tl', 'help', 'high', 0.92),
-  P('tulong po', 'tl', 'help', 'critical', 0.96),
-  P('tulungan mo ako', 'tl', 'help', 'critical', 0.98),
-  P('tulungan niyo ako', 'tl', 'help', 'critical', 0.98),
-  P('tulungan nyo po ako', 'tl', 'help', 'critical', 0.98),
-  P('saklolo', 'tl', 'help', 'critical', 0.98),
-  P('saklolo po', 'tl', 'help', 'critical', 0.98),
-  P('iligtas mo ako', 'tl', 'help', 'critical', 0.97),
-  P('iligtas niyo ako', 'tl', 'help', 'critical', 0.97),
-  P('kailangan ko ng tulong', 'tl', 'help', 'critical', 0.97),
-  P('may tao ba diyan', 'tl', 'help', 'medium', 0.72),
-  P('may naririnig ba kayo', 'tl', 'help', 'medium', 0.72),
-  P('pakitulungan ako', 'tl', 'help', 'critical', 0.97),
-  P('tawag kayo ng tulong', 'tl', 'help', 'critical', 0.96),
-  P('hingi ako ng tulong', 'tl', 'help', 'critical', 0.95),
-];
-
-const TL_EMERGENCY: SafetyPhrase[] = [
-  P('emergency po', 'tl', 'distress', 'critical', 0.96),
-  P('tumawag ka ng pulis', 'tl', 'intruder', 'critical', 0.97),
-  P('tumawag kayo ng pulis', 'tl', 'intruder', 'critical', 0.97),
-  P('tawagan mo ang pulis', 'tl', 'intruder', 'critical', 0.97),
-  P('tumawag ng ambulansya', 'tl', 'medical', 'critical', 0.98),
-  P('tawag ng ambulansya', 'tl', 'medical', 'critical', 0.98),
-  P('tumawag ng bumbero', 'tl', 'fire', 'critical', 0.98),
-  P('tawagan mo ang barangay', 'tl', 'distress', 'high', 0.9),
-  P('dalhin mo ako sa ospital', 'tl', 'medical', 'critical', 0.96),
-  P('pulis', 'tl', 'intruder', 'high', 0.85),
-  P('ambulansya', 'tl', 'medical', 'critical', 0.95),
-  P('bumbero', 'tl', 'fire', 'critical', 0.95),
-  P('ospital', 'tl', 'medical', 'high', 0.85),
-];
-
-const TL_MEDICAL: SafetyPhrase[] = [
-  P('hindi ako makahinga', 'tl', 'medical', 'critical', 0.98),
-  P('hirap akong huminga', 'tl', 'medical', 'critical', 0.97),
-  P('nasasakal ako', 'tl', 'medical', 'critical', 0.98),
-  P('masakit ang dibdib ko', 'tl', 'medical', 'critical', 0.97),
-  P('atake sa puso', 'tl', 'medical', 'critical', 0.98),
-  P('inaatake ako', 'tl', 'medical', 'critical', 0.97),
-  P('nahihilo ako', 'tl', 'medical', 'high', 0.88),
-  P('hinihimatay ako', 'tl', 'medical', 'critical', 0.95),
-  P('nawalan ng malay', 'tl', 'medical', 'critical', 0.98),
-  P('hindi humihinga', 'tl', 'medical', 'critical', 0.98),
-  P('dumudugo ako', 'tl', 'medical', 'critical', 0.96),
-  P('maraming dugo', 'tl', 'medical', 'critical', 0.96),
-  P('sumasakit ang ulo ko', 'tl', 'medical', 'high', 0.85),
-  P('masakit', 'tl', 'medical', 'high', 0.85),
-  P('ang sakit', 'tl', 'medical', 'high', 0.9),
-  P('ang sakit po', 'tl', 'medical', 'high', 0.92),
-  P('aray', 'tl', 'medical', 'high', 0.85),
-  P('aray ko', 'tl', 'medical', 'high', 0.88),
-  P('kailangan ko ng gamot', 'tl', 'medical', 'high', 0.9),
-  P('inuubo ako ng dugo', 'tl', 'medical', 'critical', 0.97),
-  P('sumusuka ako', 'tl', 'medical', 'high', 0.85),
-  P('nilalagnat ako', 'tl', 'medical', 'medium', 0.75),
-  P('hindi ako okay', 'tl', 'distress', 'high', 0.85),
-  P('may sakit ako', 'tl', 'medical', 'medium', 0.75),
-];
-
-const TL_FALL: SafetyPhrase[] = [
-  P('nahulog ako', 'tl', 'fall', 'critical', 0.96),
-  P('natumba ako', 'tl', 'fall', 'critical', 0.95),
-  P('nadulas ako', 'tl', 'fall', 'high', 0.92),
-  P('hindi ako makatayo', 'tl', 'fall', 'critical', 0.97),
-  P('hindi ako makagalaw', 'tl', 'fall', 'critical', 0.97),
-  P('natumba si lola', 'tl', 'fall', 'critical', 0.98),
-  P('natumba si lolo', 'tl', 'fall', 'critical', 0.98),
-  P('nahulog si lola', 'tl', 'fall', 'critical', 0.98),
-  P('naipit ako', 'tl', 'fall', 'critical', 0.96),
-  P('hindi ako makalabas', 'tl', 'fall', 'critical', 0.95),
-];
-
-const TL_FIRE: SafetyPhrase[] = [
-  P('sunog', 'tl', 'fire', 'critical', 0.96),
-  P('may sunog', 'tl', 'fire', 'critical', 0.98),
-  P('may sunog po', 'tl', 'fire', 'critical', 0.98),
-  P('nasusunog', 'tl', 'fire', 'critical', 0.97),
-  P('nasusunog ang bahay', 'tl', 'fire', 'critical', 0.99),
-  P('may usok', 'tl', 'fire', 'high', 0.92),
-  P('maraming usok', 'tl', 'fire', 'critical', 0.95),
-  P('amoy sunog', 'tl', 'fire', 'high', 0.93),
-  P('patayin ang apoy', 'tl', 'fire', 'critical', 0.95),
-  P('may apoy', 'tl', 'fire', 'critical', 0.95),
-  P('lumabas na kayo', 'tl', 'fire', 'critical', 0.94),
-  P('lumikas na', 'tl', 'fire', 'critical', 0.95),
-];
-
-const TL_GAS_ELEC_WATER: SafetyPhrase[] = [
-  P('may tumatagas na gas', 'tl', 'gas', 'critical', 0.97),
-  P('amoy gas', 'tl', 'gas', 'critical', 0.96),
-  P('tumatagas ang lpg', 'tl', 'gas', 'critical', 0.97),
-  P('patayin mo ang gas', 'tl', 'gas', 'high', 0.92),
-  P('nakabukas pa ang kalan', 'tl', 'gas', 'high', 0.9),
-  P('patayin ang kalan', 'tl', 'gas', 'high', 0.9),
-  P('nag short circuit', 'tl', 'electrical', 'critical', 0.95),
-  P('may kuryente', 'tl', 'electrical', 'high', 0.85),
-  P('nakuryente ako', 'tl', 'electrical', 'critical', 0.97),
-  P('may umaapoy na kable', 'tl', 'electrical', 'critical', 0.96),
-  P('patayin mo ang kuryente', 'tl', 'electrical', 'high', 0.9),
-  P('baha', 'tl', 'water', 'high', 0.9),
-  P('tumataas ang tubig', 'tl', 'water', 'critical', 0.95),
-  P('may tumatagas na tubig', 'tl', 'water', 'medium', 0.75),
-  P('nalulunod', 'tl', 'water', 'critical', 0.98),
-  P('nalulunod siya', 'tl', 'water', 'critical', 0.99),
-];
-
-const TL_INTRUDER: SafetyPhrase[] = [
-  P('magnanakaw', 'tl', 'intruder', 'critical', 0.95),
-  P('may magnanakaw', 'tl', 'intruder', 'critical', 0.97),
-  P('may pumasok sa bahay', 'tl', 'intruder', 'critical', 0.97),
-  P('may tao sa loob', 'tl', 'intruder', 'critical', 0.95),
-  P('may estranghero', 'tl', 'intruder', 'high', 0.9),
-  P('may kumakatok', 'tl', 'awareness', 'medium', 0.7),
-  P('binubuksan nila ang pinto', 'tl', 'intruder', 'critical', 0.96),
-  P('may hawak siyang kutsilyo', 'tl', 'violence', 'critical', 0.99),
-  P('may baril siya', 'tl', 'violence', 'critical', 0.99),
-  P('holdap', 'tl', 'intruder', 'critical', 0.97),
-  P('nanakawan kami', 'tl', 'intruder', 'critical', 0.96),
-  P('isara mo ang pinto', 'tl', 'intruder', 'high', 0.85),
-];
-
-const TL_VIOLENCE: SafetyPhrase[] = [
-  P('tama na', 'tl', 'violence', 'high', 0.9),
-  P('tama na po', 'tl', 'violence', 'high', 0.92),
-  P('huwag', 'tl', 'violence', 'high', 0.85),
-  P('huwag po', 'tl', 'violence', 'high', 0.9),
-  P('wag mo akong saktan', 'tl', 'violence', 'critical', 0.97),
-  P('huwag mo akong saktan', 'tl', 'violence', 'critical', 0.97),
-  P('sinasaktan niya ako', 'tl', 'violence', 'critical', 0.98),
-  P('binubugbog niya ako', 'tl', 'violence', 'critical', 0.98),
-  P('layuan mo ako', 'tl', 'violence', 'critical', 0.95),
-  P('lumayo ka sa akin', 'tl', 'violence', 'critical', 0.95),
-  P('bitawan mo ako', 'tl', 'violence', 'critical', 0.96),
-  P('takot ako', 'tl', 'distress', 'high', 0.88),
-  P('natatakot ako', 'tl', 'distress', 'high', 0.9),
-  P('huwag mo akong hawakan', 'tl', 'violence', 'critical', 0.96),
-];
-
-const TL_CHILD_AWARENESS: SafetyPhrase[] = [
-  P('umiiyak ang bata', 'tl', 'child', 'medium', 0.75),
-  P('nasaan ang bata', 'tl', 'child', 'high', 0.88),
-  P('nawawala ang bata', 'tl', 'child', 'critical', 0.97),
-  P('nahulog ang bata', 'tl', 'child', 'critical', 0.98),
-  P('bantayan mo ang bata', 'tl', 'child', 'medium', 0.72),
-  P('mag-ingat', 'tl', 'awareness', 'medium', 0.72),
-  P('mag ingat ka', 'tl', 'awareness', 'medium', 0.75),
-  P('delikado', 'tl', 'awareness', 'high', 0.88),
-  P('delikado dito', 'tl', 'awareness', 'high', 0.9),
-  P('may lindol', 'tl', 'accident', 'critical', 0.96),
-  P('lindol', 'tl', 'accident', 'critical', 0.95),
-  P('may aksidente', 'tl', 'accident', 'critical', 0.95),
-  P('may basag na salamin', 'tl', 'awareness', 'medium', 0.75),
-  P('madulas ang sahig', 'tl', 'awareness', 'medium', 0.72),
-  P('mag-isa lang ako', 'tl', 'awareness', 'medium', 0.7),
-  P('nakakulong ako sa labas', 'tl', 'awareness', 'medium', 0.72),
-];
-
-const ALL_SAFETY_LEXICON: SafetyPhrase[] = [
-  ...EN_HELP, ...EN_EMERGENCY, ...EN_MEDICAL, ...EN_FALL, ...EN_FIRE,
-  ...EN_GAS_ELEC_WATER, ...EN_INTRUDER, ...EN_VIOLENCE, ...EN_CHILD_AWARENESS,
-  ...TL_HELP, ...TL_EMERGENCY, ...TL_MEDICAL, ...TL_FALL, ...TL_FIRE,
-  ...TL_GAS_ELEC_WATER, ...TL_INTRUDER, ...TL_VIOLENCE, ...TL_CHILD_AWARENESS,
-];
-
 /** Chapter I language scope for the panelist-compliance runtime. */
 export const SAFETY_LANGUAGE_SCOPE = 'en' as const;
 
 /**
- * Only English entries are indexed on this branch. The bilingual/Tagalog
- * runtime remains preserved on tagalog-kws-experimental.
+ * English-only runtime lexicon. The Tagalog lexicon remains preserved on
+ * tagalog-kws-experimental and is intentionally absent from this branch.
  */
-export const SAFETY_LEXICON: SafetyPhrase[] = ALL_SAFETY_LEXICON.filter(
-  phrase => phrase.lang === SAFETY_LANGUAGE_SCOPE,
-);
+export const SAFETY_LEXICON: SafetyPhrase[] = [
+  ...EN_HELP, ...EN_EMERGENCY, ...EN_MEDICAL, ...EN_FALL, ...EN_FIRE,
+  ...EN_GAS_ELEC_WATER, ...EN_INTRUDER, ...EN_VIOLENCE, ...EN_CHILD_AWARENESS,
+];
 
 const VARIANTS: Record<string, string> = {
   'help help': 'help me',
@@ -440,7 +271,6 @@ const normalize = (value: string) =>
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^\p{L}\p{N}']+/gu, ' ')
-    .replace(/\bwag\b/g, 'huwag')
     .trim()
     .replace(/\s+/g, ' ');
 
