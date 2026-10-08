@@ -40,7 +40,7 @@ import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import { getCameraSession } from '@/lib/cameraSessions';
 import { clipFileName, recordClip, saveClip } from '@/lib/clipRecorder';
 import { CAMERA_HISTORY_LIMIT } from '@/lib/cameraRegistry';
-import { computeMultimodalAttention } from '@/lib/multimodalAttention';
+import { computeMultimodalAttention, computeObjectImportance } from '@/lib/multimodalAttention';
 import { validateSafetyEvent } from '@/lib/safetyValidation';
 import type { CameraRuntime, DetectionEvent } from '@/types/multicam';
 import type { Alert, QualityMode } from '@/types/dashboard';
@@ -180,7 +180,7 @@ export default function Index() {
     ? computeMultimodalAttention({
         visual: currentRuntime?.saliencyScore ?? 0,
         audio: yamnet.distressScore,
-        object: Math.max(0, ...(currentRuntime?.objects.map(object => object.confidence * 100) || [])),
+        object: computeObjectImportance(currentRuntime?.objects ?? [], priorityObjects),
       })
     : currentRuntime?.attentionScore ?? 0;
   const saliency = currentRuntime?.saliencyScore ?? 0;
