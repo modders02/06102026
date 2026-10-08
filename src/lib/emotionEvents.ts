@@ -1,8 +1,8 @@
-export type HistoryEmotion = 'happy' | 'sad' | 'shock' | 'neutral' | 'disgust';
+export type HistoryEmotion = 'happy' | 'sad' | 'frightened' | 'neutral' | 'disgust';
 
 export interface HistoryEmotionMeta {
   emotion: HistoryEmotion;
-  label: 'Happy' | 'Sad' | 'Shock' | 'Neutral' | 'Disgust';
+  label: 'Happy' | 'Sad' | 'Frightened' | 'Neutral' | 'Disgust';
   icon: string;
   rowClass: string;
   labelClass: string;
@@ -23,9 +23,9 @@ const META: Record<HistoryEmotion, HistoryEmotionMeta> = {
     rowClass: 'border-l-4 border-l-info bg-info/10',
     labelClass: 'text-info',
   },
-  shock: {
-    emotion: 'shock',
-    label: 'Shock',
+  frightened: {
+    emotion: 'frightened',
+    label: 'Frightened',
     icon: '😲',
     rowClass: 'border-l-4 border-l-warning bg-warning/10',
     labelClass: 'text-warning',
@@ -47,15 +47,20 @@ const META: Record<HistoryEmotion, HistoryEmotionMeta> = {
 };
 
 /**
- * face-api calls the shock-like base expression "surprised".
- * Keep the UI/research wording as "Shock" while accepting either form.
+ * face-api calls this wide-eyed/startle expression "surprised".
+ * MSDS presents it as "Frightened" so the UI and multimodal safety rule use
+ * one label for fearful/startled distress.
  */
 export function historyEmotionMeta(expression: string | null | undefined): HistoryEmotionMeta | null {
   const normalized = (expression ?? '').trim().toLowerCase();
   if (normalized === 'happy') return META.happy;
   if (normalized === 'sad') return META.sad;
-  if (normalized === 'surprised' || normalized === 'surprise' || normalized === 'shock' || normalized === 'shocked') {
-    return META.shock;
+  if (
+    normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
+    || normalized === 'surprised' || normalized === 'surprise'
+    || normalized === 'shock' || normalized === 'shocked'
+  ) {
+    return META.frightened;
   }
   if (normalized === 'neutral') return META.neutral;
   if (normalized === 'disgusted' || normalized === 'disgust') return META.disgust;
