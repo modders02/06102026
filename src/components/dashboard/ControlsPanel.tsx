@@ -16,11 +16,13 @@ interface ControlsPanelProps {
   priorityObjects: string[];
   saliencyMode: SaliencyMode;
   attentionThreshold: number;
+  alertCooldownMs: number;
   onStart: () => void;
   onStop: () => void;
   onThresholdChange: (v: number) => void;
   onSaliencyModeChange: (mode: SaliencyMode) => void;
   onAttentionThresholdChange: (v: number) => void;
+  onAlertCooldownChange: (v: number) => void;
   onToggleBoundingBoxes: () => void;
   onToggleHeatmap: () => void;
   onToggleAlerts: () => void;
@@ -37,8 +39,8 @@ export default function ControlsPanel(props: ControlsPanelProps) {
   const {
     snapshotMode = false, running, threshold, showBoundingBoxes, showHeatmap, showAlerts,
     quality, mirror, heatmapOpacity, simulationMode, priorityObjects, minConfidence,
-    saliencyMode, attentionThreshold,
-    onStart, onStop, onThresholdChange, onSaliencyModeChange, onAttentionThresholdChange,
+    saliencyMode, attentionThreshold, alertCooldownMs,
+    onStart, onStop, onThresholdChange, onSaliencyModeChange, onAttentionThresholdChange, onAlertCooldownChange,
     onToggleBoundingBoxes, onToggleHeatmap, onToggleAlerts,
     onQualityChange, onToggleMirror, onHeatmapOpacityChange,
     onToggleSimulation, onPriorityObjectsChange, onMinConfidenceChange, onExportCSV,
@@ -145,6 +147,23 @@ export default function ControlsPanel(props: ControlsPanelProps) {
           max={100}
           value={attentionThreshold}
           onChange={e => onAttentionThresholdChange(Number(e.target.value))}
+          className="w-full h-1 bg-secondary rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:cursor-pointer"
+        />
+      </div>
+
+      {/* Same-event cooldown from Chapter III (default 3000 ms). */}
+      <div className="space-y-1">
+        <div className="flex justify-between">
+          <span className="text-[10px] font-mono text-muted-foreground">Alert cooldown</span>
+          <span className="text-[10px] font-mono text-foreground">{(alertCooldownMs / 1000).toFixed(1)} s</span>
+        </div>
+        <input
+          type="range"
+          min={1000}
+          max={15000}
+          step={500}
+          value={alertCooldownMs}
+          onChange={e => onAlertCooldownChange(Number(e.target.value))}
           className="w-full h-1 bg-secondary rounded-full appearance-none [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:cursor-pointer"
         />
       </div>
