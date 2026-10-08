@@ -1,10 +1,9 @@
 /**
- * MSDS safety & awareness lexicon — Tagalog + English.
+ * MSDS safety & awareness lexicon — English thesis-scope runtime.
  *
- * A single, large collection of the words and sentences a household actually
- * shouts when something goes wrong. Transcripts from the CCTV are compared
- * against this list; only entries found here are treated as recognised
- * safety speech, everything else stays plain transcription.
+ * The Tagalog/Filipino lexicon is intentionally kept on the separate
+ * tagalog-kws-experimental branch. Accepted English safety speech is compared
+ * against this list; unmatched speech is not promoted to a safety event.
  *
  * severity:
  *   critical -> life threatening, triggers the emergency screen
@@ -32,7 +31,7 @@ export type SafetyCategory =
 export interface SafetyPhrase {
   /** Lowercase phrase as it would appear in a transcript. */
   phrase: string;
-  lang: 'en' | 'tl';
+  lang: 'en';
   category: SafetyCategory;
   severity: SafetySeverity;
   /** 0–1 confidence that this phrase alone means real trouble. */
@@ -290,7 +289,7 @@ export interface SafetyMatch {
   phrase: string;
   category: SafetyCategory | null;
   severity: SafetySeverity | null;
-  lang: 'en' | 'tl' | null;
+  lang: 'en' | null;
   confidence: number;
   /** Every distinct lexicon phrase found in the text. */
   all: SafetyPhrase[];
