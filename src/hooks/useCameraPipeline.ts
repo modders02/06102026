@@ -656,30 +656,25 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     });
 
     if (d.hasFace && emotion && d.probability >= 0.55) {
-      // Record the human-readable expression in Event History. Frightened is
-      // special: it remains eligible for help/tulong/scream fusion after this
-      // informational history event. Other mapped emotions are history-only.
+      // Record the human-readable expression in Event History. Do not erase a
+      // recent Angry/Frightened fusion signal when the next live frame briefly
+      // flips to Neutral/Sad/Disgusted: expression classifiers naturally jitter.
+      // fuseDistressSignals enforces the 10-second timestamp window, so stale
+      // face evidence still expires without destroying valid speech-late fusion.
       emit('emotion', emotion.label, d.probability);
-      if (!fusionExpression) {
-        recentDistressFaceRef.current = null;
-        return;
-      }
+      if (!fusionExpression) return;
     }
 
     if (fusionExpression) {
       if (distressFace) {
         recentDistressFaceRef.current = distressFace;
         maybeEmitVerifiedDistress();
-      } else {
-        recentDistressFaceRef.current = null;
       }
       return;
     }
 
-    // Neutral, disgust, unknown expressions and no-face states never emit a
-    // facial alarm. A clearly observed non-fusion face invalidates the pending
-    // visual half; a temporary no-face frame preserves it within the 10 s window.
-    if (d.hasFace) recentDistressFaceRef.current = null;
+    // Non-fusion/no-face frames do not raise an alarm and do not immediately
+    // erase a recent distress face. Its timestamp expires naturally in fusion.
   }, [camera.enabled, camera.aiEnabled, face.distress, patch, emit, maybeEmitVerifiedDistress]);
 
   // ---- Audio: RTSP audio -> ffmpeg -> Whisper on the backend ---------------
