@@ -176,6 +176,7 @@ export default function Index() {
   const [simulationMode, setSimulationMode] = useState(false);
   const [priorityObjects, setPriorityObjects] = useState<string[]>(DEFAULT_PRIORITY_OBJECTS);
   const alertCooldown = useRef(new Map<string, number>());
+  const lastLocalSpeechTrigger = useRef('');
   const recordingCameras = useRef(new Set<string>());
   const householdMatches = useRef(new Map<number, { phrase: string; at: number }>());
   const previousConnections = useRef(new Set<number>());
@@ -396,6 +397,15 @@ export default function Index() {
   useEffect(() => {
     if (!running || !localCameras.length || connected.length) return;
     const text = `${speech.transcript} ${speech.interimTranscript}`.trim();
+    if (!text) {
+      lastLocalSpeechTrigger.current = '';
+      return;
+    }
+    // Runtime/face updates can re-render this effect many times while Web
+    // Speech still exposes the same utterance. Process that utterance once;
+    // after speech clears, the same phrase can legitimately trigger again.
+    if (lastLocalSpeechTrigger.current === text) return;
+    lastLocalSpeechTrigger.current = text;
     const runtime = runtimes[1];
 
     const fireSpeech = makeFireSpeechSignal(text);
