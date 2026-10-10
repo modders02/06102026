@@ -356,9 +356,8 @@ describe('camera alerts and event history', () => {
     expect(screen.getByRole('combobox', { name: 'Filter events by camera' })).toHaveValue('slot-2');
     expect(screen.queryByText('Lobby delivery')).not.toBeInTheDocument();
     expect(screen.getAllByText(/Kitchen fire/)).toHaveLength(1);
-    const recording = view.container.querySelector('video');
-    expect(recording).toHaveAttribute('preload', 'none');
-    expect(recording).not.toHaveAttribute('autoplay');
+    expect(view.container.querySelector('video')).toBeNull();
+    expect(screen.getByRole('button', { name: 'View snapshot: Kitchen fire from Camera 2' })).toBeInTheDocument();
   });
 
   it('allows all history while a camera is focused and resets filters with All live cameras', () => {
