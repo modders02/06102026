@@ -276,6 +276,37 @@ describe('camera alerts and event history', () => {
     ];
   });
 
+  it('shows the exact facial expression, trigger image, and accepted word for a distress emergency', () => {
+    mocks.alertEvents = [{
+      id: 'distress-alert',
+      cameraId: 'slot-1',
+      cameraName: 'Camera 1',
+      location: 'Lobby',
+      type: 'multimodal-distress',
+      label: 'Verified distress: Angry + "help"',
+      confidence: 0.94,
+      timestamp: '2026-10-02T02:41:23Z',
+      snapshot: 'data:image/jpeg;base64,distress-trigger',
+      priorityScenario: true,
+      alertValidation: {
+        status: 'accepted',
+        reason: 'Angry + "help" matched within the fusion window.',
+        keyword: 'help',
+        emotion: 'Angry',
+      },
+    }];
+
+    render(<MemoryRouter initialEntries={['/cameras?camera=slot-1']}><Monitoring /></MemoryRouter>);
+
+    expect(screen.getByText('Facial expression:')).toBeInTheDocument();
+    expect(screen.getByText('Angry')).toBeInTheDocument();
+    expect(screen.getByText('Trigger word:')).toBeInTheDocument();
+    expect(screen.getByText('"help"')).toBeInTheDocument();
+    expect(screen.getByRole('img', {
+      name: 'Verified distress: Angry + "help" snapshot from Camera 1',
+    })).toHaveAttribute('src', 'data:image/jpeg;base64,distress-trigger');
+  });
+
   it('opens the exact alert snapshot with its source and timestamp, then closes it', async () => {
     render(<MemoryRouter initialEntries={['/cameras?camera=slot-2']}><Monitoring /></MemoryRouter>);
 
