@@ -79,7 +79,7 @@ function readEventHistory(): CameraEventHistory {
   }
   const events = parseEventArray(source.eventsRaw);
   // Migrate alerts before trimming the older, combined 500-entry history.
-  const alertEvents = source.alertsRaw !== null ? parseEventArray(source.alertsRaw) : events.filter(isCameraAlert);
+  const alertEvents = (source.alertsRaw !== null ? parseEventArray(source.alertsRaw) : events).filter(isCameraAlert);
   return { events, alertEvents };
 }
 
