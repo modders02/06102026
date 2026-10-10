@@ -100,9 +100,6 @@ export default function ValidationLayer({ cameraId, cameraName }: ValidationLaye
         )}
 
         <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1">
-          <span className="text-muted-foreground">Speech verification:</span>
-          <span className="font-mono font-semibold">{validation.keyword || 'None'}</span>
-
           <span className="text-muted-foreground">Confidence:</span>
           <span className="font-mono font-semibold">
             {validation.keyword ? `${(validation.confidence * 100).toFixed(1)}%` : '—'}
@@ -135,7 +132,7 @@ export default function ValidationLayer({ cameraId, cameraName }: ValidationLaye
         </div>
 
         <p className="text-muted-foreground">
-          Confirms safety keywords before alert escalation.
+          Validates supporting evidence before alert escalation.
         </p>
       </div>
     </section>
