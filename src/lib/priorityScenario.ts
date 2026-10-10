@@ -13,7 +13,7 @@ type PriorityEventInput = Pick<DetectionEvent, 'type' | 'label'> & {
 
 function isValidatedSpokenDistress(event: PriorityEventInput): boolean {
   if (event.type !== 'multimodal-distress') return false;
-  return /verified distress:.*\+\s*"help"/i.test(event.label);
+  return /^verified distress:\s*(?:Angry|Frightened)\s*\+\s*"help"\s*$/i.test(event.label.trim());
 }
 
 function shouldOpenEmergencyPopup(
@@ -108,6 +108,10 @@ export function classifyPriorityScenario(
 /** Persisted Camera alerts must carry or intrinsically satisfy priority policy. */
 export function isPriorityCameraAlert(event: PriorityEventInput): boolean {
   if (event.priorityScenario === false) return false;
+  // Never trust legacy promotion flags for raw audio or multimodal labels:
+  // re-validate those against the current strict alert contract.
+  if (event.type === 'audio-distress') return false;
+  if (event.type === 'multimodal-distress') return isValidatedSpokenDistress(event);
   if (event.priorityScenario === true) return true;
   return classifyPriorityScenario(event).priority;
 }
