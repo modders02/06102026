@@ -6,6 +6,7 @@ import { useCamera } from '@/hooks/useCamera';
 import { useCameraSlots, slotCamera, slotSettings, type CameraSlot } from '@/hooks/useCameraSlots';
 import LiveCameraFeed from '@/components/multicam/LiveCameraFeed';
 import DashboardEvents from '@/components/dashboard/DashboardEvents';
+import ValidationLayer from '@/components/dashboard/ValidationLayer';
 
 /** Displays existing monitoring sessions; changing the view never starts another pipeline. */
 export default function Monitoring() {
@@ -21,6 +22,11 @@ export default function Monitoring() {
   const focused = includedSlots.some(slot => `slot-${slot.index}` === requestedCamera) ? requestedCamera : null;
   const visible = focused ? includedSlots.filter(slot => `slot-${slot.index}` === focused) : includedSlots;
   const connected = includedSlots.filter(isConnected);
+  const validationSlot = focused
+    ? includedSlots.find(slot => `slot-${slot.index}` === focused)
+    : connected[0] ?? includedSlots[0];
+  const validationCameraId = validationSlot ? `slot-${validationSlot.index}` : 'slot-1';
+  const validationCameraName = validationSlot?.name || `Camera ${validationSlot?.index ?? 1}`;
 
   useEffect(() => {
     if (searchParams.has('events')) {
@@ -86,8 +92,9 @@ export default function Monitoring() {
               </button>
             ))}
           </section>
-          <aside aria-label="Camera controls and activity" className="min-w-0">
+          <aside aria-label="Camera controls and activity" className="min-w-0 space-y-4">
             <DashboardEvents initialFilter={focused || 'all'} />
+            <ValidationLayer cameraId={validationCameraId} cameraName={validationCameraName} />
           </aside>
         </div>
       </main>
