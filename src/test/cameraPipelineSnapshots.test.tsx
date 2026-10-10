@@ -23,7 +23,7 @@ vi.mock('@/lib/multiCamServer', () => ({
   describeAudioStatus: () => ({ message: 'Listening', tone: 'ok' }),
 }));
 
-const safetyEvent = { timestamp: '2026-10-04T00:00:01Z', transcript: 'help me', keyword: 'help', confidence: 0.99 };
+const safetyEvent = { timestamp: '2026-10-04T00:00:01Z', transcript: 'call police', keyword: 'police', confidence: 0.99 };
 let drawImage: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   localStorage.clear();
