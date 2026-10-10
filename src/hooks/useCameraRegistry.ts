@@ -68,7 +68,10 @@ export function useCameraRegistry() {
 
   const addEvent = useCallback((evt: DetectionEvent) => {
     const current = loadEventHistory();
-    const captured = { ...evt, snapshot: evt.snapshot || captureCameraEventSnapshot(evt.cameraId) };
+    const rejectedValidation = evt.alertValidation?.status === 'rejected';
+    const captured = rejectedValidation
+      ? { ...evt, snapshot: undefined }
+      : { ...evt, snapshot: evt.snapshot || captureCameraEventSnapshot(evt.cameraId) };
     const alert = isCameraAlert(captured);
     commitHistory({
       // Camera Alert is intentionally a single active accepted trigger. When a
