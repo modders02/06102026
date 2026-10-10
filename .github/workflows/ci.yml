@@ -45,6 +45,7 @@ jobs:
         run: npm run typecheck
 
 
+  # Regression coverage for the Python camera bridge and custom keyword spotter.
   local-camera-server:
     name: Camera + KWS tests
     runs-on: ubuntu-latest
