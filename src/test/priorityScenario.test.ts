@@ -32,14 +32,34 @@ describe('priority scenario camera alert policy', () => {
     })).toBe(true);
   });
 
-  it('requires critical accepted speech before it becomes a priority emergency', () => {
+  it('opens the emergency popup only for validated spoken distress or fire/smoke', () => {
     expect(classifyPriorityScenario(
-      { type: 'audio-distress', label: 'Wake word: "danger"' },
-      'high',
-    )).toMatchObject({ priority: false, emergency: false });
+      { type: 'multimodal-distress', label: 'Verified distress: Angry + "help"' },
+      'critical',
+    )).toMatchObject({ priority: true, emergency: true });
+
+    expect(classifyPriorityScenario(
+      { type: 'multimodal-distress', label: 'Verified distress: Frightened + "emergency"' },
+      'critical',
+    )).toMatchObject({ priority: true, emergency: true });
+
+    expect(classifyPriorityScenario(
+      { type: 'multimodal-distress', label: 'Verified distress: Frightened + screaming' },
+      'critical',
+    )).toMatchObject({ priority: true, emergency: false });
 
     expect(classifyPriorityScenario(
       { type: 'audio-distress', label: 'Wake word: "call 911"' },
+      'critical',
+    )).toMatchObject({ priority: false, emergency: false });
+
+    expect(classifyPriorityScenario(
+      { type: 'motion-anomaly', label: 'Possible person collapse' },
+      'critical',
+    )).toMatchObject({ priority: true, emergency: false });
+
+    expect(classifyPriorityScenario(
+      { type: 'fire', label: 'Verified fire: visual fire + smoke' },
       'critical',
     )).toMatchObject({ priority: true, emergency: true });
   });
@@ -55,6 +75,6 @@ describe('priority scenario camera alert policy', () => {
       type: 'audio-distress',
       label: 'validated custom emergency scenario',
       priorityScenario: true,
-    }, 'critical')).toMatchObject({ priority: true, emergency: true });
+    }, 'critical')).toMatchObject({ priority: true, emergency: false });
   });
 });
