@@ -41,7 +41,7 @@ import {
   makeFireVisualSignal,
   makeFireSpeechSignal,
 } from '@/lib/fireFusion';
-import { makeDistressFaceSignal, makeDistressSoundSignal, makeDistressSpeechSignal, multimodalDistressLabel, fuseDistressSignals } from '@/lib/multimodalDistress';
+import { makeDistressFaceSignal, makeDistressSpeechSignal, multimodalDistressLabel, fuseDistressSignals } from '@/lib/multimodalDistress';
 import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import { getCameraSession } from '@/lib/cameraSessions';
 import { clipFileName, recordClip, saveClip } from '@/lib/clipRecorder';
@@ -461,24 +461,8 @@ export default function Index() {
     if (!running || !localCameras.length || connected.length) return;
 
     if (audioFeatures.audioEvent === 'scream') {
-      const runtime = runtimes[1];
-      const face = runtime
-        ? makeDistressFaceSignal(runtime.faceDistress.label, runtime.faceDistress.confidence)
-        : null;
-      const scream = makeDistressSoundSignal('scream', 1);
-      const verified = fuseDistressSignals(face, scream);
-      if (!verified) return;
-      const slot = slots[0];
-      raiseAlert({
-        cameraId: 'slot-1',
-        cameraName: slot.name,
-        location: 'Local microphone',
-        type: 'multimodal-distress',
-        label: multimodalDistressLabel(verified),
-        confidence: verified.confidence,
-        timestamp: new Date(verified.at).toISOString(),
-        snapshot: captureCameraEventSnapshot('slot-1'),
-      }, 'critical');
+      // Screaming is diagnostic only. Distress alerts require accepted "help"
+      // plus an Angry/Frightened face.
       return;
     }
 
@@ -511,23 +495,8 @@ export default function Index() {
     if (!localAudioEnabled || yamnet.distressScore < 35) return;
 
     if (yamnet.topLabel === 'Screaming') {
-      const runtime = runtimes[1];
-      const face = runtime
-        ? makeDistressFaceSignal(runtime.faceDistress.label, runtime.faceDistress.confidence)
-        : null;
-      const scream = makeDistressSoundSignal('screaming', yamnet.topScore);
-      const verified = fuseDistressSignals(face, scream);
-      if (!verified) return;
-      raiseAlert({
-        cameraId: 'slot-1',
-        cameraName: slots[0].name,
-        location: 'Local microphone',
-        type: 'multimodal-distress',
-        label: multimodalDistressLabel(verified),
-        confidence: verified.confidence,
-        timestamp: new Date(verified.at).toISOString(),
-        snapshot: captureCameraEventSnapshot('slot-1'),
-      }, 'critical');
+      // Screaming alone, even with a facial cue, never satisfies the strict
+      // distress alert rule. Only accepted "help" + Angry/Frightened does.
       return;
     }
 
