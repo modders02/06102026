@@ -111,23 +111,30 @@ export default function DashboardEvents({
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
-        <div className="flex items-center gap-2 border-b border-border px-4 py-3"><Bell className="h-4 w-4 text-destructive" /><h3 className="text-sm font-bold">Camera alerts</h3><span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{alerts.length}</span></div>
-        <div className="max-h-64 divide-y divide-border overflow-y-auto">
-          {alerts.length === 0 && <p className="p-4 text-sm text-muted-foreground">No camera alerts yet.</p>}
-          {alerts.slice(0, CAMERA_HISTORY_LIMIT).map(alert => (
-            <div key={alert.id} className="flex items-start gap-3 p-3">
-              {snapshotButton(alert)}
-              <div className="min-w-0 space-y-1">
-                <p className="break-words text-sm font-semibold">{typeIcon[alert.type]} {alert.label}</p>
-                <p className="break-words text-xs text-muted-foreground"><span className="font-semibold text-foreground">{alert.cameraName}</span>{alert.location ? ` · ${alert.location}` : ''}</p>
-                <p className="text-xs text-muted-foreground">{(alert.confidence * 100).toFixed(0)}% confidence · {new Date(alert.timestamp).toLocaleString()}</p>
-                {alert.clipError && <p className="text-xs text-destructive">{alert.clipError}</p>}
+      {alerts.length > 0 && (
+        <div className="overflow-hidden rounded-xl border border-destructive/30 bg-card">
+          <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+            <Bell className="h-4 w-4 text-destructive" />
+            <h3 className="text-sm font-bold">Camera alerts</h3>
+            <span className="ml-auto rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-semibold text-destructive">
+              {alerts.length}
+            </span>
+          </div>
+          <div className="max-h-64 divide-y divide-border overflow-y-auto">
+            {alerts.slice(0, CAMERA_HISTORY_LIMIT).map(alert => (
+              <div key={alert.id} className="flex items-start gap-3 p-3">
+                {snapshotButton(alert)}
+                <div className="min-w-0 space-y-1">
+                  <p className="break-words text-sm font-semibold">{typeIcon[alert.type]} {alert.label}</p>
+                  <p className="break-words text-xs text-muted-foreground"><span className="font-semibold text-foreground">{alert.cameraName}</span>{alert.location ? ` · ${alert.location}` : ''}</p>
+                  <p className="text-xs text-muted-foreground">{(alert.confidence * 100).toFixed(0)}% confidence · {new Date(alert.timestamp).toLocaleString()}</p>
+                  {alert.clipError && <p className="text-xs text-destructive">{alert.clipError}</p>}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {validationCameraId && (
         <ValidationLayer cameraId={validationCameraId} cameraName={validationCameraName} />
