@@ -29,6 +29,7 @@ import {
   type FireSpeechSignal,
 } from '@/lib/fireFusion';
 import {
+  DISTRESS_FACE_MIN_CONFIDENCE,
   MULTIMODAL_FUSION_WINDOW_MS,
   fuseDistressSignals,
   isMultimodalDistressExpression,
@@ -49,6 +50,8 @@ const TRANSCRIPT_CLEAR_MS = 5000;
 const AUDIO_POLL_TICK_MS = 350;
 const AUDIO_POLL_BACKGROUND_MIN_MS = 700;
 const SNAPSHOT_INTERVAL_MS = 1500;
+/** A face older than this is not current enough to validate newly accepted speech. */
+const DISTRESS_FACE_FRESHNESS_MS = 2500;
 const PLAYBACK_STALL_MS = 8000;
 
 type FrameCapture = { grabFrame: () => Promise<ImageBitmap> };
@@ -336,7 +339,20 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   );
 
   const maybeEmitVerifiedDistress = useCallback(() => {
-    const verified = fuseDistressSignals(recentDistressFaceRef.current, recentDistressSpeechRef.current);
+    const faceSignal = recentDistressFaceRef.current;
+    const speechSignal = recentDistressSpeechRef.current;
+    if (!faceSignal || !speechSignal) return false;
+
+    // Do not combine current speech with an old expression that is no longer
+    // representative of the camera scene. Speech may wait for a future face,
+    // but a face-first match must still be visually fresh.
+    const now = Date.now();
+    if (now - faceSignal.at > DISTRESS_FACE_FRESHNESS_MS) {
+      recentDistressFaceRef.current = null;
+      return false;
+    }
+
+    const verified = fuseDistressSignals(faceSignal, speechSignal);
     if (!verified) return false;
 
     if (distressValidationTimerRef.current) {
@@ -666,6 +682,15 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         if (immediateFace) {
           recentDistressFaceRef.current = immediateFace;
           maybeEmitVerifiedDistress();
+        } else if (analyzedFace.probability >= DISTRESS_FACE_MIN_CONFIDENCE) {
+          // A newer confident Happy/Neutral/Sad/Disgusted/etc. frame proves the
+          // previous Angry/Frightened sample is no longer the active scene.
+          recentDistressFaceRef.current = null;
+        }
+      } else {
+        const previous = recentDistressFaceRef.current;
+        if (previous && Date.now() - previous.at > DISTRESS_FACE_FRESHNESS_MS) {
+          recentDistressFaceRef.current = null;
         }
       }
 
@@ -941,26 +966,28 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       },
     });
 
-    if (d.hasFace && emotion && d.probability >= 0.55) {
-      // Record the human-readable expression in Event History. Do not erase a
-      // recent Angry/Frightened fusion signal when the next live frame briefly
-      // flips to Neutral/Sad/Disgusted: expression classifiers naturally jitter.
-      // fuseDistressSignals enforces the 10-second timestamp window, so stale
-      // face evidence still expires without destroying valid speech-late fusion.
+    if (d.hasFace && emotion && d.probability >= DISTRESS_FACE_MIN_CONFIDENCE) {
       emit('emotion', emotion.label, d.probability);
-      if (!fusionExpression) return;
     }
 
-    if (fusionExpression) {
-      if (distressFace) {
-        recentDistressFaceRef.current = distressFace;
-        maybeEmitVerifiedDistress();
-      }
+    if (fusionExpression && distressFace) {
+      recentDistressFaceRef.current = distressFace;
+      maybeEmitVerifiedDistress();
       return;
     }
 
-    // Non-fusion/no-face frames do not raise an alarm and do not immediately
-    // erase a recent distress face. Its timestamp expires naturally in fusion.
+    if (d.hasFace && d.probability >= DISTRESS_FACE_MIN_CONFIDENCE) {
+      // Keep alert evidence synchronized with what the camera currently sees.
+      // This prevents a previous Angry frame from combining with later "help"
+      // while the displayed expression has already changed to Happy/Neutral/etc.
+      recentDistressFaceRef.current = null;
+      return;
+    }
+
+    const previous = recentDistressFaceRef.current;
+    if (!d.hasFace && previous && Date.now() - previous.at > DISTRESS_FACE_FRESHNESS_MS) {
+      recentDistressFaceRef.current = null;
+    }
   }, [camera.enabled, camera.aiEnabled, face.distress, patch, emit, maybeEmitVerifiedDistress]);
 
   // ---- Audio: RTSP audio -> ffmpeg -> trained custom KWS on the backend -----
