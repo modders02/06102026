@@ -39,12 +39,10 @@ export function useFaceDistress(active: boolean) {
   const [distress, setDistress] = useState<FaceDistress>(EMPTY);
   const busyRef = useRef(false);
   const historyRef = useRef<number[]>([]);
-  const expressionHistoryRef = useRef<Record<string, number>[]>([]);
 
   useEffect(() => {
     if (!active) {
       historyRef.current = [];
-      expressionHistoryRef.current = [];
       setDistress(EMPTY);
       return;
     }
@@ -59,7 +57,7 @@ export function useFaceDistress(active: boolean) {
   }, [active]);
 
   const analyze = useCallback(async (source: HTMLCanvasElement | HTMLVideoElement | null) => {
-    if (!ready || !source || busyRef.current) return;
+    if (!ready || !source || busyRef.current) return null;
     busyRef.current = true;
     try {
       const detections = await faceapi
@@ -68,9 +66,8 @@ export function useFaceDistress(active: boolean) {
 
       if (!detections.length) {
         historyRef.current = [];
-        expressionHistoryRef.current = [];
         setDistress(EMPTY);
-        return;
+        return EMPTY;
       }
 
       // Pick the largest face
@@ -89,40 +86,37 @@ export function useFaceDistress(active: boolean) {
       const angry = expr.angry ?? 0;
       const distressRaw = sad * 1.0 + fearful * 1.4 + surprised * 1.2 + angry * 0.8;
       const instant = Math.min(100, Math.round(distressRaw * 100));
-      // Temporal smoothing — rolling avg over last 5 samples to suppress flicker
+      // Keep the distress score lightly smoothed for display, but do not delay
+      // the actual expression label. Alert fusion needs the current camera frame,
+      // not a dominant class averaged across several seconds of old snapshots.
       historyRef.current.push(instant);
-      if (historyRef.current.length > 5) historyRef.current.shift();
+      if (historyRef.current.length > 3) historyRef.current.shift();
       const distressScore = Math.round(
         historyRef.current.reduce((a, b) => a + b, 0) / historyRef.current.length
       );
 
-      // Average expression probabilities over the last three valid face frames.
-      // Real indoor video contains compression noise, head turns and shadows;
-      // one unstable frame must not become a safety expression.
-      expressionHistoryRef.current.push({ ...expr });
-      if (expressionHistoryRef.current.length > 3) expressionHistoryRef.current.shift();
-      const averaged: Record<string, number> = {};
-      for (const sample of expressionHistoryRef.current) {
-        for (const [key, value] of Object.entries(sample)) {
-          averaged[key] = (averaged[key] ?? 0) + value / expressionHistoryRef.current.length;
-        }
-      }
-
+      // Use the current frame's expression probabilities so a real change to
+      // Angry/Fearful is available to validation immediately. Confidence
+      // filtering and multimodal fusion still prevent a single weak frame from
+      // becoming an alert.
       let dominant = 'neutral';
       let dominantProb = 0;
-      for (const [k, v] of Object.entries(averaged)) {
+      for (const [k, v] of Object.entries(expr)) {
         if (v > dominantProb) { dominantProb = v; dominant = k; }
       }
 
-      setDistress({
+      const result: FaceDistress = {
         hasFace: true,
         expression: dominant,
         probability: dominantProb,
         distressScore,
         distressLevel: distressScore > 55 ? 'severe' : distressScore > 25 ? 'mild' : 'none',
-      });
+      };
+      setDistress(result);
+      return result;
     } catch (err) {
       console.error('[FaceDistress] analyze error:', err);
+      return null;
     } finally {
       busyRef.current = false;
     }
