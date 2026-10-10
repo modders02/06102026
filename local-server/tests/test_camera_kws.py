@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from msds.camera import Camera
+from msds.camera import Camera, KWS_REPEAT_GUARD_SECONDS
 from msds.kws_engine import KWS_ENGINE
 
 
