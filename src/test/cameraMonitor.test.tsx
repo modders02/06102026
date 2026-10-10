@@ -921,6 +921,58 @@ describe('camera snapshots and page-scoped playback', () => {
     }));
   });
 
+  it('captures one Camera Alert snapshot for one continuous fire trigger, then allows a new trigger after clear', async () => {
+    const activeFire = {
+      fireCandidate: true,
+      fireDetected: true,
+      smokeEmergency: false,
+      confidence: 0.9,
+      firePixelRatio: 0.03,
+      smokeRatio: 0,
+      visibility: 100,
+      smokeCorroborated: false,
+      lowVisibilityCorroborated: false,
+    };
+    mocked.detectFire.mockReturnValue(activeFire);
+
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+
+    const fireCalls = () => onEvent.mock.calls
+      .map(([event]) => event)
+      .filter(event => event.type === 'fire');
+
+    expect(fireCalls()).toHaveLength(1);
+    expect(fireCalls()[0]).toMatchObject({
+      type: 'fire',
+      alertValidation: { status: 'accepted' },
+      snapshot: 'data:image/jpeg;base64,preview',
+    });
+
+    // The detector remains positive across several background frames. This is
+    // one continuous trigger, so no additional Camera Alert snapshot is made.
+    await act(async () => { await vi.advanceTimersByTimeAsync(4500); });
+    expect(fireCalls()).toHaveLength(1);
+
+    // Clear the condition, then a later positive condition is a new trigger.
+    mocked.detectFire.mockReturnValue({
+      fireCandidate: false,
+      fireDetected: false,
+      smokeEmergency: false,
+      confidence: 0,
+      firePixelRatio: 0,
+      smokeRatio: 0,
+      visibility: 100,
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+
+    mocked.detectFire.mockReturnValue(activeFire);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(fireCalls()).toHaveLength(2);
+  });
+
   it('immediately alerts on visual fire plus low visibility', async () => {
     mocked.detectFire.mockReturnValueOnce({
       fireCandidate: true,
