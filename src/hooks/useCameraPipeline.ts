@@ -324,9 +324,11 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     ) => {
       const now = Date.now();
       const key = type === 'fire' ? 'fire' : `${type}:${label}`;
-      const cooldownMs = type === 'multimodal-distress'
-        ? 0
-        : (settings.alertCooldownMs ?? 3000);
+      const edgeDeduped = type === 'multimodal-distress'
+        || type === 'fire'
+        || type === 'motion-anomaly'
+        || type === 'attention-alert';
+      const cooldownMs = edgeDeduped ? 0 : (settings.alertCooldownMs ?? 3000);
       if (cooldownMs > 0 && cooldownRef.current[key] && now - cooldownRef.current[key] < cooldownMs) return;
       if (cooldownMs > 0) cooldownRef.current[key] = now;
       runtimeRef.current.alerts += 1;
