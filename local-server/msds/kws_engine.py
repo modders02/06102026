@@ -609,7 +609,10 @@ class CustomKeywordEngine:
             if len(existing) >= maximum:
                 oldest = existing[0]
                 oldest.unlink(missing_ok=True)
-            stamp = f"{int(time.time() * 1000)}-{os.getpid()}"
+            # Millisecond filenames can collide when several enrollment samples
+            # are processed in one fast batch, silently overwriting templates.
+            # Nanosecond stamps keep each real sample distinct.
+            stamp = f"{time.time_ns()}-{os.getpid()}"
             np.save(folder / f"{stamp}.npy", features, allow_pickle=False)
             self.load()
             count = len(self.templates.get(key, []))
