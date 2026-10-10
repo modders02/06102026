@@ -41,7 +41,13 @@ import {
   makeFireVisualSignal,
   makeFireSpeechSignal,
 } from '@/lib/fireFusion';
-import { makeDistressFaceSignal, makeDistressSpeechSignal, multimodalDistressLabel, fuseDistressSignals } from '@/lib/multimodalDistress';
+import {
+  DISTRESS_FACE_FRESHNESS_MS,
+  makeDistressFaceSignal,
+  makeDistressSpeechSignal,
+  multimodalDistressLabel,
+  fuseDistressSignals,
+} from '@/lib/multimodalDistress';
 import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import { getCameraSession } from '@/lib/cameraSessions';
 import { clipFileName, recordClip, saveClip } from '@/lib/clipRecorder';
@@ -415,6 +421,12 @@ export default function Index() {
           type: 'fire',
           label: fireSpeechLabel(),
           confidence: verifiedFire.confidence,
+          alertValidation: {
+            status: 'accepted',
+            reason: 'Accepted "fire" keyword matched current visual fire evidence.',
+            keyword: 'fire',
+            emotion: 'visual fire',
+          },
           timestamp: new Date(verifiedFire.at).toISOString(),
           snapshot: captureCameraEventSnapshot('slot-1'),
         }, 'critical');
@@ -426,8 +438,16 @@ export default function Index() {
 
     const fusionSpeech = makeDistressSpeechSignal(text);
     if (fusionSpeech) {
-      const fusionFace = runtime
-        ? makeDistressFaceSignal(runtime.faceDistress.label, runtime.faceDistress.confidence)
+      const observedAt = runtime?.faceDistress.observedAt
+        ? Date.parse(runtime.faceDistress.observedAt)
+        : NaN;
+      const faceAt = Number.isFinite(observedAt) ? observedAt : 0;
+      const fusionFace = runtime && faceAt > 0 && Date.now() - faceAt <= DISTRESS_FACE_FRESHNESS_MS
+        ? makeDistressFaceSignal(
+            runtime.faceDistress.label,
+            runtime.faceDistress.confidence,
+            faceAt,
+          )
         : null;
       const verified = fuseDistressSignals(fusionFace, fusionSpeech);
       if (!verified) return;
@@ -439,6 +459,12 @@ export default function Index() {
         type: 'multimodal-distress',
         label: multimodalDistressLabel(verified),
         confidence: verified.confidence,
+        alertValidation: {
+          status: 'accepted',
+          reason: `${verified.face.label} + "${verified.speech.keyword}" matched within the fusion window.`,
+          keyword: verified.speech.keyword,
+          emotion: verified.face.label,
+        },
         timestamp: new Date(verified.at).toISOString(),
         snapshot: captureCameraEventSnapshot('slot-1'),
       }, 'critical');
@@ -484,17 +510,24 @@ export default function Index() {
     // noisier in a household, so require substantially stronger evidence.
     const threshold = yamnet.fireAlarm ? 35 : 60;
     if (yamnet.fireScore < threshold) return;
-    raiseAlert({
+    storeEvent({
       cameraId: 'slot-1',
       cameraName: slots[0].name,
       location: 'Local microphone',
       type: 'fire',
       label: `Fire-related sound: ${yamnet.fireLabel} (${yamnet.fireScore}%)`,
       confidence: yamnet.fireScore / 100,
+      priorityScenario: false,
+      alertValidation: {
+        status: 'rejected',
+        reason: 'Fire-related audio was detected, but visual fire validation was not satisfied.',
+        keyword: '',
+        emotion: 'audio fire cue',
+      },
       timestamp: new Date().toISOString(),
       snapshot: captureCameraEventSnapshot('slot-1'),
-    }, yamnet.fireAlarm ? 'critical' : 'high');
-  }, [localAudioEnabled, yamnet.fireAlarm, yamnet.fireScore, yamnet.fireLabel, slots, raiseAlert]);
+    });
+  }, [localAudioEnabled, yamnet.fireAlarm, yamnet.fireScore, yamnet.fireLabel, slots, storeEvent]);
 
   useEffect(() => {
     if (!localAudioEnabled || yamnet.distressScore < 35) return;
