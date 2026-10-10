@@ -85,6 +85,7 @@ export interface CctvAudioStatus {
       message?: string;
     } | null;
     last_segment_ms?: number;
+    last_segment_at?: string | null;
     last_candidate?: string | null;
     last_candidate_confidence?: number;
     last_runner_up_keyword?: string | null;
