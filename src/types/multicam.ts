@@ -130,8 +130,32 @@ export interface CameraRuntime {
     bbox?: [number, number, number, number];
   };
   smoke: { detected: boolean; confidence: number };
-  faceDistress: { detected: boolean; label: string; confidence: number };
-  audioDistress: { detected: boolean; keyword: string; confidence: number; transcript: string };
+  faceDistress: {
+    detected: boolean;
+    label: string;
+    confidence: number;
+    /** Timestamp of the camera frame that produced this expression result. */
+    observedAt?: string;
+  };
+  audioDistress: {
+    detected: boolean;
+    keyword: string;
+    confidence: number;
+    transcript: string;
+    /** Timestamp of the accepted backend keyword event. */
+    detectedAt?: string;
+  };
+  /** Final alert-validation outcome, produced by the same fusion path as alerts. */
+  alertValidation?: {
+    status: 'waiting' | 'pending' | 'accepted' | 'rejected';
+    keyword: string;
+    confidence: number;
+    emotion: string;
+    emotionConfidence: number;
+    reason: string;
+    evaluatedAt: string;
+    sourceDecision?: string;
+  };
   /** Rolling live transcription of everything heard on this camera. */
   transcript: string;
   /** True while transcripts are being polled from the backend. */
