@@ -21,109 +21,50 @@ const normalizeKeyword = (value?: string | null) =>
   (value || '').replace(/_/g, ' ').trim();
 
 export function deriveValidationView(runtime: CameraRuntime | null): ValidationView {
-  const finalValidation = runtime?.alertValidation;
-  if (finalValidation) {
-    const state: ValidationViewState = finalValidation.status === 'accepted'
+  const outcome = runtime?.alertValidation;
+  if (outcome) {
+    const state: ValidationViewState = outcome.status === 'accepted'
       ? 'validated'
-      : finalValidation.status;
+      : outcome.status === 'rejected'
+        ? 'rejected'
+        : outcome.status === 'pending'
+          ? 'pending'
+          : 'waiting';
+
     return {
-      keyword: finalValidation.keyword,
-      confidence: finalValidation.confidence,
-      decision: finalValidation.status.toUpperCase(),
+      keyword: outcome.keyword,
+      confidence: outcome.confidence,
+      decision: outcome.status.toUpperCase(),
       state,
-      crossCheck: finalValidation.reason,
+      crossCheck: outcome.reason,
     };
   }
 
-  // Backward-compatible fallback for sessions created before alertValidation
-  // was added. New sessions are driven by the pipeline's actual fusion result.
+  // Legacy/session-start fallback. Once the pipeline evaluates anything, the
+  // authoritative alertValidation result above becomes the only displayed
+  // decision so rejected KWS diagnostics cannot disagree with Camera alerts.
   const kws = runtime?.audio?.custom_kws;
-  const latestCandidate = normalizeKeyword(kws?.last_candidate);
-  const acceptedKeyword = normalizeKeyword(kws?.last_keyword);
+  const keyword = normalizeKeyword(kws?.last_candidate);
   const decision = kws?.last_decision || '';
-
-  if (!latestCandidate && !acceptedKeyword) {
+  if (!keyword) {
     return {
       keyword: '',
       confidence: 0,
       decision: 'WAITING',
       state: 'waiting',
-      crossCheck: 'Waiting for trained keyword and camera evidence.',
+      crossCheck: 'Waiting for keyword and camera evidence.',
     };
   }
 
-  if (decision && decision !== 'accepted') {
-    const reasons: Record<string, string> = {
-      negative_not_ready: 'UNKNOWN/non-keyword validation is not ready.',
-      duration_mismatch: 'Keyword duration does not match the trained examples.',
-      below_threshold: 'Keyword confidence is below the trained acceptance threshold.',
-      too_close_to_unknown: 'Candidate is too similar to UNKNOWN/non-keyword speech.',
-      insufficient_margin: 'Candidate is too close to another trained keyword.',
-      no_ready_candidate: 'No trained keyword candidate is ready.',
-    };
-    return {
-      keyword: latestCandidate,
-      confidence: kws?.last_candidate_confidence ?? 0,
-      decision: 'REJECTED',
-      state: 'rejected',
-      crossCheck: reasons[decision] || `Keyword candidate rejected: ${decision}.`,
-    };
-  }
-
-  const keyword = acceptedKeyword || latestCandidate;
-  const confidence = kws?.last_confidence ?? kws?.last_candidate_confidence ?? 0;
-  const normalized = keyword.toLowerCase();
-  const face = runtime?.faceDistress;
-  const hasDistressFace = Boolean(
-    face?.detected
-    && (face.label === 'Angry' || face.label === 'Frightened'),
-  );
-  const hasVisualHazard = Boolean(runtime?.fire.detected || runtime?.smoke.detected);
-
-  if (normalized === 'help') {
-    if (hasDistressFace) {
-      return {
-        keyword,
-        confidence,
-        decision: 'ACCEPTED',
-        state: 'validated',
-        crossCheck: `Accepted help + ${face?.label || 'distress face'}.`,
-      };
-    }
-    return {
-      keyword,
-      confidence,
-      decision: 'PENDING',
-      state: 'pending',
-      crossCheck: 'Help accepted; waiting for Angry/Frightened facial evidence.',
-    };
-  }
-
-  if (normalized === 'fire') {
-    if (hasVisualHazard) {
-      return {
-        keyword,
-        confidence,
-        decision: 'ACCEPTED',
-        state: 'validated',
-        crossCheck: 'Accepted fire + current visual fire/smoke evidence.',
-      };
-    }
-    return {
-      keyword,
-      confidence,
-      decision: 'PENDING',
-      state: 'pending',
-      crossCheck: 'Fire accepted; waiting for current visual hazard evidence.',
-    };
-  }
-
+  const accepted = decision === 'accepted';
   return {
     keyword,
-    confidence,
-    decision: 'REJECTED',
-    state: 'rejected',
-    crossCheck: `Accepted "${keyword}", but it is not configured for multimodal alert fusion.`,
+    confidence: kws?.last_candidate_confidence ?? 0,
+    decision: accepted ? 'PENDING' : 'REJECTED',
+    state: accepted ? 'pending' : 'rejected',
+    crossCheck: accepted
+      ? 'Accepted keyword; waiting for configured visual/facial evidence.'
+      : `Keyword rejected by KWS: ${decision || 'unknown reason'}.`,
   };
 }
 
