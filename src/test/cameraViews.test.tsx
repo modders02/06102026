@@ -280,6 +280,26 @@ describe('camera alerts and event history', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
+  it('does not render a rejected validation as a Camera alert', () => {
+    mocks.alertEvents = [{
+      ...mocks.alertEvents[0],
+      id: 'rejected',
+      label: 'Rejected fire candidate',
+      priorityScenario: false,
+      alertValidation: {
+        status: 'rejected',
+        reason: 'Visual validation failed.',
+        keyword: '',
+        emotion: 'fire candidate',
+      },
+    }];
+
+    render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
+
+    expect(screen.queryByText('Rejected fire candidate')).not.toBeInTheDocument();
+    expect(screen.getByText('No camera alerts yet.')).toBeInTheDocument();
+  });
+
   it('keeps an alert snapshot available after the event leaves general history', () => {
     mocks.events = [mocks.events[0]];
     render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
