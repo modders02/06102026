@@ -14,6 +14,8 @@ describe('multimodal distress fusion', () => {
     ['angry', 'Angry'],
     ['fearful', 'Frightened'],
     ['frightened', 'Frightened'],
+    ['surprised', 'Frightened'],
+    ['shock', 'Frightened'],
   ] as const)('accepts a reliable %s face', (expression, label) => {
     expect(makeDistressFaceSignal(expression, 0.9, 1000)).toEqual({
       label,
@@ -28,8 +30,6 @@ describe('multimodal distress fusion', () => {
     expect(makeDistressFaceSignal('sad', 0.99, 1000)).toBeNull();
     expect(makeDistressFaceSignal('neutral', 0.99, 1000)).toBeNull();
     expect(makeDistressFaceSignal('disgusted', 0.99, 1000)).toBeNull();
-    expect(makeDistressFaceSignal('surprised', 0.99, 1000)).toBeNull();
-    expect(makeDistressFaceSignal('shock', 0.99, 1000)).toBeNull();
   });
 
   it.each([
@@ -60,6 +60,8 @@ describe('multimodal distress fusion', () => {
     ['angry', 'Angry'],
     ['fearful', 'Frightened'],
     ['frightened', 'Frightened'],
+    ['surprised', 'Frightened'],
+    ['shock', 'Frightened'],
   ] as const)('verifies accepted help with %s', (expression, label) => {
     const face = makeDistressFaceSignal(expression, 0.92, 5000)!;
     const help = makeDistressSpeechSignal('help', 0.95, 7000)!;
