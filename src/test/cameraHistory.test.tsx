@@ -153,7 +153,7 @@ describe('priority-only camera alerts', () => {
     });
   });
 
-  it('keeps raw audio distress in event history unless explicitly prioritized', () => {
+  it('keeps raw audio distress in event history', () => {
     const registry = renderHook(useCameraRegistry);
     act(() => registry.result.current.addEvent(event(1, 'audio-distress', {
       label: 'Safety word: "danger"',
@@ -163,17 +163,18 @@ describe('priority-only camera alerts', () => {
     expect(registry.result.current.alertEvents).toEqual([]);
   });
 
-  it('retains explicitly prioritized critical speech as a camera alert', () => {
+  it('does not promote standalone audio even when explicitly marked priority', () => {
     const registry = renderHook(useCameraRegistry);
     act(() => registry.result.current.addEvent(event(1, 'audio-distress', {
       label: 'Wake word: "call 911"',
       priorityScenario: true,
     })));
 
-    expect(registry.result.current.alertEvents[0]).toMatchObject({
+    expect(registry.result.current.events[0]).toMatchObject({
       type: 'audio-distress',
       priorityScenario: true,
     });
+    expect(registry.result.current.alertEvents).toEqual([]);
   });
 });
 
@@ -232,7 +233,9 @@ describe('camera event snapshot fallback', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/jpeg;base64,live');
     publishCameraSession('history-source', { video, preview: 'data:image/jpeg;base64,old', previewTimestamp: 1000 });
     const registry = renderHook(useCameraRegistry);
-    act(() => registry.result.current.addEvent(event(1, 'audio-distress', { priorityScenario: true })));
+    act(() => registry.result.current.addEvent(event(1, 'multimodal-distress', {
+      label: 'Verified distress: Angry + "help"',
+    })));
     expect(drawImage).toHaveBeenCalledWith(video, 0, 0, 640, 360);
     expect(registry.result.current.alertEvents[0].snapshot).toBe('data:image/jpeg;base64,live');
   });
@@ -243,7 +246,9 @@ describe('camera event snapshot fallback', () => {
       eventPreview: 'data:image/jpeg;base64,current',
     });
     const registry = renderHook(useCameraRegistry);
-    act(() => registry.result.current.addEvent(event(1, 'audio-distress', { priorityScenario: true })));
+    act(() => registry.result.current.addEvent(event(1, 'multimodal-distress', {
+      label: 'Verified distress: Frightened + "help"',
+    })));
     expect(registry.result.current.alertEvents[0].snapshot).toBe('data:image/jpeg;base64,current');
   });
 });
