@@ -56,11 +56,14 @@ export default function DashboardEvents({
   }, [activeSlots, events, alertEvents, filter]);
   const filtered = useMemo(() => filter === 'all' ? events : events.filter(event => event.cameraId === filter), [events, filter]);
   const alerts = useMemo(
-    () => (alertEvents ?? []).filter(
-      event => isPriorityCameraAlert(event)
-        && event.alertValidation?.status === 'accepted'
-        && (filter === 'all' || event.cameraId === filter),
-    ),
+    () => (alertEvents ?? [])
+      .filter(
+        event => isPriorityCameraAlert(event)
+          && event.alertValidation?.status === 'accepted'
+          && (filter === 'all' || event.cameraId === filter),
+      )
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+      .slice(0, 1),
     [alertEvents, filter],
   );
   const viewingEvent = viewingId ? [...events, ...(alertEvents || [])].find(event => event.id === viewingId) : undefined;
@@ -126,7 +129,7 @@ export default function DashboardEvents({
         </div>
         <div className="max-h-64 divide-y divide-border overflow-y-auto">
           {alerts.length === 0 && <p className="p-4 text-sm text-muted-foreground">No camera alerts yet.</p>}
-          {alerts.slice(0, CAMERA_HISTORY_LIMIT).map(alert => (
+          {alerts.map(alert => (
             <div key={alert.id} className="flex items-start gap-3 p-3">
               {snapshotButton(alert)}
               <div className="min-w-0 space-y-1">
