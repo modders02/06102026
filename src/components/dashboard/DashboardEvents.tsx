@@ -56,7 +56,7 @@ export default function DashboardEvents({
   }, [activeSlots, events, alertEvents, filter]);
   const filtered = useMemo(() => filter === 'all' ? events : events.filter(event => event.cameraId === filter), [events, filter]);
   const alerts = useMemo(
-    () => alertEvents.filter(
+    () => (alertEvents ?? []).filter(
       event => isPriorityCameraAlert(event)
         && event.alertValidation?.status === 'accepted'
         && (filter === 'all' || event.cameraId === filter),
