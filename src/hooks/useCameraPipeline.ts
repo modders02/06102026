@@ -982,6 +982,25 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       },
     });
 
+    const activeValidation = runtimeRef.current.alertValidation;
+    if (activeValidation?.status === 'pending' && activeValidation.keyword === 'help' && !distressFace) {
+      const currentLabel = d.hasFace
+        ? (emotion?.label || d.expression || 'unrecognized expression')
+        : '';
+      const reason = d.hasFace
+        ? `Accepted "help"; current expression ${currentLabel} (${(d.probability * 100).toFixed(0)}%) does not yet satisfy Angry/Frightened validation.`
+        : 'Accepted "help"; no face is currently detected, waiting for Angry/Frightened facial evidence.';
+      patch({
+        alertValidation: {
+          ...activeValidation,
+          emotion: currentLabel,
+          emotionConfidence: d.probability,
+          reason,
+          evaluatedAt: new Date().toISOString(),
+        },
+      });
+    }
+
     if (d.hasFace && emotion && d.probability >= DISTRESS_FACE_MIN_CONFIDENCE) {
       emit('emotion', emotion.label, d.probability);
     }
