@@ -70,7 +70,7 @@ describe('bounded camera event histories', () => {
   it('attaches completed clips to alerts that have left event history and clears both together', () => {
     const registry = renderHook(useCameraRegistry);
     act(() => {
-      registry.result.current.addEvent(event(1, 'audio-distress'));
+      registry.result.current.addEvent(event(1, 'multimodal-distress'));
       for (let index = 2; index <= 51; index++) registry.result.current.addEvent(event(index));
       registry.result.current.updateEvent('event-1', { clipUrl: 'blob:finished', clipFile: 'alert.webm' });
     });
@@ -204,7 +204,7 @@ describe('camera event snapshot fallback', () => {
       eventPreview: 'data:image/jpeg;base64,current',
     });
     const registry = renderHook(useCameraRegistry);
-    act(() => registry.result.current.addEvent(event(1, 'audio-distress')));
+    act(() => registry.result.current.addEvent(event(1, 'audio-distress', { priorityScenario: true })));
     expect(registry.result.current.alertEvents[0].snapshot).toBe('data:image/jpeg;base64,current');
   });
 });
