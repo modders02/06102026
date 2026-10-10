@@ -149,7 +149,10 @@ export function saveEventHistory(next: CameraEventHistory): CameraEventHistory {
 export function loadEventHistory(): CameraEventHistory {
   const history = readEventHistory();
   if (history === historyCache?.history) return history;
-  let needsMigration = history.events.length > CAMERA_HISTORY_LIMIT || history.alertEvents.length > 1;
+  const source = readHistoryStorage();
+  const storedAlertCount = parseEventArray(source.alertsRaw).filter(isCameraAlert).length;
+  let needsMigration = history.events.length > CAMERA_HISTORY_LIMIT
+    || storedAlertCount > 1;
   try { needsMigration ||= localStorage.getItem(ALERTS_KEY) === null; } catch { /* unavailable storage */ }
   return needsMigration ? saveEventHistory(history) : history;
 }
