@@ -1,8 +1,8 @@
-export type HistoryEmotion = 'happy' | 'sad' | 'frightened' | 'neutral' | 'disgust';
+export type HistoryEmotion = 'happy' | 'sad' | 'angry' | 'frightened' | 'neutral' | 'disgust';
 
 export interface HistoryEmotionMeta {
   emotion: HistoryEmotion;
-  label: 'Happy' | 'Sad' | 'Frightened' | 'Neutral' | 'Disgust';
+  label: 'Happy' | 'Sad' | 'Angry' | 'Frightened' | 'Neutral' | 'Disgust';
   icon: string;
   rowClass: string;
   labelClass: string;
@@ -22,6 +22,13 @@ const META: Record<HistoryEmotion, HistoryEmotionMeta> = {
     icon: '😢',
     rowClass: 'border-l-4 border-l-info bg-info/10',
     labelClass: 'text-info',
+  },
+  angry: {
+    emotion: 'angry',
+    label: 'Angry',
+    icon: '😠',
+    rowClass: 'border-l-4 border-l-destructive bg-destructive/10',
+    labelClass: 'text-destructive',
   },
   frightened: {
     emotion: 'frightened',
@@ -55,6 +62,7 @@ export function historyEmotionMeta(expression: string | null | undefined): Histo
   const normalized = (expression ?? '').trim().toLowerCase();
   if (normalized === 'happy') return META.happy;
   if (normalized === 'sad') return META.sad;
+  if (normalized === 'angry' || normalized === 'anger') return META.angry;
   if (
     normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
     || normalized === 'surprised' || normalized === 'surprise'
