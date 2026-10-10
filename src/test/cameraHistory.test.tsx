@@ -5,10 +5,33 @@ import { CAMERA_HISTORY_LIMIT, loadEventHistory, saveEventHistory } from '@/lib/
 import { publishCameraSession } from '@/lib/cameraSessions';
 import type { DetectionEvent } from '@/types/multicam';
 
-const event = (index: number, type: DetectionEvent['type'] = 'object', extra: Partial<DetectionEvent> = {}): DetectionEvent => ({
-  id: `event-${index}`, cameraId: 'history-source', cameraName: 'Front camera', location: 'Entrance',
-  type, label: `${type} ${index}`, confidence: 0.9, timestamp: new Date(index * 1000).toISOString(), ...extra,
-});
+const event = (index: number, type: DetectionEvent['type'] = 'object', extra: Partial<DetectionEvent> = {}): DetectionEvent => {
+  const label = extra.label ?? `${type} ${index}`;
+  const distress = /^Verified distress: (Angry|Frightened) \+ "help"$/.exec(label);
+  const defaultValidation: DetectionEvent['alertValidation'] | undefined =
+    type === 'fire' || type === 'smoke'
+      ? { status: 'accepted', reason: 'validated visual hazard', keyword: '', emotion: 'visual fire' }
+      : type === 'multimodal-distress' && distress
+        ? { status: 'accepted', reason: 'validated help + face', keyword: 'help', emotion: distress[1] }
+        : type === 'motion-anomaly' && /person collapse/i.test(label)
+          ? { status: 'accepted', reason: 'validated person collapse', keyword: '', emotion: 'motion' }
+          : type === 'attention-alert' && /priority object/i.test(label)
+            ? { status: 'accepted', reason: 'validated priority object', keyword: '', emotion: 'priority object' }
+            : undefined;
+
+  return {
+    id: `event-${index}`,
+    cameraId: 'history-source',
+    cameraName: 'Front camera',
+    location: 'Entrance',
+    type,
+    label,
+    confidence: 0.9,
+    alertValidation: defaultValidation,
+    timestamp: new Date(index * 1000).toISOString(),
+    ...extra,
+  };
+};
 
 let revoke: ReturnType<typeof vi.fn>;
 beforeEach(() => {
@@ -141,6 +164,26 @@ describe('bounded camera event histories', () => {
 });
 
 describe('priority-only camera alerts', () => {
+  it('drops rejected alert records from Camera alerts', () => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => registry.result.current.addEvent(event(1, 'multimodal-distress', {
+      label: 'Verified distress: Angry + "help"',
+      alertValidation: {
+        status: 'rejected',
+        reason: 'Current camera expression is Happy.',
+        keyword: 'help',
+        emotion: 'Happy',
+      },
+    })));
+
+    expect(registry.result.current.alertEvents).toEqual([]);
+    expect(registry.result.current.events[0]).toMatchObject({
+      type: 'multimodal-distress',
+      alertValidation: { status: 'rejected' },
+    });
+  });
+
+
   it('keeps priority alerts out of Event history', () => {
     const registry = renderHook(useCameraRegistry);
     act(() => registry.result.current.addEvent(event(1, 'fire', {
