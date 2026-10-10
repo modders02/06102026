@@ -4,15 +4,14 @@ import {
   DetectionEvent,
   MultiCamSettings,
 } from '@/types/multicam';
+import { isPriorityCameraAlert } from '@/lib/priorityScenario';
 
 const CAMERAS_KEY = 'msd-cameras-v1';
 const SETTINGS_KEY = 'msd-multicam-settings-v1';
 const EVENTS_KEY = 'msd-detection-events-v1';
 const ALERTS_KEY = 'msd-camera-alerts-v1';
 export const CAMERA_HISTORY_LIMIT = 50;
-const ALERT_TYPES = new Set<DetectionEvent['type']>(['fire', 'smoke', 'face-distress', 'audio-distress', 'multimodal-distress', 'motion-anomaly', 'attention-alert']);
-
-export const isCameraAlert = (event: DetectionEvent) => ALERT_TYPES.has(event.type);
+export const isCameraAlert = (event: DetectionEvent) => isPriorityCameraAlert(event);
 
 export interface CameraEventHistory {
   events: DetectionEvent[];
