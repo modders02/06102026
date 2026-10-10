@@ -57,3 +57,9 @@ supabase/.temp/
 
 # Local acoustic enrollment samples / templates
 local-server/kws-data*/
+
+# Facial-distress training data and generated artifacts
+training/facial_distress/.venv/
+training/facial_distress/data/
+training/facial_distress/artifacts/
+training/facial_distress/__pycache__/
