@@ -24,13 +24,13 @@ class CameraCustomKeywordTests(unittest.TestCase):
         cam = self.make_camera()
         segment = b"\x01\x00" * 12000
         match = SimpleNamespace(
-            keyword="tulong",
+            keyword="help",
             confidence=0.91,
             distance=0.09,
-            runner_up_keyword="sunog",
+            runner_up_keyword="fire",
             runner_up_confidence=0.2,
-            keyword_scores={"tulong": 0.91, "sunog": 0.2},
-            keyword_duration_ratios={"tulong": 1.0, "sunog": 0.8},
+            keyword_scores={"help": 0.91, "fire": 0.2},
+            keyword_duration_ratios={"help": 1.0, "fire": 0.8},
             class_margin=0.71,
             required_margin=0.02,
             negative_confidence=0.1,
@@ -50,14 +50,14 @@ class CameraCustomKeywordTests(unittest.TestCase):
 
         self.assertEqual(len(cam.events), 1)
         self.assertEqual(cam.events[0]["source"], "custom-kws")
-        self.assertEqual(cam.events[0]["keyword"], "tulong")
-        self.assertEqual(cam.events[0]["transcript"], "tulong")
-        self.assertEqual(cam.last_transcript, "tulong")
-        self.assertEqual(cam.kws_last_keyword, "tulong")
-        self.assertEqual(cam.kws_last_candidate, "tulong")
-        self.assertEqual(cam.kws_last_runner_up_keyword, "sunog")
-        self.assertEqual(cam.kws_last_keyword_scores["tulong"], 0.91)
-        self.assertEqual(cam.kws_last_keyword_duration_ratios["tulong"], 1.0)
+        self.assertEqual(cam.events[0]["keyword"], "help")
+        self.assertEqual(cam.events[0]["transcript"], "help")
+        self.assertEqual(cam.last_transcript, "help")
+        self.assertEqual(cam.kws_last_keyword, "help")
+        self.assertEqual(cam.kws_last_candidate, "help")
+        self.assertEqual(cam.kws_last_runner_up_keyword, "fire")
+        self.assertEqual(cam.kws_last_keyword_scores["help"], 0.91)
+        self.assertEqual(cam.kws_last_keyword_duration_ratios["help"], 1.0)
         self.assertEqual(cam.kws_last_class_margin, 0.71)
         self.assertEqual(cam.kws_last_required_margin, 0.02)
         self.assertEqual(cam.kws_last_negative_second_confidence, 0.08)
