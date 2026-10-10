@@ -306,7 +306,12 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   }, [camera.id]);
 
   const emit = useCallback(
-    (type: DetectionEvent['type'], label: string, confidence: number) => {
+    (
+      type: DetectionEvent['type'],
+      label: string,
+      confidence: number,
+      eventValidation?: DetectionEvent['alertValidation'],
+    ) => {
       const now = Date.now();
       const key = type === 'fire' ? 'fire' : `${type}:${label}`;
       const cooldownMs = type === 'multimodal-distress'
@@ -322,6 +327,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         type,
         label,
         confidence,
+        alertValidation: eventValidation,
         timestamp: new Date().toISOString(),
         snapshot: snapshot(),
       });
@@ -354,7 +360,17 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         sourceDecision: 'accepted',
       },
     });
-    emit('multimodal-distress', multimodalDistressLabel(verified), verified.confidence);
+    emit(
+      'multimodal-distress',
+      multimodalDistressLabel(verified),
+      verified.confidence,
+      {
+        status: 'accepted',
+        reason: `${verified.face.label} + "${verified.speech.keyword}" matched within the fusion window.`,
+        keyword: verified.speech.keyword,
+        emotion: verified.face.label,
+      },
+    );
     return true;
   }, [emit, patch]);
 
@@ -375,7 +391,17 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         sourceDecision: 'accepted',
       },
     });
-    emit('fire', fireSpeechLabel(), verified.confidence);
+    emit(
+      'fire',
+      fireSpeechLabel(),
+      verified.confidence,
+      {
+        status: 'accepted',
+        reason: 'Accepted "fire" keyword matched current visual fire evidence.',
+        keyword: 'fire',
+        emotion: 'visual fire',
+      },
+    );
     return true;
   }, [emit, patch]);
 
@@ -552,7 +578,12 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       if (!drawn) return;
       if (!camera.aiEnabled || cancelled()) return;
       const { canvas, frame } = drawn;
-      // Objects + humans
+
+      // Object and face inference are independent readers of the same current
+      // frame. Start both immediately so facial validation is not serialized
+      // behind COCO-SSD latency.
+      faceAnalysisRevisionRef.current = revision;
+      const facePromise = analyzeFace(canvas);
       const objects = await detectObjects(canvas, settings.objectThreshold);
       if (cancelled()) return;
       const humanCount = objects.filter(o => HUMAN_LABELS.has(o.label)).length;
@@ -621,8 +652,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         !!fire.lowVisibilityCorroborated,
       );
 
-      faceAnalysisRevisionRef.current = revision;
-      const analyzedFace = await analyzeFace(canvas);
+      const analyzedFace = await facePromise;
       if (cancelled()) return;
 
       // useFaceDistress returns the current frame result directly. Feed it into
@@ -659,7 +689,17 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             evaluatedAt: new Date(fireVisual.at).toISOString(),
           },
         });
-        emit('fire', fireSmokeLabel(fireVisual), fireVisual.confidence);
+        emit(
+          'fire',
+          fireSmokeLabel(fireVisual),
+          fireVisual.confidence,
+          {
+            status: 'accepted',
+            reason: 'Visual fire/smoke evidence independently satisfied the hazard rule.',
+            keyword: '',
+            emotion: 'visual fire/smoke',
+          },
+        );
       } else if (fireVisual) {
         verifiedFireSpeech = maybeEmitVerifiedFire();
       }
@@ -702,7 +742,24 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       if (humanCount > 0) emit('human', `${humanCount} person(s)`, 0.9);
       if (!immediateFireSmoke && !verifiedFireSpeech
           && fire.fireDetected && fire.confidence >= settings.fireThreshold) {
-        emit('fire', 'Fire detected', fire.confidence);
+        const validationReason = 'Fire detector confidence satisfied the configured fire threshold.';
+        patch({
+          alertValidation: {
+            status: 'accepted',
+            keyword: '',
+            confidence: fire.confidence,
+            emotion: 'visual fire',
+            emotionConfidence: fire.confidence,
+            reason: validationReason,
+            evaluatedAt: new Date().toISOString(),
+          },
+        });
+        emit('fire', 'Fire detected', fire.confidence, {
+          status: 'accepted',
+          reason: validationReason,
+          keyword: '',
+          emotion: 'visual fire',
+        });
       }
       if (motionAnomaly.detected && validation.visualUsable) {
         emit('motion-anomaly', motionAnomaly.label, motionAnomaly.confidence);
