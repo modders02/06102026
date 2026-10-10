@@ -191,10 +191,11 @@ describe('single active Camera Alert with bounded Event History', () => {
 });
 
 describe('validation gate for Camera Alert', () => {
-  it('stores REJECTED detections in Event History and never in Camera Alert', () => {
+  it('stores REJECTED detections without a snapshot and never in Camera Alert', () => {
     const registry = renderHook(useCameraRegistry);
     act(() => registry.result.current.addEvent(event(1, 'multimodal-distress', {
       label: 'Verified distress: Angry + "help"',
+      snapshot: 'data:image/jpeg;base64,must-not-survive',
       alertValidation: {
         status: 'rejected',
         reason: 'Current camera expression is Happy.',
@@ -208,6 +209,7 @@ describe('validation gate for Camera Alert', () => {
       type: 'multimodal-distress',
       alertValidation: { status: 'rejected' },
     });
+    expect(registry.result.current.events[0].snapshot).toBeUndefined();
   });
 
   it('keeps raw audio distress in Event History even when marked priority by a caller', () => {
