@@ -43,3 +43,17 @@ jobs:
         run: npm install
       - working-directory: local-service
         run: npm run typecheck
+
+
+  local-camera-server:
+    name: Camera + KWS tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - working-directory: local-server
+        run: python -m pip install -r requirements.txt
+      - working-directory: local-server
+        run: python -m unittest discover -s tests -p "test_*.py"
