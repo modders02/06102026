@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   stopTalk: vi.fn(),
   clearEvents: vi.fn(),
   events: [] as DetectionEvent[],
-  alertEvents: undefined as DetectionEvent[] | undefined,
+  alertEvents: [] as DetectionEvent[],
   localActive: [false, false],
   count: 2,
   slots: [1, 2].map(index => ({
@@ -63,7 +63,7 @@ beforeEach(() => {
   mocks.stopTalk.mockClear();
   mocks.clearEvents.mockClear();
   mocks.events = [];
-  mocks.alertEvents = undefined;
+  mocks.alertEvents = [];
   mocks.localActive = [false, false];
   mocks.count = 2;
   for (const slot of mocks.slots) slot.connected = true;
@@ -244,7 +244,27 @@ describe('camera alerts and event history', () => {
   beforeEach(() => {
     mocks.events = [
       { id: 'first', cameraId: 'slot-1', cameraName: 'Camera 1', location: 'Lobby', type: 'object', label: 'Lobby delivery', confidence: 0.8, timestamp: '2026-10-02T02:40:23Z' },
-      { id: 'second', cameraId: 'slot-2', cameraName: 'Camera 2', location: 'Kitchen', type: 'fire', label: 'Kitchen fire', confidence: 0.9, timestamp: '2026-10-02T02:41:23Z', clipUrl: 'blob:test-recording', snapshot: 'data:image/jpeg;base64,test' },
+    ];
+    mocks.alertEvents = [
+      {
+        id: 'second',
+        cameraId: 'slot-2',
+        cameraName: 'Camera 2',
+        location: 'Kitchen',
+        type: 'fire',
+        label: 'Kitchen fire',
+        confidence: 0.9,
+        timestamp: '2026-10-02T02:41:23Z',
+        clipUrl: 'blob:test-recording',
+        snapshot: 'data:image/jpeg;base64,test',
+        priorityScenario: true,
+        alertValidation: {
+          status: 'accepted',
+          reason: 'Fire detector confidence satisfied the configured fire threshold.',
+          keyword: '',
+          emotion: 'visual fire',
+        },
+      },
     ];
   });
 
@@ -261,7 +281,6 @@ describe('camera alerts and event history', () => {
   });
 
   it('keeps an alert snapshot available after the event leaves general history', () => {
-    mocks.alertEvents = [mocks.events[1]];
     mocks.events = [mocks.events[0]];
     render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
 
@@ -272,7 +291,6 @@ describe('camera alerts and event history', () => {
   });
 
   it('closes a snapshot preview when its alert is cleared or evicted', () => {
-    mocks.alertEvents = [mocks.events[1]];
     const view = render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'View snapshot: Kitchen fire from Camera 2' }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -284,12 +302,12 @@ describe('camera alerts and event history', () => {
   });
 
   it('shows the missing folder and save failure without a Downloads fallback', async () => {
-    mocks.events[1] = { ...mocks.events[1], clipError: 'No folder selected.' };
+    mocks.alertEvents[0] = { ...mocks.alertEvents[0], clipError: 'No folder selected.' };
     render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
-    expect(screen.getAllByText('No folder selected.')).toHaveLength(2);
+    expect(screen.getAllByText('No folder selected.')).toHaveLength(1);
 
     fireEvent.click(screen.getByRole('button', { name: 'Recording settings' }));
-    await waitFor(() => expect(screen.getAllByText('No folder selected.')).toHaveLength(3));
+    await waitFor(() => expect(screen.getAllByText('No folder selected.')).toHaveLength(2));
     expect(screen.queryByText(/Downloads/)).not.toBeInTheDocument();
   });
 
@@ -317,7 +335,7 @@ describe('camera alerts and event history', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Choose live camera' }), { target: { value: 'slot-2' } });
     expect(screen.getByRole('combobox', { name: 'Filter events by camera' })).toHaveValue('slot-2');
     expect(screen.queryByText('Lobby delivery')).not.toBeInTheDocument();
-    expect(screen.getAllByText(/Kitchen fire/)).toHaveLength(2);
+    expect(screen.getAllByText(/Kitchen fire/)).toHaveLength(1);
     const recording = view.container.querySelector('video');
     expect(recording).toHaveAttribute('preload', 'none');
     expect(recording).not.toHaveAttribute('autoplay');
