@@ -886,6 +886,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     let stopped = false;
     let inFlight = false;
     lastAudioPollStartedAtRef.current = 0;
+    // Start this mounted listener at "now" so retained backend history from a
+    // previous renderer/session is not replayed as a brand-new alert. New events
+    // created after this cursor are still delivered normally.
+    if (!lastAudioRef.current) lastAudioRef.current = new Date().toISOString();
     patch({ audioListening: true, audioMessage: 'Starting to listen…', audioTone: 'wait' });
 
     const poll = async () => {
