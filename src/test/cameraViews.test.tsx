@@ -307,8 +307,8 @@ describe('camera alerts and event history', () => {
 
     render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
 
-    expect(screen.getByText('Newest accepted fire')).toBeInTheDocument();
-    expect(screen.queryByText('Older accepted fire')).not.toBeInTheDocument();
+    expect(screen.getByText(/Newest accepted fire/)).toBeInTheDocument();
+    expect(screen.queryByText(/Older accepted fire/)).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Camera alerts' }).parentElement)
       .toHaveTextContent('1');
   });
