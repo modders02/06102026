@@ -56,6 +56,10 @@ export default function DashboardEvents({
   }, [activeSlots, events, alertEvents, filter]);
   const filtered = useMemo(() => filter === 'all' ? events : events.filter(event => event.cameraId === filter), [events, filter]);
   const alerts = useMemo(() => (alertEvents || events).filter(event => isPriorityCameraAlert(event) && (filter === 'all' || event.cameraId === filter)), [alertEvents, events, filter]);
+  // Camera alerts is a live scene view, not an alert-history list.
+  // Histories still retain older alerts internally, but only the newest
+  // triggered scene for the selected camera is shown here.
+  const activeAlert = alerts[0];
   const viewingEvent = viewingId ? [...events, ...(alertEvents || [])].find(event => event.id === viewingId) : undefined;
 
   const selectFilter = (value: string) => {
@@ -111,27 +115,56 @@ export default function DashboardEvents({
         </div>
       )}
 
-      {alerts.length > 0 && (
+      {activeAlert && (
         <div className="overflow-hidden rounded-xl border border-destructive/30 bg-card">
           <div className="flex items-center gap-2 border-b border-border px-4 py-3">
             <Bell className="h-4 w-4 text-destructive" />
-            <h3 className="text-sm font-bold">Camera alerts</h3>
+            <h3 className="text-sm font-bold">Camera alert</h3>
             <span className="ml-auto rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-semibold text-destructive">
-              {alerts.length}
+              Triggered scene
             </span>
           </div>
-          <div className="max-h-64 divide-y divide-border overflow-y-auto">
-            {alerts.slice(0, CAMERA_HISTORY_LIMIT).map(alert => (
-              <div key={alert.id} className="flex items-start gap-3 p-3">
-                {snapshotButton(alert)}
-                <div className="min-w-0 space-y-1">
-                  <p className="break-words text-sm font-semibold">{typeIcon[alert.type]} {alert.label}</p>
-                  <p className="break-words text-xs text-muted-foreground"><span className="font-semibold text-foreground">{alert.cameraName}</span>{alert.location ? ` · ${alert.location}` : ''}</p>
-                  <p className="text-xs text-muted-foreground">{(alert.confidence * 100).toFixed(0)}% confidence · {new Date(alert.timestamp).toLocaleString()}</p>
-                  {alert.clipError && <p className="text-xs text-destructive">{alert.clipError}</p>}
+
+          <div className="space-y-3 p-3">
+            {activeAlert.snapshot ? (
+              <button
+                type="button"
+                onClick={() => setViewingId(activeAlert.id)}
+                aria-label={`View triggered scene: ${activeAlert.label} from ${activeAlert.cameraName}`}
+                className="group relative block w-full overflow-hidden rounded-lg border border-destructive/20 bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                <img
+                  src={activeAlert.snapshot}
+                  alt={`Triggered alert scene for ${activeAlert.label} from ${activeAlert.cameraName}`}
+                  className="aspect-video w-full object-cover transition-opacity group-hover:opacity-90"
+                />
+                <span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-md bg-black/65 px-2 py-1 text-[11px] font-semibold text-white">
+                  <Maximize2 className="h-3.5 w-3.5" />
+                  View scene
+                </span>
+              </button>
+            ) : (
+              <div className="flex aspect-video w-full items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground">
+                <div className="text-center">
+                  <CameraOff className="mx-auto h-6 w-6" />
+                  <p className="mt-2 text-xs">Triggered scene unavailable</p>
                 </div>
               </div>
-            ))}
+            )}
+
+            <div className="space-y-1">
+              <p className="break-words text-sm font-semibold">
+                {typeIcon[activeAlert.type]} {activeAlert.label}
+              </p>
+              <p className="break-words text-xs text-muted-foreground">
+                <span className="font-semibold text-foreground">{activeAlert.cameraName}</span>
+                {activeAlert.location ? ` · ${activeAlert.location}` : ''}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {(activeAlert.confidence * 100).toFixed(0)}% confidence · {new Date(activeAlert.timestamp).toLocaleString()}
+              </p>
+              {activeAlert.clipError && <p className="text-xs text-destructive">{activeAlert.clipError}</p>}
+            </div>
           </div>
         </div>
       )}
