@@ -153,22 +153,74 @@ export default function DashboardEvents({
         </div>
         <div className="max-h-64 divide-y divide-border overflow-y-auto">
           {alerts.length === 0 && <p className="p-4 text-sm text-muted-foreground">No camera alerts yet.</p>}
-          {alerts.map(alert => (
-            <div key={alert.id} className="flex items-start gap-3 p-3">
-              {snapshotButton(alert)}
-              <div className="min-w-0 space-y-1">
-                <p className="break-words text-sm font-semibold">{typeIcon[alert.type]} {alert.label}</p>
-                <p className="break-words text-xs text-muted-foreground">
-                  <span className="font-semibold text-foreground">{alert.cameraName}</span>
-                  {alert.location ? ` · ${alert.location}` : ''}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {(alert.confidence * 100).toFixed(0)}% confidence · {new Date(alert.timestamp).toLocaleString()}
-                </p>
-                {alert.clipError && <p className="text-xs text-destructive">{alert.clipError}</p>}
+          {alerts.map(alert => {
+            const validation = alert.alertValidation;
+            const facialExpression = alert.type === 'multimodal-distress'
+              ? validation?.emotion?.trim()
+              : '';
+            const triggerWord = validation?.keyword?.trim();
+
+            return (
+              <div key={alert.id} className="space-y-3 p-3">
+                {alert.snapshot ? (
+                  <button
+                    type="button"
+                    onClick={() => setViewingId(alert.id)}
+                    aria-label={`View snapshot: ${alert.label} from ${alert.cameraName}`}
+                    title="View exact trigger snapshot"
+                    className="group relative block w-full overflow-hidden rounded-lg border border-border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <img
+                      src={alert.snapshot}
+                      loading="lazy"
+                      alt={`${alert.label} snapshot from ${alert.cameraName}`}
+                      className="aspect-video w-full object-cover transition-opacity group-hover:opacity-90"
+                    />
+                    <Maximize2 aria-hidden="true" className="absolute bottom-2 right-2 h-5 w-5 rounded bg-black/60 p-1 text-white" />
+                  </button>
+                ) : (
+                  <div
+                    role="img"
+                    aria-label={`Snapshot unavailable for ${alert.cameraName}`}
+                    title="Snapshot unavailable"
+                    className="flex aspect-video w-full items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground"
+                  >
+                    <CameraOff className="h-7 w-7" />
+                  </div>
+                )}
+
+                <div className="min-w-0 space-y-2">
+                  <p className="break-words text-sm font-semibold">{typeIcon[alert.type]} {alert.label}</p>
+
+                  {(facialExpression || triggerWord) && (
+                    <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 rounded-lg bg-muted/50 px-3 py-2 text-xs">
+                      {facialExpression && (
+                        <>
+                          <span className="text-muted-foreground">Facial expression:</span>
+                          <span className="font-semibold text-foreground">{facialExpression}</span>
+                        </>
+                      )}
+                      {triggerWord && (
+                        <>
+                          <span className="text-muted-foreground">Trigger word:</span>
+                          <span className="font-mono font-semibold text-foreground">"{triggerWord}"</span>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  <p className="break-words text-xs text-muted-foreground">
+                    <span className="font-semibold text-foreground">{alert.cameraName}</span>
+                    {alert.location ? ` · ${alert.location}` : ''}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {(alert.confidence * 100).toFixed(0)}% confidence · {new Date(alert.timestamp).toLocaleString()}
+                  </p>
+                  {alert.clipError && <p className="text-xs text-destructive">{alert.clipError}</p>}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
