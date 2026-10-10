@@ -64,12 +64,12 @@ class CustomKeywordEngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             engine = CustomKeywordEngine(tmp)
             for scale in (0.97, 1.0, 1.03):
-                result = engine.enroll("tulong", synthetic_word([310, 560, 430], scale))
+                result = engine.enroll("help", synthetic_word([310, 560, 430], scale))
             self.assertEqual(result["templates"], MIN_TEMPLATES)
             self.assertTrue(result["ready"])
 
             for scale in (0.97, 1.0, 1.03):
-                engine.enroll("magnanakaw", synthetic_word([760, 360, 880], scale))
+                engine.enroll("fire", synthetic_word([760, 360, 880], scale))
             for index, pattern in enumerate((
                 [900, 720, 650],
                 [520, 810, 690],
@@ -81,7 +81,7 @@ class CustomKeywordEngineTests(unittest.TestCase):
 
             match = engine.match(synthetic_word([310, 560, 430], 1.01))
             self.assertIsNotNone(match)
-            self.assertEqual(match.keyword, "tulong")
+            self.assertEqual(match.keyword, "help")
             self.assertGreaterEqual(match.confidence, 0.72)
 
     def test_templates_persist_across_engine_restart(self):
@@ -130,8 +130,8 @@ class CustomKeywordEngineTests(unittest.TestCase):
             engine = CustomKeywordEngine(tmp)
 
             for scale in (0.98, 1.0, 1.02):
-                engine.enroll("tulong", synthetic_word([300, 560, 410], scale))
-                engine.enroll("sunog", synthetic_word([560, 300, 410], scale))
+                engine.enroll("help", synthetic_word([300, 560, 410], scale))
+                engine.enroll("fire", synthetic_word([560, 300, 410], scale))
 
             for index, pattern in enumerate((
                 [900, 720, 650],
@@ -144,20 +144,20 @@ class CustomKeywordEngineTests(unittest.TestCase):
 
             decision = engine.diagnose(synthetic_word([300, 560, 410], 1.01))
             self.assertIsNotNone(decision)
-            self.assertEqual(decision.keyword, "tulong")
+            self.assertEqual(decision.keyword, "help")
             self.assertGreater(
-                decision.keyword_scores["tulong"],
-                decision.keyword_scores["sunog"],
+                decision.keyword_scores["help"],
+                decision.keyword_scores["fire"],
             )
-            self.assertIn("tulong", decision.keyword_duration_ratios)
-            self.assertIn("sunog", decision.keyword_duration_ratios)
+            self.assertIn("help", decision.keyword_duration_ratios)
+            self.assertIn("fire", decision.keyword_duration_ratios)
 
     def test_template_evaluation_compares_v3_and_v4_without_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:
             engine = CustomKeywordEngine(tmp)
             for scale in (0.98, 1.0, 1.02):
-                engine.enroll("tulong", synthetic_word([300, 560, 410], scale))
-                engine.enroll("sunog", synthetic_word([560, 300, 410], scale))
+                engine.enroll("help", synthetic_word([300, 560, 410], scale))
+                engine.enroll("fire", synthetic_word([560, 300, 410], scale))
             for index, pattern in enumerate((
                 [900, 720, 650],
                 [520, 810, 690],
@@ -177,16 +177,16 @@ class CustomKeywordEngineTests(unittest.TestCase):
             self.assertIn("v4_sequence", report)
             self.assertEqual(report["v3_dtw"]["total"], 6)
             self.assertEqual(report["v4_sequence"]["total"], 6)
-            self.assertIn("tulong", report["duration_summary"])
-            self.assertIn("sunog", report["duration_summary"])
+            self.assertIn("help", report["duration_summary"])
+            self.assertIn("fire", report["duration_summary"])
 
             status = engine.status()
-            self.assertIn("tulong", status["keyword_margins"])
-            self.assertIn("sunog", status["keyword_margins"])
-            self.assertLessEqual(status["keyword_margins"]["tulong"], MATCH_MARGIN)
-            self.assertLessEqual(status["keyword_margins"]["sunog"], MATCH_MARGIN)
-            self.assertIn("tulong", status["keyword_margin_calibration"])
-            self.assertIn("sunog", status["keyword_margin_calibration"])
+            self.assertIn("help", status["keyword_margins"])
+            self.assertIn("fire", status["keyword_margins"])
+            self.assertLessEqual(status["keyword_margins"]["help"], MATCH_MARGIN)
+            self.assertLessEqual(status["keyword_margins"]["fire"], MATCH_MARGIN)
+            self.assertIn("help", status["keyword_margin_calibration"])
+            self.assertIn("fire", status["keyword_margin_calibration"])
 
     def test_unknown_training_becomes_open_set_ready_but_is_not_a_keyword(self):
         with tempfile.TemporaryDirectory() as tmp:
