@@ -58,7 +58,7 @@ describe('validation layer decision consistency', () => {
           last_decision: 'below_threshold',
         },
       },
-    })));
+    }));
 
     expect(view).toMatchObject({
       decision: 'ACCEPTED',
@@ -87,7 +87,7 @@ describe('validation layer decision consistency', () => {
           last_decision: 'below_threshold',
         },
       },
-    })));
+    }));
 
     expect(view).toMatchObject({
       decision: 'REJECTED',
@@ -117,7 +117,7 @@ describe('validation layer decision consistency', () => {
           last_decision: 'accepted',
         },
       },
-    })));
+    }));
 
     expect(view).toMatchObject({
       decision: 'PENDING',
@@ -147,7 +147,7 @@ describe('validation layer decision consistency', () => {
           last_decision: 'accepted',
         },
       },
-    })));
+    }));
 
     expect(view).toMatchObject({
       decision: 'REJECTED',
