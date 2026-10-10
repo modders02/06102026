@@ -66,34 +66,35 @@ export default function DashboardEvents({
     newestStoredAlert?.cameraId || validationCameraId || 'slot-1',
   );
 
-  useEffect(() => {
-    if (!newestStoredAlert) return;
+  const activeAlertRejected = useMemo(() => {
+    if (!newestStoredAlert) return false;
     const liveValidation = activeAlertSession.runtime?.alertValidation;
-    if (liveValidation?.status !== 'rejected') return;
-
+    if (liveValidation?.status !== 'rejected') return false;
     const rejectedAt = Date.parse(liveValidation.evaluatedAt || '');
     const acceptedAt = Date.parse(newestStoredAlert.timestamp);
-    if (!Number.isFinite(rejectedAt) || !Number.isFinite(acceptedAt) || rejectedAt <= acceptedAt) return;
+    return Number.isFinite(rejectedAt)
+      && Number.isFinite(acceptedAt)
+      && rejectedAt > acceptedAt;
+  }, [newestStoredAlert, activeAlertSession.runtime?.alertValidation]);
 
+  useEffect(() => {
+    if (!newestStoredAlert || !activeAlertRejected) return;
     archiveActiveAlert(newestStoredAlert.id);
     if (viewingId === newestStoredAlert.id) setViewingId(null);
-  }, [
-    newestStoredAlert,
-    activeAlertSession.runtime?.alertValidation,
-    archiveActiveAlert,
-    viewingId,
-  ]);
+  }, [newestStoredAlert, activeAlertRejected, archiveActiveAlert, viewingId]);
 
   const alerts = useMemo(
-    () => (alertEvents ?? [])
-      .filter(
-        event => isPriorityCameraAlert(event)
-          && event.alertValidation?.status === 'accepted'
-          && (filter === 'all' || event.cameraId === filter),
-      )
-      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
-      .slice(0, 1),
-    [alertEvents, filter],
+    () => activeAlertRejected
+      ? []
+      : (alertEvents ?? [])
+          .filter(
+            event => isPriorityCameraAlert(event)
+              && event.alertValidation?.status === 'accepted'
+              && (filter === 'all' || event.cameraId === filter),
+          )
+          .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+          .slice(0, 1),
+    [alertEvents, filter, activeAlertRejected],
   );
   const viewingEvent = viewingId ? [...events, ...(alertEvents || [])].find(event => event.id === viewingId) : undefined;
 
