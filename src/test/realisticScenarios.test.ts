@@ -37,7 +37,7 @@ describe('panelist realistic-condition scenario matrix', () => {
   });
 
   it('validated Frightened + help still produces multimodal distress', () => {
-    const face = makeDistressFaceSignal('surprised', 0.9, 1000);
+    const face = makeDistressFaceSignal('fearful', 0.9, 1000);
     const speech = makeDistressSpeechSignal('help', 0.95, 2000);
     expect(fuseDistressSignals(face, speech)).not.toBeNull();
   });
