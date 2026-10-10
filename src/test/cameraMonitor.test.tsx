@@ -695,13 +695,44 @@ describe('camera snapshots and page-scoped playback', () => {
     });
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
     expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
       status: 'rejected',
       keyword: 'help',
     });
     expect(getCameraSession('slot-1').runtime?.alertValidation?.reason)
-      .toMatch(/no Angry\/Frightened face/i);
+      .toMatch(/no usable Angry\/Frightened|did not satisfy Angry\/Frightened/i);
+  });
+
+  it('rejects an accepted KWS event below the configured frontend audio threshold', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({
+      events: [{
+        timestamp: '2026-10-02T00:00:01Z',
+        transcript: 'help',
+        keyword: 'help',
+        confidence: 0.72,
+      }],
+      status: null,
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor
+      slot={slot}
+      monitoring
+      playbackEnabled={false}
+      onEvent={onEvent}
+      baseSettings={{ ...DEFAULT_SETTINGS, audioThreshold: 0.8 }}
+    />);
+    await act(async () => {});
+
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
+      status: 'rejected',
+      keyword: 'help',
+      sourceDecision: 'below_frontend_threshold',
+    });
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.reason)
+      .toMatch(/configured audio threshold/i);
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
   });
 
   it('shows a rejected KWS candidate reason without creating an alert event', async () => {
