@@ -385,7 +385,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         keyword: 'fire',
         confidence: verified.speech.confidence,
         emotion: 'visual fire',
-        emotionConfidence: verified.visual.confidence,
+        emotionConfidence: verified.fire.confidence,
         reason: 'Accepted "fire" keyword matched current visual fire evidence.',
         evaluatedAt: new Date(verified.at).toISOString(),
         sourceDecision: 'accepted',
