@@ -123,10 +123,11 @@ describe('camera snapshots and page-scoped playback', () => {
       cameraId: `slot-${index}`, type: 'audio-distress', snapshot: 'data:image/jpeg;base64,preview',
     }));
     expect(getCameraSession(`slot-${index}`).runtime?.audioListening).toBe(true);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1499); });
-    expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(1);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1499); });
+    expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(3);
     expect(getCameraSession(`slot-${index}`).previewTimestamp).toBe(firstSeenAt);
     expect(mocked.players).toHaveLength(0);
     expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
@@ -238,7 +239,7 @@ describe('camera snapshots and page-scoped playback', () => {
     const still = getCameraSession('slot-4').preview;
     const timestamp = getCameraSession('slot-4').previewTimestamp;
     mocked.getCameraSnapshot.mockRejectedValue(new Error('Camera snapshot unavailable'));
-    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(getCameraSession('slot-4').runtime?.status).toBe('error');
     expect(getCameraSession('slot-4').preview).toBe(still);
     expect(getCameraSession('slot-4').previewTimestamp).toBe(timestamp);
@@ -369,7 +370,7 @@ describe('camera snapshots and page-scoped playback', () => {
     await act(async () => {});
     const firstSeenAt = getCameraSession('slot-1').previewTimestamp;
     expect(closeBitmap).toHaveBeenCalledOnce();
-    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(2);
     expect(mocked.detectObjects).toHaveBeenCalledOnce();
     expect(closeBitmap).toHaveBeenCalledTimes(2);
@@ -394,12 +395,14 @@ describe('camera snapshots and page-scoped playback', () => {
   });
 
   it.each([
-    ['happy', 'Happy', false],
-    ['sad', 'Sad', false],
-    ['surprised', 'Frightened', false],
-    ['neutral', 'Neutral', false],
-    ['disgusted', 'Disgust', false],
-  ] as const)('records %s as a non-alert emotion event', async (expression, label, distressDetected) => {
+    ['happy', 'Happy', false, ''],
+    ['sad', 'Sad', false, ''],
+    ['angry', 'Angry', true, 'Angry'],
+    ['fearful', 'Frightened', true, 'Frightened'],
+    ['surprised', 'Frightened', true, 'Frightened'],
+    ['neutral', 'Neutral', false, ''],
+    ['disgusted', 'Disgust', false, ''],
+  ] as const)('records %s as a non-alert emotion event', async (expression, label, distressDetected, distressLabel) => {
     mocked.analyzeFace.mockImplementationOnce(async () => {
       const severeCarryover = ['sad', 'neutral', 'disgusted'].includes(expression);
       mocked.distress = { hasFace: true, expression, probability: 0.94, distressScore: severeCarryover ? 94 : 0, distressLevel: severeCarryover ? 'severe' : 'none' };
@@ -418,13 +421,15 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress' }));
     expect(getCameraSession('slot-1').runtime?.faceDistress.detected).toBe(distressDetected);
     if (distressDetected) {
-      expect(getCameraSession('slot-1').runtime?.faceDistress.label).toBe('Frightened');
+      expect(getCameraSession('slot-1').runtime?.faceDistress.label).toBe(distressLabel);
     }
   });
 
   it.each([
     ['angry', 'help me', 'help', 'Angry'],
     ['fearful', 'help me', 'help', 'Frightened'],
+    ['surprised', 'help me', 'help', 'Frightened'],
+    ['shock', 'help me', 'help', 'Frightened'],
   ] as const)('verifies %s + accepted help as one multimodal alert', async (expression, transcript, keyword, faceLabel) => {
     mocked.getAudioEvents.mockResolvedValueOnce({
       events: [{ timestamp: '2026-10-02T00:00:01Z', transcript, keyword, confidence: 0.96 }],
@@ -539,10 +544,10 @@ describe('camera snapshots and page-scoped playback', () => {
 
     // A later neutral frame may hide the live face state, but the recent
     // Frightened fusion signal remains valid until its timestamp expires.
-    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(getCameraSession('slot-1').runtime?.faceDistress.detected).toBe(false);
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(1200); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(700); });
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: 'multimodal-distress',
       label: 'Verified distress: Frightened + "help"',
@@ -593,7 +598,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
   });
 
-  it('does not alarm on surprised plus help', async () => {
+  it('treats configured surprised + help as Frightened + help', async () => {
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
     mocked.analyzeFace.mockImplementationOnce(async () => {
       mocked.distress = { hasFace: true, expression: 'surprised', probability: 0.95, distressScore: 90, distressLevel: 'severe' };
@@ -602,7 +607,10 @@ describe('camera snapshots and page-scoped playback', () => {
     const onEvent = vi.fn();
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
-    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'multimodal-distress',
+      label: 'Verified distress: Frightened + "help"',
+    }));
   });
 
   it('does not alarm on help without Angry or Frightened', async () => {
@@ -640,7 +648,7 @@ describe('camera snapshots and page-scoped playback', () => {
     const onEvent = vi.fn();
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
-    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
       type: 'fire',
       label: 'Verified fire: visual fire + "fire"',
