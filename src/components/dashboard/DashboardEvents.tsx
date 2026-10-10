@@ -9,6 +9,7 @@ import { CAMERA_HISTORY_LIMIT } from '@/lib/cameraRegistry';
 import type { DetectionEvent, DetectionType } from '@/types/multicam';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
+import ValidationLayer from '@/components/dashboard/ValidationLayer';
 
 const typeIcon: Record<DetectionType, string> = {
   fire: '🔥', smoke: '💨', human: '🧍', object: '📦',
@@ -16,7 +17,15 @@ const typeIcon: Record<DetectionType, string> = {
 };
 
 /** Camera alerts, past detections, and emergency clips shown beside live feeds. */
-export default function DashboardEvents({ initialFilter }: { initialFilter?: string }) {
+export default function DashboardEvents({
+  initialFilter,
+  validationCameraId,
+  validationCameraName,
+}: {
+  initialFilter?: string;
+  validationCameraId?: string;
+  validationCameraName?: string;
+}) {
   const { events, alertEvents, clearEvents } = useCameraRegistry();
   const { activeSlots } = useCameraSlots();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -119,6 +128,10 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
           ))}
         </div>
       </div>
+
+      {validationCameraId && (
+        <ValidationLayer cameraId={validationCameraId} cameraName={validationCameraName} />
+      )}
 
       <div className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border px-4 py-3"><Film className="h-4 w-4 text-primary" /><h3 className="text-sm font-bold">Event history</h3><span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{filtered.length}</span></div>
