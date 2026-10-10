@@ -15,7 +15,7 @@ import { validateFusionCycle } from '@/lib/signalValidation';
 import { createMotionAnomalyState, detectMotionAnomaly } from '@/lib/motionAnomaly';
 import { createFireState, detectFire } from '@/lib/fireDetection';
 import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/multiCamServer';
-import { useFaceDistress, type FaceDistress } from '@/hooks/useFaceDistress';
+import { useFaceDistress } from '@/hooks/useFaceDistress';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
 import {
   SMOKE_REGION_MIN_RATIO,
@@ -699,7 +699,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     void loadDetector().catch(() => {});
   }, [camera.enabled, camera.aiEnabled]);
 
-  // Decode only a JPEG every three seconds on the dashboard. This leaves the
+  // Decode lightweight JPEG snapshots on the dashboard at a responsive cadence. This leaves the
   // backend's audio listener active without a browser video connection.
   useEffect(() => {
     if (!camera.enabled || playbackEnabled) return;
