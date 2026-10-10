@@ -450,6 +450,67 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
   });
 
+  it('does not treat transcript-only "help" as accepted KWS evidence', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({
+      events: [{
+        timestamp: '2026-10-02T00:00:01Z',
+        transcript: 'help me',
+        keyword: 'police',
+        confidence: 0.99,
+      }],
+      status: null,
+    });
+    mocked.analyzeFace.mockImplementationOnce(async () => {
+      mocked.distress = {
+        hasFace: true,
+        expression: 'angry',
+        probability: 0.95,
+        distressScore: 90,
+        distressLevel: 'severe',
+      };
+    });
+
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'multimodal-distress',
+    }));
+  });
+
+  it('uses an accepted trained "help" keyword even when transcript text is different', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({
+      events: [{
+        timestamp: '2026-10-02T00:00:01Z',
+        transcript: 'unrelated display text',
+        keyword: 'help',
+        confidence: 0.96,
+      }],
+      status: null,
+    });
+    mocked.analyzeFace.mockImplementationOnce(async () => {
+      mocked.distress = {
+        hasFace: true,
+        expression: 'angry',
+        probability: 0.94,
+        distressScore: 90,
+        distressLevel: 'severe',
+      };
+    });
+
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'multimodal-distress',
+      label: 'Verified distress: Angry + "help"',
+    }));
+  });
+
   it('keeps a recent surprised/Frightened face through neutral jitter until emergency arrives', async () => {
     mocked.getAudioEvents
       .mockResolvedValueOnce({ events: [], status: null })
