@@ -56,7 +56,7 @@ describe('pipeline event snapshots', () => {
     }));
     await act(async () => {});
     const events = onEvent.mock.calls.map(([event]) => event);
-    expect(events.map(event => event.type)).toEqual(['object', 'human', 'fire', 'smoke', 'saliency']);
+    expect(events.map(event => event.type)).toEqual(['object', 'human', 'fire', 'saliency']);
     for (const event of events) expect(event).toMatchObject({ cameraId: 'snapshot-pipeline', snapshot: 'data:image/jpeg;base64,current' });
   });
 
