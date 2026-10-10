@@ -24,10 +24,21 @@ export interface VerifiedMultimodalDistress {
   at: number;
 }
 
-export function isMultimodalDistressExpression(expression: string | null | undefined) {
+export function normalizeDistressFaceLabel(
+  expression: string | null | undefined,
+): DistressFaceLabel | null {
   const normalized = (expression ?? '').trim().toLowerCase();
-  return normalized === 'angry' || normalized === 'anger'
-    || normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened';
+  if (normalized === 'angry' || normalized === 'anger') return 'Angry';
+  if (
+    normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
+    || normalized === 'surprised' || normalized === 'surprise'
+    || normalized === 'shock' || normalized === 'shocked'
+  ) return 'Frightened';
+  return null;
+}
+
+export function isMultimodalDistressExpression(expression: string | null | undefined) {
+  return normalizeDistressFaceLabel(expression) !== null;
 }
 
 export function makeDistressFaceSignal(
@@ -36,16 +47,8 @@ export function makeDistressFaceSignal(
   at = Date.now(),
 ): DistressFaceSignal | null {
   if (!Number.isFinite(confidence) || confidence < DISTRESS_FACE_MIN_CONFIDENCE) return null;
-  const normalized = (expression ?? '').trim().toLowerCase();
-  if (normalized === 'angry' || normalized === 'anger') {
-    return { label: 'Angry', confidence, at };
-  }
-  if (
-    normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
-  ) {
-    return { label: 'Frightened', confidence, at };
-  }
-  return null;
+  const label = normalizeDistressFaceLabel(expression);
+  return label ? { label, confidence, at } : null;
 }
 
 /**
