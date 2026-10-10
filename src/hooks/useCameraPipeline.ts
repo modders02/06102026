@@ -15,7 +15,7 @@ import { validateFusionCycle } from '@/lib/signalValidation';
 import { createMotionAnomalyState, detectMotionAnomaly } from '@/lib/motionAnomaly';
 import { createFireState, detectFire } from '@/lib/fireDetection';
 import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/multiCamServer';
-import { useFaceDistress } from '@/hooks/useFaceDistress';
+import { useFaceDistress, type FaceDistress } from '@/hooks/useFaceDistress';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
 import {
   SMOKE_REGION_MIN_RATIO,
@@ -29,6 +29,7 @@ import {
   type FireSpeechSignal,
 } from '@/lib/fireFusion';
 import {
+  MULTIMODAL_FUSION_WINDOW_MS,
   fuseDistressSignals,
   isMultimodalDistressExpression,
   makeDistressFaceSignal,
@@ -46,8 +47,8 @@ const HUMAN_LABELS = new Set(['person']);
 /** Live CCTV text disappears this long after the last words were heard. */
 const TRANSCRIPT_CLEAR_MS = 5000;
 const AUDIO_POLL_TICK_MS = 350;
-const AUDIO_POLL_BACKGROUND_MIN_MS = 1400;
-const SNAPSHOT_INTERVAL_MS = 3000;
+const AUDIO_POLL_BACKGROUND_MIN_MS = 700;
+const SNAPSHOT_INTERVAL_MS = 1500;
 const PLAYBACK_STALL_MS = 8000;
 
 type FrameCapture = { grabFrame: () => Promise<ImageBitmap> };
@@ -99,6 +100,15 @@ const emptyRuntime = (cameraId: string): CameraRuntime => ({
   smoke: { detected: false, confidence: 0 },
   faceDistress: { detected: false, label: '', confidence: 0 },
   audioDistress: { detected: false, keyword: '', confidence: 0, transcript: '' },
+  alertValidation: {
+    status: 'waiting',
+    keyword: '',
+    confidence: 0,
+    emotion: '',
+    emotionConfidence: 0,
+    reason: 'Waiting for validated alert evidence.',
+    evaluatedAt: new Date(0).toISOString(),
+  },
   transcript: '',
   audioListening: false,
   audio: null,
@@ -147,6 +157,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const lastShownRef = useRef<string>('');
   const clearTimerRef = useRef<number | undefined>(undefined);
   const audioDistressTimerRef = useRef<number | undefined>(undefined);
+  const distressValidationTimerRef = useRef<number | undefined>(undefined);
+  const snapshotAnalysisKickRef = useRef<(() => void) | null>(null);
   const recentDistressFaceRef = useRef<DistressFaceSignal | null>(null);
   const recentDistressSpeechRef = useRef<DistressSpeechSignal | null>(null);
   const recentFireVisualRef = useRef<FireVisualSignal | null>(null);
@@ -210,6 +222,11 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       fireStateRef.current = createFireState();
       motionStateRef.current = createMotionAnomalyState();
       recentDistressFaceRef.current = null;
+      recentDistressSpeechRef.current = null;
+      if (distressValidationTimerRef.current) {
+        window.clearTimeout(distressValidationTimerRef.current);
+        distressValidationTimerRef.current = undefined;
+      }
       recentFireVisualRef.current = null;
       recentFireSpeechRef.current = null;
       patch({
@@ -244,9 +261,11 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     (type: DetectionEvent['type'], label: string, confidence: number) => {
       const now = Date.now();
       const key = type === 'fire' ? 'fire' : `${type}:${label}`;
-      const cooldownMs = settings.alertCooldownMs ?? 3000;
-      if (cooldownRef.current[key] && now - cooldownRef.current[key] < cooldownMs) return;
-      cooldownRef.current[key] = now;
+      const cooldownMs = type === 'multimodal-distress'
+        ? 0
+        : (settings.alertCooldownMs ?? 3000);
+      if (cooldownMs > 0 && cooldownRef.current[key] && now - cooldownRef.current[key] < cooldownMs) return;
+      if (cooldownMs > 0) cooldownRef.current[key] = now;
       runtimeRef.current.alerts += 1;
       onEventRef.current?.({
         cameraId: camera.id,
@@ -265,22 +284,52 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const maybeEmitVerifiedDistress = useCallback(() => {
     const verified = fuseDistressSignals(recentDistressFaceRef.current, recentDistressSpeechRef.current);
     if (!verified) return false;
-    // Consume both signals so one spoken phrase cannot repeatedly combine with
-    // subsequent face frames. The normal event cooldown adds a second guard.
+
+    if (distressValidationTimerRef.current) {
+      window.clearTimeout(distressValidationTimerRef.current);
+      distressValidationTimerRef.current = undefined;
+    }
+
+    // Consume both signals so one accepted keyword produces exactly one alert.
+    // A later, separately accepted keyword remains eligible immediately.
     recentDistressFaceRef.current = null;
     recentDistressSpeechRef.current = null;
+    patch({
+      alertValidation: {
+        status: 'accepted',
+        keyword: verified.speech.keyword,
+        confidence: verified.speech.confidence,
+        emotion: verified.face.label,
+        emotionConfidence: verified.face.confidence,
+        reason: `${verified.face.label} + "${verified.speech.keyword}" matched within the fusion window.`,
+        evaluatedAt: new Date(verified.at).toISOString(),
+        sourceDecision: 'accepted',
+      },
+    });
     emit('multimodal-distress', multimodalDistressLabel(verified), verified.confidence);
     return true;
-  }, [emit]);
+  }, [emit, patch]);
 
   const maybeEmitVerifiedFire = useCallback(() => {
     const verified = fuseFireWithSpeech(recentFireVisualRef.current, recentFireSpeechRef.current);
     if (!verified) return false;
     recentFireVisualRef.current = null;
     recentFireSpeechRef.current = null;
+    patch({
+      alertValidation: {
+        status: 'accepted',
+        keyword: 'fire',
+        confidence: verified.speech.confidence,
+        emotion: 'visual fire',
+        emotionConfidence: verified.visual.confidence,
+        reason: 'Accepted "fire" keyword matched current visual fire evidence.',
+        evaluatedAt: new Date(verified.at).toISOString(),
+        sourceDecision: 'accepted',
+      },
+    });
     emit('fire', fireSpeechLabel(), verified.confidence);
     return true;
-  }, [emit]);
+  }, [emit, patch]);
 
   // Keep camera playback realtime; retry WebRTC rather than downgrading to HLS.
   const whepUrl = webrtcUrlFor(camera, settings);
@@ -525,8 +574,22 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       );
 
       faceAnalysisRevisionRef.current = revision;
-      await analyzeFace(canvas);
+      const analyzedFace = await analyzeFace(canvas);
       if (cancelled()) return;
+
+      // useFaceDistress returns the current frame result directly. Feed it into
+      // fusion now instead of waiting for a React state round-trip.
+      if (analyzedFace?.hasFace) {
+        const immediateFace = makeDistressFaceSignal(
+          analyzedFace.expression,
+          analyzedFace.probability,
+          Date.now(),
+        );
+        if (immediateFace) {
+          recentDistressFaceRef.current = immediateFace;
+          maybeEmitVerifiedDistress();
+        }
+      }
 
       // Publish fusion only after this frame is still confirmed current. Speech
       // may have arrived while face analysis was running; storing it first and
@@ -537,6 +600,17 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       if (immediateFireSmoke && fireVisual) {
         recentFireSpeechRef.current = null;
         recentFireVisualRef.current = null;
+        patch({
+          alertValidation: {
+            status: 'accepted',
+            keyword: '',
+            confidence: fireVisual.confidence,
+            emotion: 'visual fire/smoke',
+            emotionConfidence: fireVisual.confidence,
+            reason: 'Visual fire/smoke evidence independently satisfied the hazard rule.',
+            evaluatedAt: new Date(fireVisual.at).toISOString(),
+          },
+        });
         emit('fire', fireSmokeLabel(fireVisual), fireVisual.confidence);
       } else if (fireVisual) {
         verifiedFireSpeech = maybeEmitVerifiedFire();
@@ -616,7 +690,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     } finally {
       busyRef.current = false;
     }
-  }, [camera.enabled, camera.aiEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.saliencyMode, settings.attentionThreshold, settings.alertCooldownMs, settings.priorityObjects, analyzeFace, drawWorkFrame, patch, emit, maybeEmitVerifiedFire]);
+  }, [camera.enabled, camera.aiEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.saliencyMode, settings.attentionThreshold, settings.alertCooldownMs, settings.priorityObjects, analyzeFace, drawWorkFrame, patch, emit, maybeEmitVerifiedFire, maybeEmitVerifiedDistress]);
   const analyzeFrameRef = useRef(analyzeFrame);
   analyzeFrameRef.current = analyzeFrame;
 
@@ -647,8 +721,13 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       return;
     }
     patch({ status: 'connecting', error: null, fps: 0 });
+    let rerunImmediately = false;
     const tick = async () => {
-      if (stopped || inFlight) return;
+      if (stopped) return;
+      if (inFlight) {
+        rerunImmediately = true;
+        return;
+      }
       inFlight = true;
       let decoded: Awaited<ReturnType<typeof decodeSnapshot>> | null = null;
       try {
@@ -688,11 +767,21 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         decoded?.close();
         request = null;
         inFlight = false;
+        if (rerunImmediately && !stopped) {
+          rerunImmediately = false;
+          void tick();
+        }
       }
     };
+    snapshotAnalysisKickRef.current = () => { void tick(); };
     void tick();
     const id = window.setInterval(tick, SNAPSHOT_INTERVAL_MS);
-    return () => { stopped = true; window.clearInterval(id); request?.abort(); };
+    return () => {
+      stopped = true;
+      snapshotAnalysisKickRef.current = null;
+      window.clearInterval(id);
+      request?.abort();
+    };
   }, [camera.enabled, camera.id, playbackEnabled, sourceStream, settings.pythonServer, nonce, patch, drawWorkFrame]);
 
   // Live frames are processed only while their camera player is visible.
@@ -725,6 +814,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         detected,
         label: distressFace?.label ?? d.expression ?? '',
         confidence: distressFace?.confidence ?? d.probability,
+        observedAt: new Date().toISOString(),
       },
     });
 
@@ -778,6 +868,15 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         audioListening: false,
         audio: null,
         audioDistress: { detected: false, keyword: '', confidence: 0, transcript: '' },
+        alertValidation: {
+          status: 'waiting',
+          keyword: '',
+          confidence: 0,
+          emotion: '',
+          emotionConfidence: 0,
+          reason: 'Waiting for validated alert evidence.',
+          evaluatedAt: new Date().toISOString(),
+        },
         audioBackendReachable: true,
         audioMessage: 'Connect this camera to start listening.',
         audioTone: 'wait',
@@ -812,6 +911,41 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
           audioTone: described.tone,
         });
 
+        const kws = status?.custom_kws;
+        const candidate = (kws?.last_candidate || '').replace(/_/g, ' ').trim();
+        const decision = kws?.last_decision || '';
+        if (candidate && decision && decision !== 'accepted') {
+          const reasons: Record<string, string> = {
+            negative_not_ready: 'UNKNOWN/non-keyword validation is not ready.',
+            duration_mismatch: 'Keyword duration does not match the trained examples.',
+            below_threshold: 'Keyword confidence is below the trained acceptance threshold.',
+            too_close_to_unknown: 'Candidate is too similar to UNKNOWN/non-keyword speech.',
+            insufficient_margin: 'Candidate is too close to another trained keyword.',
+            no_ready_candidate: 'No trained keyword candidate is ready.',
+          };
+          const evaluatedAt = kws?.last_segment_at || new Date().toISOString();
+          const previous = runtimeRef.current.alertValidation;
+          if (
+            previous?.status !== 'rejected'
+            || previous.keyword !== candidate
+            || previous.sourceDecision !== decision
+            || previous.evaluatedAt !== evaluatedAt
+          ) {
+            patch({
+              alertValidation: {
+                status: 'rejected',
+                keyword: candidate,
+                confidence: kws?.last_candidate_confidence ?? 0,
+                emotion: runtimeRef.current.faceDistress.label,
+                emotionConfidence: runtimeRef.current.faceDistress.confidence,
+                reason: reasons[decision] || `Keyword candidate rejected: ${decision}.`,
+                evaluatedAt,
+                sourceDecision: decision,
+              },
+            });
+          }
+        }
+
         // New events are authoritative; when a poll brings none but the backend
         // already holds a transcript we still show it, so the panel is never
         // stuck on "no speech yet" while the backend has words.
@@ -832,7 +966,11 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             if (!keyword || confidence < settings.audioThreshold) continue;
             patch({
               audioDistress: {
-                detected: true, keyword, confidence, transcript: e.transcript,
+                detected: true,
+                keyword,
+                confidence,
+                transcript: e.transcript,
+                detectedAt: e.timestamp,
               },
             });
             if (audioDistressTimerRef.current) window.clearTimeout(audioDistressTimerRef.current);
@@ -853,6 +991,19 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             const fireSpeech = makeFireSpeechSignal(sourceText, confidence, spokenAt);
             if (fireSpeech) {
               reservedForFusion = true;
+              patch({
+                alertValidation: {
+                  status: 'pending',
+                  keyword: 'fire',
+                  confidence: fireSpeech.confidence,
+                  emotion: runtimeRef.current.fire.detected ? 'visual fire' : '',
+                  emotionConfidence: runtimeRef.current.fire.confidence,
+                  reason: 'Accepted "fire"; waiting for current visual fire evidence.',
+                  evaluatedAt: e.timestamp,
+                  sourceDecision: 'accepted',
+                },
+              });
+              snapshotAnalysisKickRef.current?.();
               // Store speech only. Fire verification is performed by the next
               // current visual analysis frame, after device-screen suppression.
               // This prevents an older unsuppressed frame from combining with
@@ -864,11 +1015,66 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             if (distressSpeech) {
               reservedForFusion = true;
               recentDistressSpeechRef.current = distressSpeech;
-              maybeEmitVerifiedDistress();
+
+              const currentFace = runtimeRef.current.faceDistress;
+              patch({
+                alertValidation: {
+                  status: 'pending',
+                  keyword: distressSpeech.keyword,
+                  confidence: distressSpeech.confidence,
+                  emotion: currentFace.label,
+                  emotionConfidence: currentFace.confidence,
+                  reason: 'Accepted "help"; waiting for Angry/Frightened facial evidence.',
+                  evaluatedAt: e.timestamp,
+                  sourceDecision: 'accepted',
+                },
+              });
+
+              if (!maybeEmitVerifiedDistress()) {
+                if (distressValidationTimerRef.current) {
+                  window.clearTimeout(distressValidationTimerRef.current);
+                }
+                const trackedSpeech = distressSpeech;
+                distressValidationTimerRef.current = window.setTimeout(() => {
+                  distressValidationTimerRef.current = undefined;
+                  if (recentDistressSpeechRef.current !== trackedSpeech) return;
+                  recentDistressSpeechRef.current = null;
+                  const faceState = runtimeRef.current.faceDistress;
+                  patch({
+                    alertValidation: {
+                      status: 'rejected',
+                      keyword: trackedSpeech.keyword,
+                      confidence: trackedSpeech.confidence,
+                      emotion: faceState.label,
+                      emotionConfidence: faceState.confidence,
+                      reason: 'Accepted "help" but no Angry/Frightened face was detected within the fusion window.',
+                      evaluatedAt: new Date().toISOString(),
+                      sourceDecision: 'accepted',
+                    },
+                  });
+                }, MULTIMODAL_FUSION_WINDOW_MS);
+
+                // Background cameras normally analyze on a cadence. As soon as
+                // speech is accepted, request a fresh frame so validation does
+                // not wait for the next scheduled snapshot.
+                snapshotAnalysisKickRef.current?.();
+              }
+            } else if (!fireSpeech && !/^(?:scream|screaming)$/i.test(keyword)) {
+              patch({
+                alertValidation: {
+                  status: 'rejected',
+                  keyword,
+                  confidence,
+                  emotion: runtimeRef.current.faceDistress.label,
+                  emotionConfidence: runtimeRef.current.faceDistress.confidence,
+                  reason: `Accepted "${keyword}", but this keyword is not configured for facial-distress alert fusion.`,
+                  evaluatedAt: e.timestamp,
+                  sourceDecision: 'accepted',
+                },
+              });
             }
 
-            // "help" is reserved for multimodal fusion. Scream/screaming is
-            // diagnostic only and must not become an alert event.
+            // Reserved fusion cues never become standalone audio alarms.
             if (reservedForFusion || /^(?:scream|screaming)$/i.test(keyword)) continue;
             emit('audio-distress', `Safety word: "${keyword}"`, confidence);
           }
@@ -902,6 +1108,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       if (audioDistressTimerRef.current) {
         window.clearTimeout(audioDistressTimerRef.current);
         audioDistressTimerRef.current = undefined;
+      }
+      if (distressValidationTimerRef.current) {
+        window.clearTimeout(distressValidationTimerRef.current);
+        distressValidationTimerRef.current = undefined;
       }
       patch({ audioListening: false, audioDistress: { detected: false, keyword: '', confidence: 0, transcript: '' } });
     };
