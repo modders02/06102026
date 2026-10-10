@@ -9,14 +9,12 @@ import { CAMERA_HISTORY_LIMIT } from '@/lib/cameraRegistry';
 import type { DetectionEvent, DetectionType } from '@/types/multicam';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
 import ValidationLayer from '@/components/dashboard/ValidationLayer';
+import { isPriorityCameraAlert } from '@/lib/priorityScenario';
 
 const typeIcon: Record<DetectionType, string> = {
   fire: '🔥', smoke: '💨', human: '🧍', object: '📦',
   'face-distress': '😨', 'audio-distress': '🗣', 'multimodal-distress': '🆘', 'motion-anomaly': '⚠️', 'attention-alert': '🔔', emotion: '🙂', saliency: '✨',
 };
-const EMERGENCY_TYPES = new Set<DetectionType>([
-  'fire', 'smoke', 'face-distress', 'audio-distress', 'multimodal-distress',
-]);
 
 /** Camera alerts, past detections, and emergency clips shown beside live feeds. */
 export default function DashboardEvents({
@@ -58,10 +56,12 @@ export default function DashboardEvents({
   }, [activeSlots, events, alertEvents, filter]);
   const filtered = useMemo(() => filter === 'all' ? events : events.filter(event => event.cameraId === filter), [events, filter]);
   const alerts = useMemo(
-    () => (alertEvents || events).filter(
-      event => EMERGENCY_TYPES.has(event.type) && (filter === 'all' || event.cameraId === filter),
+    () => alertEvents.filter(
+      event => isPriorityCameraAlert(event)
+        && event.alertValidation?.status === 'accepted'
+        && (filter === 'all' || event.cameraId === filter),
     ),
-    [alertEvents, events, filter],
+    [alertEvents, filter],
   );
   const viewingEvent = viewingId ? [...events, ...(alertEvents || [])].find(event => event.id === viewingId) : undefined;
 
