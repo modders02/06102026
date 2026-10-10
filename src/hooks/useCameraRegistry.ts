@@ -101,12 +101,25 @@ export function useCameraRegistry() {
     });
   }, [commitHistory]);
 
+  const archiveActiveAlert = useCallback((id?: string) => {
+    const current = loadEventHistory();
+    const archived = current.alertEvents.filter(event => !id || event.id === id);
+    if (!archived.length) return;
+    commitHistory({
+      events: [
+        ...archived.map(archiveCameraAlert),
+        ...current.events.filter(event => !archived.some(alert => alert.id === event.id)),
+      ],
+      alertEvents: current.alertEvents.filter(event => !archived.some(alert => alert.id === event.id)),
+    });
+  }, [commitHistory]);
+
   const clearEvents = useCallback(() => {
     commitHistory({ events: [], alertEvents: [] });
   }, [commitHistory]);
 
   return {
     cameras, settings, events: history.events, alertEvents: history.alertEvents,
-    addCamera, updateCamera, deleteCamera, updateSettings, addEvent, updateEvent, clearEvents,
+    addCamera, updateCamera, deleteCamera, updateSettings, addEvent, updateEvent, archiveActiveAlert, clearEvents,
   };
 }
