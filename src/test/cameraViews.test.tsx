@@ -364,6 +364,10 @@ describe('camera alerts and event history', () => {
 
     render(<MemoryRouter initialEntries={['/cameras?camera=slot-2']}><Monitoring /></MemoryRouter>);
 
+    expect(screen.queryByText(/Kitchen fire/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View snapshot: Kitchen fire from Camera 2' }))
+      .not.toBeInTheDocument();
+    expect(screen.getByText('No camera alerts yet.')).toBeInTheDocument();
     await waitFor(() => expect(mocks.archiveActiveAlert).toHaveBeenCalledWith('second'));
   });
 
