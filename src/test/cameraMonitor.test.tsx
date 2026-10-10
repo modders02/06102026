@@ -358,7 +358,9 @@ describe('camera snapshots and page-scoped playback', () => {
     rerender(<CameraMonitor slot={slot} monitoring={false} playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => { finishDetection([{ label: 'person', confidence: 0.99, bbox: [0, 0, 20, 20] }]); });
     expect(onEvent).not.toHaveBeenCalled();
-    expect(mocked.analyzeFace).not.toHaveBeenCalled();
+    // Face and object inference now start in parallel. The in-flight face work
+    // may have started, but its result must be discarded after AI is disabled.
+    expect(mocked.analyzeFace).toHaveBeenCalledOnce();
     expect(getCameraSession('slot-1').runtime?.objects).toEqual([]);
     expect(getCameraSession('slot-1').runtime?.lastDetectionAt).toBeNull();
     expect(getCameraSession('slot-1').runtime?.audioListening).toBe(true);
@@ -1022,7 +1024,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(getCameraSession('slot-1').eventPreview).toBe('data:image/jpeg;base64,first');
     expect(write).toHaveBeenCalledOnce();
     await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
-    expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(4);
+    expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(7);
     expect(getCameraSession('slot-1').preview).toBe('data:image/jpeg;base64,first');
     expect(getCameraSession('slot-1').previewTimestamp).toBe(firstSeenAt);
     expect(getCameraSession('slot-1').eventPreview).toBe('data:image/jpeg;base64,last');
@@ -1204,7 +1206,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(playCount);
     expect(mocked.players).toHaveLength(0);
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
-    expect(mocked.getAudioEvents).toHaveBeenCalledTimes(6);
+    expect(mocked.getAudioEvents).toHaveBeenCalledTimes(7);
     expect(mocked.getAudioEvents).toHaveBeenLastCalledWith(expect.any(String), 'slot-1', standaloneSafetyEvent.timestamp);
     expect(onEvent).toHaveBeenCalledOnce();
     expect(mocked.openCameraWebRtc).toHaveBeenCalledOnce();
