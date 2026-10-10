@@ -32,7 +32,6 @@ import {
   fuseDistressSignals,
   isMultimodalDistressExpression,
   makeDistressFaceSignal,
-  makeDistressSoundSignal,
   makeDistressSpeechSignal,
   multimodalDistressLabel,
   type DistressFaceSignal,
@@ -710,10 +709,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   }, [camera.enabled, camera.aiEnabled, playbackEnabled]);
 
   // Facial expression tracking.
-  // Every base expression is non-alerting by itself. Angry/Frightened can
-  // verify help/emergency or a scream. face-api's surprised/shock-like expression
-  // is presented as Frightened and participates in the same fusion rule.
-  // Sad, Happy, Neutral and Disgust remain informational history only.
+  // Every base expression is non-alerting by itself. Only Angry/Frightened can
+  // verify an accepted "help" keyword. Surprise/shock and all other expressions
+  // remain informational history only.
   useEffect(() => {
     if (!camera.enabled || !camera.aiEnabled || faceAnalysisRevisionRef.current !== analysisRevisionRef.current) return;
     const d = face.distress;
@@ -843,9 +841,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
               patch({ audioDistress: { detected: false, keyword: '', confidence: 0, transcript: '' } });
             }, TRANSCRIPT_CLEAR_MS);
 
-            // "help" and "emergency" are intentionally not standalone alarms.
-            // Hold them briefly so either speech-first or face-first ordering can
-            // verify the same-camera Angry/Frightened + help/emergency combination.
+            // "help" is intentionally not a standalone alarm. Hold it briefly
+            // so either speech-first or face-first ordering can verify the
+            // same-camera Angry/Frightened + accepted-help combination.
             const spokenAt = Number.isNaN(Date.parse(e.timestamp)) ? Date.now() : Date.parse(e.timestamp);
             // Fusion also uses only the accepted trained keyword. A displayed
             // transcript that happens to contain "help" is not alert evidence.
@@ -863,16 +861,15 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             }
 
             const distressSpeech = makeDistressSpeechSignal(sourceText, confidence, spokenAt);
-            const distressSound = makeDistressSoundSignal(keyword, confidence, spokenAt);
-            const fusionAudio = distressSpeech ?? distressSound;
-            if (fusionAudio) {
+            if (distressSpeech) {
               reservedForFusion = true;
-              recentDistressSpeechRef.current = fusionAudio;
+              recentDistressSpeechRef.current = distressSpeech;
               maybeEmitVerifiedDistress();
             }
 
-            // Reserved fusion cues never become standalone audio alarms.
-            if (reservedForFusion) continue;
+            // "help" is reserved for multimodal fusion. Scream/screaming is
+            // diagnostic only and must not become an alert event.
+            if (reservedForFusion || /^(?:scream|screaming)$/i.test(keyword)) continue;
             emit('audio-distress', `Safety word: "${keyword}"`, confidence);
           }
         } else if (
