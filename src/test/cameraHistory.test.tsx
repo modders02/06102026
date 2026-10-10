@@ -48,9 +48,9 @@ describe('bounded camera event histories', () => {
     act(() => {
       for (let index = 1; index <= 51; index++) registry.result.current.addEvent(event(index, 'fire', { clipUrl: `blob:clip-${index}` }));
     });
-    expect(registry.result.current.events).toHaveLength(50);
+    expect(registry.result.current.events).toEqual([]);
     expect(registry.result.current.alertEvents).toHaveLength(50);
-    expect(registry.result.current.events.map(item => item.id)).toEqual(Array.from({ length: 50 }, (_, index) => `event-${51 - index}`));
+    expect(registry.result.current.alertEvents.map(item => item.id)).toEqual(Array.from({ length: 50 }, (_, index) => `event-${51 - index}`));
     expect(revoke.mock.calls).toEqual([['blob:clip-1']]);
 
     act(() => {
@@ -91,7 +91,7 @@ describe('bounded camera event histories', () => {
       registry.result.current.addEvent(event(1, 'fire', { clipUrl: 'blob:original' }));
       registry.result.current.updateEvent('event-1', { clipUrl: 'blob:replacement' });
     });
-    expect(registry.result.current.events[0].clipUrl).toBe('blob:replacement');
+    expect(registry.result.current.events).toEqual([]);
     expect(registry.result.current.alertEvents[0].clipUrl).toBe('blob:replacement');
     expect(revoke.mock.calls).toEqual([['blob:original']]);
 
@@ -139,6 +139,20 @@ describe('bounded camera event histories', () => {
 });
 
 describe('priority-only camera alerts', () => {
+  it('keeps priority alerts out of Event history', () => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => registry.result.current.addEvent(event(1, 'fire', {
+      label: 'Verified fire',
+    })));
+
+    expect(registry.result.current.events).toEqual([]);
+    expect(registry.result.current.alertEvents).toHaveLength(1);
+    expect(registry.result.current.alertEvents[0]).toMatchObject({
+      type: 'fire',
+      label: 'Verified fire',
+    });
+  });
+
   it('keeps raw audio distress in event history unless explicitly prioritized', () => {
     const registry = renderHook(useCameraRegistry);
     act(() => registry.result.current.addEvent(event(1, 'audio-distress', {
@@ -171,7 +185,7 @@ describe('verified multimodal alert history', () => {
       snapshot: 'data:image/jpeg;base64,verified',
     })));
 
-    expect(registry.result.current.events[0]).toMatchObject({ type: 'multimodal-distress' });
+    expect(registry.result.current.events).toEqual([]);
     expect(registry.result.current.alertEvents[0]).toMatchObject({
       type: 'multimodal-distress',
       snapshot: 'data:image/jpeg;base64,verified',
