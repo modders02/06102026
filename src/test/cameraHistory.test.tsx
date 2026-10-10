@@ -138,6 +138,31 @@ describe('bounded camera event histories', () => {
   });
 });
 
+describe('priority-only camera alerts', () => {
+  it('keeps raw audio distress in event history unless explicitly prioritized', () => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => registry.result.current.addEvent(event(1, 'audio-distress', {
+      label: 'Safety word: "danger"',
+    })));
+
+    expect(registry.result.current.events[0]).toMatchObject({ type: 'audio-distress' });
+    expect(registry.result.current.alertEvents).toEqual([]);
+  });
+
+  it('retains explicitly prioritized critical speech as a camera alert', () => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => registry.result.current.addEvent(event(1, 'audio-distress', {
+      label: 'Wake word: "call 911"',
+      priorityScenario: true,
+    })));
+
+    expect(registry.result.current.alertEvents[0]).toMatchObject({
+      type: 'audio-distress',
+      priorityScenario: true,
+    });
+  });
+});
+
 describe('verified multimodal alert history', () => {
   it('retains verified multimodal distress in camera alerts with its snapshot', () => {
     const registry = renderHook(useCameraRegistry);
@@ -193,7 +218,7 @@ describe('camera event snapshot fallback', () => {
     vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/jpeg;base64,live');
     publishCameraSession('history-source', { video, preview: 'data:image/jpeg;base64,old', previewTimestamp: 1000 });
     const registry = renderHook(useCameraRegistry);
-    act(() => registry.result.current.addEvent(event(1, 'audio-distress')));
+    act(() => registry.result.current.addEvent(event(1, 'audio-distress', { priorityScenario: true })));
     expect(drawImage).toHaveBeenCalledWith(video, 0, 0, 640, 360);
     expect(registry.result.current.alertEvents[0].snapshot).toBe('data:image/jpeg;base64,live');
   });
