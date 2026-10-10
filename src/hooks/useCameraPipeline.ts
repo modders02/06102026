@@ -148,6 +148,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const lastAudioRef = useRef<string | undefined>(undefined);
   const lastShownRef = useRef<string>('');
   const clearTimerRef = useRef<number | undefined>(undefined);
+  const audioDistressTimerRef = useRef<number | undefined>(undefined);
   const recentDistressFaceRef = useRef<DistressFaceSignal | null>(null);
   const recentDistressSpeechRef = useRef<DistressSpeechSignal | null>(null);
   const recentFireVisualRef = useRef<FireVisualSignal | null>(null);
@@ -769,6 +770,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         window.clearTimeout(clearTimerRef.current);
         clearTimerRef.current = undefined;
       }
+      if (audioDistressTimerRef.current) {
+        window.clearTimeout(audioDistressTimerRef.current);
+        audioDistressTimerRef.current = undefined;
+      }
       latestPreviewRef.current = undefined;
       setPreview(null);
       patch({
@@ -832,6 +837,11 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                 detected: true, keyword, confidence, transcript: e.transcript,
               },
             });
+            if (audioDistressTimerRef.current) window.clearTimeout(audioDistressTimerRef.current);
+            audioDistressTimerRef.current = window.setTimeout(() => {
+              audioDistressTimerRef.current = undefined;
+              patch({ audioDistress: { detected: false, keyword: '', confidence: 0, transcript: '' } });
+            }, TRANSCRIPT_CLEAR_MS);
 
             // "help" and "emergency" are intentionally not standalone alarms.
             // Hold them briefly so either speech-first or face-first ordering can
@@ -887,7 +897,15 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
 
     const id = window.setInterval(poll, AUDIO_POLL_TICK_MS);
     void poll();
-    return () => { stopped = true; window.clearInterval(id); patch({ audioListening: false }); };
+    return () => {
+      stopped = true;
+      window.clearInterval(id);
+      if (audioDistressTimerRef.current) {
+        window.clearTimeout(audioDistressTimerRef.current);
+        audioDistressTimerRef.current = undefined;
+      }
+      patch({ audioListening: false, audioDistress: { detected: false, keyword: '', confidence: 0, transcript: '' } });
+    };
   }, [camera.enabled, camera.id, sourceStream, settings.pythonServer, settings.audioThreshold, patch, emit, maybeEmitVerifiedDistress, maybeEmitVerifiedFire, showTranscript]);
 
 
