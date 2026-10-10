@@ -257,25 +257,35 @@ export default function Index() {
 
   const storeEvent = useCallback((event: Omit<DetectionEvent, 'id'>) => {
     const id = crypto.randomUUID();
-    addEvent({ ...event, id });
-    const video = getCameraSession(event.cameraId).video;
-    // Recording is reserved for priority scenarios. Ordinary detections remain
-    // in Event History without producing emergency clips.
-    if (!video || !event.priorityScenario || recordingCameras.current.has(event.cameraId)) return id;
-    recordingCameras.current.add(event.cameraId);
+    const rejectedValidation = event.alertValidation?.status === 'rejected';
+    const storedEvent = rejectedValidation
+      ? { ...event, snapshot: undefined, priorityScenario: false }
+      : event;
+    addEvent({ ...storedEvent, id });
+    const video = getCameraSession(storedEvent.cameraId).video;
+    // Emergency recording requires the same ACCEPTED validation that permits
+    // Camera Alert rendering. A rejected detection cannot capture/save an
+    // alert snapshot or start an emergency clip.
+    if (
+      !video
+      || !storedEvent.priorityScenario
+      || storedEvent.alertValidation?.status !== 'accepted'
+      || recordingCameras.current.has(storedEvent.cameraId)
+    ) return id;
+    recordingCameras.current.add(storedEvent.cameraId);
     void recordClip(video).then(async blob => {
       if (!blob) {
         updateEvent(id, { clipError: 'Could not record a clip from this camera.' });
         return;
       }
-      const name = clipFileName(event.cameraName, event.type);
+      const name = clipFileName(storedEvent.cameraName, storedEvent.type);
       await saveClip(blob, name);
       updateEvent(id, { clipFile: name, clipUrl: URL.createObjectURL(blob), clipError: undefined });
     }).catch(error => {
       const message = error instanceof Error ? error.message : 'Could not save the clip.';
       updateEvent(id, { clipError: message });
-      toast.error(message, { id: `camera-clip-save:${event.cameraId}` });
-    }).finally(() => recordingCameras.current.delete(event.cameraId));
+      toast.error(message, { id: `camera-clip-save:${storedEvent.cameraId}` });
+    }).finally(() => recordingCameras.current.delete(storedEvent.cameraId));
     return id;
   }, [addEvent, updateEvent]);
 
