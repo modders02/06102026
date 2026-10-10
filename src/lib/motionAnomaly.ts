@@ -53,7 +53,9 @@ function nearestPrevious(
       bestDistance = distance;
     }
   }
-  return bestDistance <= 0.35 ? best : null;
+  // Allow substantial downward travel while still rejecting unrelated tracks.
+  // The semantic fall validator separately constrains horizontal displacement.
+  return bestDistance <= 0.4 ? best : null;
 }
 
 function activePixelRatio(map: ImageData) {
