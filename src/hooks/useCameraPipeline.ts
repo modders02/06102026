@@ -165,6 +165,11 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const recentDistressSpeechRef = useRef<DistressSpeechSignal | null>(null);
   const recentFireVisualRef = useRef<FireVisualSignal | null>(null);
   const recentFireSpeechRef = useRef<FireSpeechSignal | null>(null);
+  // Continuous detectors are edge-triggered: one accepted condition produces
+  // one Camera Alert snapshot until the condition clears or materially changes.
+  const visualFireAlertActiveRef = useRef(false);
+  const motionAlertKeyRef = useRef<string | null>(null);
+  const attentionAlertKeyRef = useRef<string | null>(null);
 
   const cooldownRef = useRef<Record<string, number>>({});
   const retryRef = useRef(0);
@@ -236,6 +241,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       }
       recentFireVisualRef.current = null;
       recentFireSpeechRef.current = null;
+      visualFireAlertActiveRef.current = false;
+      motionAlertKeyRef.current = null;
+      attentionAlertKeyRef.current = null;
       const currentValidation = runtimeRef.current.alertValidation;
       patch({
         objects: [], humanCount: 0, saliencyScore: 0, attentionScore: 0,
@@ -698,10 +706,15 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       // checking here makes either signal order work without stale-frame alerts.
       if (fireVisual) recentFireVisualRef.current = fireVisual;
       const immediateFireSmoke = isImmediateFireSmoke(fireVisual);
+      const thresholdFireDetected = fire.fireDetected && fire.confidence >= settings.fireThreshold;
+      const persistentVisualFire = immediateFireSmoke || thresholdFireDetected;
+      if (!persistentVisualFire) visualFireAlertActiveRef.current = false;
+
       let verifiedFireSpeech = false;
       if (immediateFireSmoke && fireVisual) {
         recentFireSpeechRef.current = null;
         recentFireVisualRef.current = null;
+        const validationReason = 'Visual fire/smoke evidence independently satisfied the hazard rule.';
         patch({
           alertValidation: {
             status: 'accepted',
@@ -709,22 +722,27 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             confidence: fireVisual.confidence,
             emotion: 'visual fire/smoke',
             emotionConfidence: fireVisual.confidence,
-            reason: 'Visual fire/smoke evidence independently satisfied the hazard rule.',
+            reason: validationReason,
             evaluatedAt: new Date(fireVisual.at).toISOString(),
           },
         });
-        emit(
-          'fire',
-          fireSmokeLabel(fireVisual),
-          fireVisual.confidence,
-          {
-            status: 'accepted',
-            reason: 'Visual fire/smoke evidence independently satisfied the hazard rule.',
-            keyword: '',
-            emotion: 'visual fire/smoke',
-          },
-        );
+        if (!visualFireAlertActiveRef.current) {
+          visualFireAlertActiveRef.current = true;
+          emit(
+            'fire',
+            fireSmokeLabel(fireVisual),
+            fireVisual.confidence,
+            {
+              status: 'accepted',
+              reason: validationReason,
+              keyword: '',
+              emotion: 'visual fire/smoke',
+            },
+          );
+        }
       } else if (fireVisual) {
+        // Speech-correlated fire is already one-shot because the accepted
+        // speech signal is consumed after successful fusion.
         verifiedFireSpeech = maybeEmitVerifiedFire();
       }
 
@@ -764,8 +782,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         : objects;
       for (const object of historyObjects) emit('object', object.label, object.confidence);
       if (humanCount > 0) emit('human', `${humanCount} person(s)`, 0.9);
-      if (!immediateFireSmoke && !verifiedFireSpeech
-          && fire.fireDetected && fire.confidence >= settings.fireThreshold) {
+      if (!immediateFireSmoke && !verifiedFireSpeech && thresholdFireDetected) {
         const validationReason = 'Fire detector confidence satisfied the configured fire threshold.';
         patch({
           alertValidation: {
@@ -778,14 +795,24 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             evaluatedAt: new Date().toISOString(),
           },
         });
-        emit('fire', 'Fire detected', fire.confidence, {
-          status: 'accepted',
-          reason: validationReason,
-          keyword: '',
-          emotion: 'visual fire',
-        });
+        if (!visualFireAlertActiveRef.current) {
+          visualFireAlertActiveRef.current = true;
+          emit('fire', 'Fire detected', fire.confidence, {
+            status: 'accepted',
+            reason: validationReason,
+            keyword: '',
+            emotion: 'visual fire',
+          });
+        }
       }
-      if (motionAnomaly.detected && validation.visualUsable) {
+
+      const motionKey = motionAnomaly.detected && validation.visualUsable
+        ? motionAnomaly.label
+        : null;
+      if (!motionKey) {
+        motionAlertKeyRef.current = null;
+      } else if (motionAlertKeyRef.current !== motionKey) {
+        motionAlertKeyRef.current = motionKey;
         const motionReason = `Visual motion validation accepted: ${motionAnomaly.label}.`;
         emit('motion-anomaly', motionAnomaly.label, motionAnomaly.confidence, {
           status: 'accepted',
@@ -817,19 +844,27 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
           const reason = alertReason === 'priority-object+loud-audio'
             ? 'priority object + loud audio'
             : alertReason === 'priority-object' ? 'priority object' : 'loud audio';
-          const attentionReason = `Attention validation accepted: ${reason}; score α=${attentionScore} exceeded the configured threshold.`;
-          emit(
-            'attention-alert',
-            `Attention alert: ${reason} (α=${attentionScore})`,
-            attentionScore / 100,
-            {
-              status: 'accepted',
-              reason: attentionReason,
-              keyword: '',
-              emotion: reason,
-            },
-          );
+          const alertKey = reason;
+          if (attentionAlertKeyRef.current !== alertKey) {
+            attentionAlertKeyRef.current = alertKey;
+            const attentionReason = `Attention validation accepted: ${reason}; score α=${attentionScore} exceeded the configured threshold.`;
+            emit(
+              'attention-alert',
+              `Attention alert: ${reason} (α=${attentionScore})`,
+              attentionScore / 100,
+              {
+                status: 'accepted',
+                reason: attentionReason,
+                keyword: '',
+                emotion: reason,
+              },
+            );
+          }
+        } else {
+          attentionAlertKeyRef.current = null;
         }
+      } else {
+        attentionAlertKeyRef.current = null;
       }
     } catch {
       // A detector failure does not interrupt previews, playback, or audio.
