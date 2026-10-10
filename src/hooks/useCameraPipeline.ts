@@ -1021,20 +1021,38 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
               recentDistressSpeechRef.current = distressSpeech;
 
               const currentFace = runtimeRef.current.faceDistress;
-              patch({
-                alertValidation: {
-                  status: 'pending',
-                  keyword: distressSpeech.keyword,
-                  confidence: distressSpeech.confidence,
-                  emotion: currentFace.label,
-                  emotionConfidence: currentFace.confidence,
-                  reason: 'Accepted "help"; waiting for Angry/Frightened facial evidence.',
-                  evaluatedAt: e.timestamp,
-                  sourceDecision: 'accepted',
-                },
-              });
+              if (!camera.aiEnabled || face.error) {
+                recentDistressSpeechRef.current = null;
+                patch({
+                  alertValidation: {
+                    status: 'rejected',
+                    keyword: distressSpeech.keyword,
+                    confidence: distressSpeech.confidence,
+                    emotion: currentFace.label,
+                    emotionConfidence: currentFace.confidence,
+                    reason: !camera.aiEnabled
+                      ? 'Accepted "help", but camera AI is disabled so facial validation is unavailable.'
+                      : `Accepted "help", but facial-expression detection failed: ${face.error}`,
+                    evaluatedAt: e.timestamp,
+                    sourceDecision: 'accepted',
+                  },
+                });
+              } else {
+                patch({
+                  alertValidation: {
+                    status: 'pending',
+                    keyword: distressSpeech.keyword,
+                    confidence: distressSpeech.confidence,
+                    emotion: currentFace.label,
+                    emotionConfidence: currentFace.confidence,
+                    reason: 'Accepted "help"; waiting for Angry/Frightened facial evidence.',
+                    evaluatedAt: e.timestamp,
+                    sourceDecision: 'accepted',
+                  },
+                });
+              }
 
-              if (!maybeEmitVerifiedDistress()) {
+              if (recentDistressSpeechRef.current && !maybeEmitVerifiedDistress()) {
                 if (distressValidationTimerRef.current) {
                   window.clearTimeout(distressValidationTimerRef.current);
                 }
@@ -1119,7 +1137,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       }
       patch({ audioListening: false, audioDistress: { detected: false, keyword: '', confidence: 0, transcript: '' } });
     };
-  }, [camera.enabled, camera.id, sourceStream, settings.pythonServer, settings.audioThreshold, patch, emit, maybeEmitVerifiedDistress, maybeEmitVerifiedFire, showTranscript]);
+  }, [camera.enabled, camera.id, camera.aiEnabled, sourceStream, settings.pythonServer, settings.audioThreshold, face.error, patch, emit, maybeEmitVerifiedDistress, maybeEmitVerifiedFire, showTranscript]);
 
 
   const reconnect = useCallback(() => {
