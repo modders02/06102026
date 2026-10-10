@@ -45,6 +45,9 @@ export function classifyPriorityScenario(
   severity?: AlertSeverity,
 ): PriorityScenarioDecision {
   if (event.priorityScenario === true) {
+    if (event.type === 'audio-distress') {
+      return { priority: false, emergency: false, reason: null };
+    }
     return {
       priority: true,
       emergency: shouldOpenEmergencyPopup(event, severity),
