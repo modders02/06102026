@@ -33,26 +33,30 @@ export function deriveValidationView(runtime: CameraRuntime | null): ValidationV
   const decision = kws?.last_decision || (acceptedKeyword ? 'accepted' : '');
   const speechAccepted = decision === 'accepted';
 
+  const normalized = keyword.toLowerCase();
+  const isHelp = normalized === 'help';
+  const isFire = normalized === 'fire';
   const hasFacialContext = Boolean(runtime?.faceDistress.detected);
   const hasVisualHazard = Boolean(runtime?.fire.detected || runtime?.smoke.detected);
-  const hasContext = hasFacialContext || hasVisualHazard;
+  const distressValidated = speechAccepted && isHelp && hasFacialContext;
+  const fireValidated = speechAccepted && isFire && hasVisualHazard;
 
   const state: ValidationViewState = !keyword
     ? 'waiting'
     : decision && !speechAccepted
       ? 'rejected'
-      : hasContext
+      : distressValidated || fireValidated
         ? 'validated'
         : 'pending';
 
   const crossCheck = !keyword
     ? 'waiting'
-    : hasVisualHazard
-      ? 'voice + visual hazard'
-      : hasFacialContext
-        ? 'voice + facial context'
+    : fireValidated
+      ? 'fire + visual hazard'
+      : distressValidated
+        ? 'help + Angry/Frightened'
         : speechAccepted
-          ? 'voice only'
+          ? 'accepted keyword; no required context'
           : 'speech not accepted';
 
   return { keyword, confidence, decision, state, crossCheck };
@@ -132,7 +136,7 @@ export default function ValidationLayer({ cameraId, cameraName }: ValidationLaye
         </div>
 
         <p className="text-muted-foreground">
-          Validates supporting evidence before alert escalation.
+          Distress alerts require accepted "help" plus Angry/Frightened facial evidence.
         </p>
       </div>
     </section>
