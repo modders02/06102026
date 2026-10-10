@@ -1233,7 +1233,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                 });
               }
 
-              if (recentDistressSpeechRef.current && !maybeEmitVerifiedDistress()) {
+              if (recentDistressSpeechRef.current) {
                 if (distressValidationTimerRef.current) {
                   window.clearTimeout(distressValidationTimerRef.current);
                 }
@@ -1259,9 +1259,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                   });
                 }, MULTIMODAL_FUSION_WINDOW_MS);
 
-                // Background cameras normally analyze on a cadence. As soon as
-                // speech is accepted, request a fresh frame so validation does
-                // not wait for the next scheduled snapshot.
+                // Never validate new speech against a cached face before the
+                // camera has had a chance to produce a current frame. Visible
+                // cameras are analyzed every 350 ms; background cameras are
+                // kicked immediately here.
                 snapshotAnalysisKickRef.current?.();
               }
             } else if (!fireSpeech && !/^(?:scream|screaming)$/i.test(keyword)) {
