@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   setCount: vi.fn(),
   stopTalk: vi.fn(),
   clearEvents: vi.fn(),
+  archiveActiveAlert: vi.fn(),
   events: [] as DetectionEvent[],
   alertEvents: [] as DetectionEvent[],
   localActive: [false, false],
@@ -27,7 +28,13 @@ vi.mock('@/hooks/useCameraSlots', async importOriginal => {
   const actual = await importOriginal<typeof import('@/hooks/useCameraSlots')>();
   return { ...actual, useCameraSlots: () => ({ count: mocks.count, slots: mocks.slots, activeSlots: mocks.slots.slice(0, mocks.count), setCount: mocks.setCount }) };
 });
-vi.mock('@/hooks/useCameraRegistry', () => ({ useCameraRegistry: () => ({ settings: DEFAULT_SETTINGS, events: mocks.events, alertEvents: mocks.alertEvents, clearEvents: mocks.clearEvents }) }));
+vi.mock('@/hooks/useCameraRegistry', () => ({ useCameraRegistry: () => ({
+  settings: DEFAULT_SETTINGS,
+  events: mocks.events,
+  alertEvents: mocks.alertEvents,
+  archiveActiveAlert: mocks.archiveActiveAlert,
+  clearEvents: mocks.clearEvents,
+}) }));
 vi.mock('@/hooks/useCamera', () => ({ useCamera: () => ({ cameras: mocks.localActive.map(active => ({ active })) }) }));
 vi.mock('@/hooks/useCctvTalk', () => ({
   useCctvTalk: () => ({ talking: false, error: null, startTalk: vi.fn(), stopTalk: mocks.stopTalk }),
@@ -62,6 +69,7 @@ beforeEach(() => {
   mocks.setCount.mockClear();
   mocks.stopTalk.mockClear();
   mocks.clearEvents.mockClear();
+  mocks.archiveActiveAlert.mockClear();
   mocks.events = [];
   mocks.alertEvents = [];
   mocks.localActive = [false, false];
@@ -278,6 +286,55 @@ describe('camera alerts and event history', () => {
     expect(within(dialog).getByText(/Camera 2 · Kitchen/)).toHaveTextContent('90% confidence');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('shows only the newest accepted Camera Alert when legacy data contains several', () => {
+    const older = {
+      ...mocks.alertEvents[0],
+      id: 'older-alert',
+      label: 'Older accepted fire',
+      timestamp: '2026-10-02T02:40:00Z',
+      snapshot: 'data:image/jpeg;base64,older',
+    };
+    const newer = {
+      ...mocks.alertEvents[0],
+      id: 'newer-alert',
+      label: 'Newest accepted fire',
+      timestamp: '2026-10-02T02:42:00Z',
+      snapshot: 'data:image/jpeg;base64,newer',
+    };
+    mocks.alertEvents = [older, newer];
+
+    render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
+
+    expect(screen.getByText('Newest accepted fire')).toBeInTheDocument();
+    expect(screen.queryByText('Older accepted fire')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Camera alerts' }).parentElement)
+      .toHaveTextContent('1');
+  });
+
+  it('archives the displayed alert when that camera validation becomes REJECTED', async () => {
+    const active = mocks.alertEvents[0];
+    publishCameraSession('slot-2', {
+      runtime: {
+        ...onlineRuntime,
+        cameraId: 'slot-2',
+        alertValidation: {
+          status: 'rejected',
+          keyword: 'help',
+          confidence: 0.61,
+          emotion: 'Happy',
+          emotionConfidence: 0.95,
+          reason: 'Current camera expression is Happy.',
+          evaluatedAt: '2026-10-02T02:42:00Z',
+          sourceDecision: 'below_threshold',
+        },
+      },
+    });
+
+    render(<MemoryRouter initialEntries={['/cameras?camera=slot-2']}><Monitoring /></MemoryRouter>);
+
+    await waitFor(() => expect(mocks.archiveActiveAlert).toHaveBeenCalledWith(active.id));
   });
 
   it('does not render a rejected validation as a Camera alert', () => {
