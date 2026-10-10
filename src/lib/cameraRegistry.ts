@@ -77,9 +77,12 @@ function readEventHistory(): CameraEventHistory {
   if (historyCache && source.eventsRaw === historyCache.eventsRaw && source.alertsRaw === historyCache.alertsRaw) {
     return historyCache.history;
   }
-  const events = parseEventArray(source.eventsRaw);
-  // Migrate alerts before trimming the older, combined 500-entry history.
-  const alertEvents = (source.alertsRaw !== null ? parseEventArray(source.alertsRaw) : events).filter(isCameraAlert);
+  const storedEvents = parseEventArray(source.eventsRaw);
+  // Older builds duplicated priority alerts into Event History. Split the two
+  // streams while loading so Camera alerts and Event history are exclusive.
+  const alertEvents = (source.alertsRaw !== null ? parseEventArray(source.alertsRaw) : storedEvents)
+    .filter(isCameraAlert);
+  const events = storedEvents.filter(event => !isCameraAlert(event));
   return { events, alertEvents };
 }
 
@@ -98,7 +101,7 @@ export function revokeUnusedEventClips(
 export function saveEventHistory(next: CameraEventHistory): CameraEventHistory {
   const previous = readEventHistory();
   const retained = {
-    events: next.events.slice(0, CAMERA_HISTORY_LIMIT),
+    events: next.events.filter(event => !isCameraAlert(event)).slice(0, CAMERA_HISTORY_LIMIT),
     alertEvents: next.alertEvents.filter(isCameraAlert).slice(0, CAMERA_HISTORY_LIMIT),
   };
   write(EVENTS_KEY, retained.events);
@@ -120,7 +123,10 @@ export function loadEventHistory(): CameraEventHistory {
 }
 
 export const loadEvents = (): DetectionEvent[] => loadEventHistory().events;
-export const saveEvents = (events: DetectionEvent[]) => saveEventHistory({ events, alertEvents: events.filter(isCameraAlert) });
+export const saveEvents = (events: DetectionEvent[]) => saveEventHistory({
+  events: events.filter(event => !isCameraAlert(event)),
+  alertEvents: events.filter(isCameraAlert),
+});
 
 export function makeCamera(partial: Partial<CameraConfig>): CameraConfig {
   const name = partial.name?.trim() || 'New Camera';
