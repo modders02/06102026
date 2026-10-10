@@ -69,11 +69,16 @@ export function useCameraRegistry() {
   const addEvent = useCallback((evt: DetectionEvent) => {
     const current = loadEventHistory();
     const captured = { ...evt, snapshot: evt.snapshot || captureCameraEventSnapshot(evt.cameraId) };
+    const alert = isCameraAlert(captured);
     commitHistory({
-      events: [captured, ...current.events.filter(event => event.id !== evt.id)],
-      alertEvents: isCameraAlert(captured)
+      // A priority scenario belongs to Camera alerts only. Every other
+      // detection belongs to Event history only.
+      events: alert
+        ? current.events.filter(event => event.id !== evt.id)
+        : [captured, ...current.events.filter(event => event.id !== evt.id)],
+      alertEvents: alert
         ? [captured, ...current.alertEvents.filter(event => event.id !== evt.id)]
-        : current.alertEvents,
+        : current.alertEvents.filter(event => event.id !== evt.id),
     });
   }, [commitHistory]);
 
