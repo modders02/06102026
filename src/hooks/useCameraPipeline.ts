@@ -29,6 +29,7 @@ import {
   type FireSpeechSignal,
 } from '@/lib/fireFusion';
 import {
+  DISTRESS_FACE_FRESHNESS_MS,
   DISTRESS_FACE_MIN_CONFIDENCE,
   MULTIMODAL_FUSION_WINDOW_MS,
   fuseDistressSignals,
@@ -50,8 +51,6 @@ const TRANSCRIPT_CLEAR_MS = 5000;
 const AUDIO_POLL_TICK_MS = 350;
 const AUDIO_POLL_BACKGROUND_MIN_MS = 700;
 const SNAPSHOT_INTERVAL_MS = 1500;
-/** A face older than this is not current enough to validate newly accepted speech. */
-const DISTRESS_FACE_FRESHNESS_MS = 2500;
 const PLAYBACK_STALL_MS = 8000;
 
 type FrameCapture = { grabFrame: () => Promise<ImageBitmap> };
