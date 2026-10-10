@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { deriveValidationView } from '@/components/dashboard/ValidationLayer';
 import type { CameraRuntime } from '@/types/multicam';
 
-const runtime = (patch: Partial<CameraRuntime> = {}) => ({
+const runtime = (alertValidation: CameraRuntime['alertValidation']): CameraRuntime => ({
   cameraId: 'slot-1',
   status: 'online',
   error: null,
@@ -25,39 +25,20 @@ const runtime = (patch: Partial<CameraRuntime> = {}) => ({
   lastDetectionAt: null,
   detections: 0,
   alerts: 0,
-  ...patch,
-}) as CameraRuntime;
+  alertValidation,
+});
 
 describe('validation layer decision consistency', () => {
   it('shows ACCEPTED from the exact final alert-validation outcome', () => {
     const view = deriveValidationView(runtime({
-      alertValidation: {
-        status: 'accepted',
-        keyword: 'help',
-        confidence: 0.96,
-        emotion: 'Frightened',
-        emotionConfidence: 0.91,
-        reason: 'Frightened + "help" matched within the fusion window.',
-        evaluatedAt: '2026-10-10T10:00:00.000Z',
-        sourceDecision: 'accepted',
-      },
-      // A stale diagnostic candidate must not override the actual alert result.
-      audio: {
-        thread_running: true,
-        connected: true,
-        chunks_received: 1,
-        bytes_received: 1,
-        last_chunk_at: null,
-        last_transcription_at: null,
-        last_transcript: '',
-        error: null,
-        ffmpeg_error: null,
-        custom_kws: {
-          last_candidate: 'help',
-          last_candidate_confidence: 0.5,
-          last_decision: 'below_threshold',
-        },
-      },
+      status: 'accepted',
+      keyword: 'help',
+      confidence: 0.96,
+      emotion: 'Frightened',
+      emotionConfidence: 0.91,
+      reason: 'Frightened + "help" matched within the fusion window.',
+      evaluatedAt: '2026-10-11T00:00:00Z',
+      sourceDecision: 'accepted',
     }));
 
     expect(view).toMatchObject({
@@ -65,58 +46,40 @@ describe('validation layer decision consistency', () => {
       state: 'validated',
       keyword: 'help',
       confidence: 0.96,
+      crossCheck: 'Frightened + "help" matched within the fusion window.',
     });
-    expect(view.crossCheck).toContain('Frightened');
   });
 
-  it('shows REJECTED with the backend KWS rejection reason', () => {
+  it('shows REJECTED with the exact rejection reason', () => {
     const view = deriveValidationView(runtime({
-      audio: {
-        thread_running: true,
-        connected: true,
-        chunks_received: 1,
-        bytes_received: 1,
-        last_chunk_at: null,
-        last_transcription_at: null,
-        last_transcript: '',
-        error: null,
-        ffmpeg_error: null,
-        custom_kws: {
-          last_candidate: 'help',
-          last_candidate_confidence: 0.61,
-          last_decision: 'below_threshold',
-        },
-      },
+      status: 'rejected',
+      keyword: 'help',
+      confidence: 0.61,
+      emotion: 'Happy',
+      emotionConfidence: 0.95,
+      reason: 'Current camera expression is Happy, not Angry/Frightened.',
+      evaluatedAt: '2026-10-11T00:00:00Z',
+      sourceDecision: 'below_threshold',
     }));
 
     expect(view).toMatchObject({
       decision: 'REJECTED',
       state: 'rejected',
       keyword: 'help',
+      crossCheck: 'Current camera expression is Happy, not Angry/Frightened.',
     });
-    expect(view.crossCheck).toMatch(/below the trained acceptance threshold/i);
   });
 
-  it('keeps accepted help pending until required facial evidence exists', () => {
+  it('keeps accepted speech PENDING while required camera evidence is still possible', () => {
     const view = deriveValidationView(runtime({
-      audio: {
-        thread_running: true,
-        connected: true,
-        chunks_received: 1,
-        bytes_received: 1,
-        last_chunk_at: null,
-        last_transcription_at: null,
-        last_transcript: 'help',
-        error: null,
-        ffmpeg_error: null,
-        custom_kws: {
-          last_candidate: 'help',
-          last_candidate_confidence: 0.95,
-          last_keyword: 'help',
-          last_confidence: 0.95,
-          last_decision: 'accepted',
-        },
-      },
+      status: 'pending',
+      keyword: 'help',
+      confidence: 0.94,
+      emotion: '',
+      emotionConfidence: 0,
+      reason: 'Accepted "help"; waiting for Angry/Frightened facial evidence.',
+      evaluatedAt: '2026-10-11T00:00:00Z',
+      sourceDecision: 'accepted',
     }));
 
     expect(view).toMatchObject({
@@ -127,33 +90,23 @@ describe('validation layer decision consistency', () => {
     expect(view.crossCheck).toMatch(/waiting for Angry\/Frightened/i);
   });
 
-  it('rejects accepted keywords that are not configured for facial-distress fusion', () => {
-    const view = deriveValidationView(runtime({
-      audio: {
-        thread_running: true,
-        connected: true,
-        chunks_received: 1,
-        bytes_received: 1,
-        last_chunk_at: null,
-        last_transcription_at: null,
-        last_transcript: 'emergency',
-        error: null,
-        ffmpeg_error: null,
-        custom_kws: {
-          last_candidate: 'emergency',
-          last_candidate_confidence: 0.97,
-          last_keyword: 'emergency',
-          last_confidence: 0.97,
-          last_decision: 'accepted',
-        },
-      },
-    }));
+  it('never reconstructs ACCEPTED from unrelated live fields', () => {
+    const value = runtime({
+      status: 'rejected',
+      keyword: 'help',
+      confidence: 0.99,
+      emotion: 'Happy',
+      emotionConfidence: 0.99,
+      reason: 'Validation rejected.',
+      evaluatedAt: '2026-10-11T00:00:00Z',
+      sourceDecision: 'accepted',
+    });
+    value.faceDistress = { detected: true, label: 'Angry', confidence: 0.99 };
+    value.audioDistress = { detected: true, keyword: 'help', confidence: 0.99, transcript: 'help' };
 
-    expect(view).toMatchObject({
+    expect(deriveValidationView(value)).toMatchObject({
       decision: 'REJECTED',
       state: 'rejected',
-      keyword: 'emergency',
     });
-    expect(view.crossCheck).toMatch(/not configured/i);
   });
 });
