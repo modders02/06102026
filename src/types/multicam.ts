@@ -68,6 +68,8 @@ export interface DetectionEvent {
   type: DetectionType;
   label: string;
   confidence: number;    // 0..1
+  /** True only when the event passed the priority-scenario alert gate. */
+  priorityScenario?: boolean;
   timestamp: string;     // ISO
   snapshot?: string;     // data URL
   /** Object URL of the 10-second emergency clip (this session only). */
