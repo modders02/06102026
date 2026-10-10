@@ -289,20 +289,22 @@ export default function Index() {
     const index = Number(event.cameraId.replace('slot-', '')) || 1;
     setAlerts(previous => [{ id, snapshotId: alreadyStored ? undefined : id, timestamp: new Date(event.timestamp), message: `${event.cameraName}: ${event.label}`, severity, cameraId: index }, ...previous].slice(0, CAMERA_HISTORY_LIMIT));
 
-    announce(`Alert. ${event.cameraName}. ${event.label}`, true);
-    void logAlert(event.type, `${event.cameraName}: ${event.label}`);
-    if (householdId) void sendAlertEmail({
-      householdId, alertId: id, alertType: event.type, message: `${event.cameraName}: ${event.label}`,
-      severity, cameraLabel: event.cameraName, occurredAt: event.timestamp, confidence: event.confidence,
-      trigger: event.label, details: { Location: event.location || undefined, PriorityScenario: priority.reason || undefined },
-      snapshotDataUrl: event.snapshot,
-    }).then(result => {
-      if (result.reason === 'error') {
-        toast.error('Alert email could not be sent. Open Household → Notifications and send a test email to check the setup.', { id: 'camera-alert-email' });
-      } else if (result.reason === 'no_recipients') {
-        toast.error('Add an email recipient in Household → Notifications to receive alerts.', { id: 'camera-alert-email' });
-      }
-    });
+    if (severity === 'high' || severity === 'critical') {
+      announce(`Alert. ${event.cameraName}. ${event.label}`, true);
+      void logAlert(event.type, `${event.cameraName}: ${event.label}`);
+      if (householdId) void sendAlertEmail({
+        householdId, alertId: id, alertType: event.type, message: `${event.cameraName}: ${event.label}`,
+        severity, cameraLabel: event.cameraName, occurredAt: event.timestamp, confidence: event.confidence,
+        trigger: event.label, details: { Location: event.location || undefined, PriorityScenario: priority.reason || undefined },
+        snapshotDataUrl: event.snapshot,
+      }).then(result => {
+        if (result.reason === 'error') {
+          toast.error('Alert email could not be sent. Open Household → Notifications and send a test email to check the setup.', { id: 'camera-alert-email' });
+        } else if (result.reason === 'no_recipients') {
+          toast.error('Add an email recipient in Household → Notifications to receive alerts.', { id: 'camera-alert-email' });
+        }
+      });
+    }
     if (priority.emergency) setShowEmergency(true);
   }, [storeEvent, logAlert, householdId, settings.alertCooldownMs]);
 
