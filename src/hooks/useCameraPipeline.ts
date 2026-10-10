@@ -810,6 +810,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     if (!camera.enabled || playbackEnabled) return;
     let stopped = false;
     let inFlight = false;
+    let validationKickTimer: number | undefined;
     let request: AbortController | null = null;
     const canvas = document.createElement('canvas');
     const Capture = (window as Window & { ImageCapture?: ImageCaptureConstructor }).ImageCapture;
@@ -878,12 +879,29 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         }
       }
     };
-    snapshotAnalysisKickRef.current = () => { void tick(); };
+    snapshotAnalysisKickRef.current = () => {
+      // A speech-triggered validation frame must not be lost merely because
+      // object/face inference is still reading the previous snapshot. Retry
+      // briefly until both capture and analysis are free, then take a fresh
+      // frame. Normal preview capture remains independent of slow inference.
+      const run = () => {
+        if (stopped) return;
+        if (inFlight || busyRef.current) {
+          validationKickTimer = window.setTimeout(run, 50);
+          return;
+        }
+        validationKickTimer = undefined;
+        void tick();
+      };
+      if (validationKickTimer) window.clearTimeout(validationKickTimer);
+      run();
+    };
     void tick();
     const id = window.setInterval(tick, SNAPSHOT_INTERVAL_MS);
     return () => {
       stopped = true;
       snapshotAnalysisKickRef.current = null;
+      if (validationKickTimer) window.clearTimeout(validationKickTimer);
       window.clearInterval(id);
       request?.abort();
     };
