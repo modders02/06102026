@@ -79,9 +79,9 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   face: [
     {
       selector: '#tour-face-distress', placement: 'top', title: 'Facial distress',
-      body: 'TinyFaceDetector finds the main face. The model\'s surprised/shock-like expression is presented as Frightened. Facial expressions never alarm by themselves: Angry or Frightened can verify help, emergency, or screaming within the fusion window.',
+      body: 'TinyFaceDetector finds the main face. Facial expressions never alarm by themselves: only Angry or Frightened can combine with an accepted "help" keyword inside the fusion window.',
       implementation: 'src/hooks/useFaceDistress.ts',
-      code: `frightened = fearful || surprised;\nalert = fuse(angryOrFrightened, helpOrEmergencyOrScream, 10_000);`,
+      code: `alert = fuse(angryOrFrightened, acceptedHelp, 10_000);`,
     },
   ],
   speech: [
@@ -93,7 +93,7 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
     },
     {
       selector: '#tour-live-transcription', placement: 'bottom', title: 'Safety phrase matching',
-      body: 'Only accepted trained safety keywords are published. “Help” and “emergency” require a recent Angry/Frightened face, while “fire” requires a recent visual fire candidate.',
+      body: 'Only accepted trained safety keywords are published. “Help” requires a recent Angry/Frightened face; “fire” uses its separate visual-fire verification path.',
       implementation: 'src/lib/safetyLexicon.ts',
       code: `if (angryOrFrightened && hasHelpOrEmergency && within10Seconds) raiseVerifiedAlert();`,
     },
@@ -354,9 +354,8 @@ export default function Index() {
     if (!recognizedSpeech) return;
 
     // Always check accepted speech against the household Supabase wake_words
-    // table first. help/emergency/fire remain reserved from standalone alarms;
-    // their database notification is logged only after face/fire verification
-    // in handleEvent above.
+    // table first. "help" is reserved for Angry/Frightened fusion and "fire"
+    // for visual-fire verification. Other accepted words are history-only.
     const match = checkForWakeWord(recognizedSpeech);
     if (
       makeDistressSpeechSignal(recognizedSpeech)
@@ -369,13 +368,18 @@ export default function Index() {
     if (previous?.phrase === match.phrase && now - previous.at < 15000) return;
     householdMatches.current.set(index, { phrase: match.phrase, at: now });
     const slot = slots[index - 1];
-    raiseAlert({ cameraId: `slot-${index}`, cameraName: slot.name, location: slot.ip,
-      type: 'audio-distress', label: `Wake word: "${match.phrase}"`, confidence: 1,
-      priorityScenario: match.isEmergency,
+    storeEvent({
+      cameraId: `slot-${index}`,
+      cameraName: slot.name,
+      location: slot.ip,
+      type: 'audio-distress',
+      label: `Wake word: "${match.phrase}"`,
+      confidence: 1,
+      priorityScenario: false,
       timestamp: new Date(now).toISOString(),
-    }, match.isEmergency ? 'critical' : 'high');
+    });
     void logNotification(match.wakeWordId, match.phrase, match.actionType, match.isEmergency);
-  }, [checkForWakeWord, slots, raiseAlert, logNotification]);
+  }, [checkForWakeWord, slots, storeEvent, logNotification]);
 
   // A local webcam uses the existing local microphone. CCTV speech comes only from its bridge.
   useEffect(() => {
@@ -440,14 +444,18 @@ export default function Index() {
     const safety = matchWakeWord(text);
     if (!household.matched && !safety.matched) return;
     const phrase = household.matched ? household.phrase : safety.phrase;
-    const emergency = household.matched ? household.isEmergency : safety.severity === 'critical';
     const slot = slots[0];
-    raiseAlert({ cameraId: 'slot-1', cameraName: slot.name, location: '', type: 'audio-distress',
-      label: `Wake word: "${phrase}"`, confidence: household.matched ? 1 : safety.confidence,
-      priorityScenario: emergency,
+    storeEvent({
+      cameraId: 'slot-1',
+      cameraName: slot.name,
+      location: '',
+      type: 'audio-distress',
+      label: `Wake word: "${phrase}"`,
+      confidence: household.matched ? 1 : safety.confidence,
+      priorityScenario: false,
       timestamp: new Date().toISOString(),
-    }, emergency ? 'critical' : 'high');
-  }, [running, localCameras.length, connected.length, speech.transcript, speech.interimTranscript, checkForWakeWord, slots, raiseAlert, runtimes]);
+    });
+  }, [running, localCameras.length, connected.length, speech.transcript, speech.interimTranscript, checkForWakeWord, slots, raiseAlert, storeEvent, runtimes]);
 
   useEffect(() => {
     if (!running || !localCameras.length || connected.length) return;
