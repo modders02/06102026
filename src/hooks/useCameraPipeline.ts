@@ -1133,7 +1133,22 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             // as "help" after a transcription error.
             const keyword = (e.keyword || '').trim();
             const confidence = e.confidence || 0;
-            if (!keyword || confidence < settings.audioThreshold) continue;
+            if (!keyword) continue;
+            if (confidence < settings.audioThreshold) {
+              patch({
+                alertValidation: {
+                  status: 'rejected',
+                  keyword,
+                  confidence,
+                  emotion: runtimeRef.current.faceDistress.label,
+                  emotionConfidence: runtimeRef.current.faceDistress.confidence,
+                  reason: `Accepted KWS event was below the configured audio threshold (${(settings.audioThreshold * 100).toFixed(0)}%).`,
+                  evaluatedAt: e.timestamp,
+                  sourceDecision: 'below_frontend_threshold',
+                },
+              });
+              continue;
+            }
             patch({
               audioDistress: {
                 detected: true,
@@ -1235,7 +1250,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                       confidence: trackedSpeech.confidence,
                       emotion: faceState.label,
                       emotionConfidence: faceState.confidence,
-                      reason: 'Accepted "help" but no Angry/Frightened face was detected within the fusion window.',
+                      reason: faceState.label
+                        ? `Accepted "help", but current facial evidence (${faceState.label}, ${(faceState.confidence * 100).toFixed(0)}%) did not satisfy Angry/Frightened within the fusion window.`
+                        : 'Accepted "help" but no usable Angry/Frightened face was detected within the fusion window.',
                       evaluatedAt: new Date().toISOString(),
                       sourceDecision: 'accepted',
                     },
