@@ -12,10 +12,14 @@ import {
 describe('multimodal distress fusion', () => {
   it.each([
     ['angry', 'Angry'],
+    ['anger', 'Angry'],
     ['fearful', 'Frightened'],
+    ['fear', 'Frightened'],
     ['frightened', 'Frightened'],
     ['surprised', 'Frightened'],
+    ['surprise', 'Frightened'],
     ['shock', 'Frightened'],
+    ['shocked', 'Frightened'],
   ] as const)('accepts a reliable %s face', (expression, label) => {
     expect(makeDistressFaceSignal(expression, 0.9, 1000)).toEqual({
       label,
@@ -44,9 +48,10 @@ describe('multimodal distress fusion', () => {
   });
 
   it('rejects every non-help distress phrase for fusion', () => {
-    expect(makeDistressSpeechSignal('emergency', 1, 2000)).toBeNull();
+    for (const phrase of ['fire', 'emergency', 'danger', 'intruder', 'police', 'ambulance', 'stop']) {
+      expect(makeDistressSpeechSignal(phrase, 1, 2000)).toBeNull();
+    }
     expect(makeDistressSpeechSignal('call the police', 1, 2000)).toBeNull();
-    expect(makeDistressSpeechSignal('fire in the kitchen', 1, 2000)).toBeNull();
     expect(makeDistressSpeechSignal('tulong', 1, 2000)).toBeNull();
   });
 
