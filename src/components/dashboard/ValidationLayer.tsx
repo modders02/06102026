@@ -21,45 +21,110 @@ const normalizeKeyword = (value?: string | null) =>
   (value || '').replace(/_/g, ' ').trim();
 
 export function deriveValidationView(runtime: CameraRuntime | null): ValidationView {
+  const finalValidation = runtime?.alertValidation;
+  if (finalValidation) {
+    const state: ValidationViewState = finalValidation.status === 'accepted'
+      ? 'validated'
+      : finalValidation.status;
+    return {
+      keyword: finalValidation.keyword,
+      confidence: finalValidation.confidence,
+      decision: finalValidation.status.toUpperCase(),
+      state,
+      crossCheck: finalValidation.reason,
+    };
+  }
+
+  // Backward-compatible fallback for sessions created before alertValidation
+  // was added. New sessions are driven by the pipeline's actual fusion result.
   const kws = runtime?.audio?.custom_kws;
   const latestCandidate = normalizeKeyword(kws?.last_candidate);
-  const acceptedKeyword = normalizeKeyword(runtime?.audioDistress.keyword);
-  const keyword = latestCandidate || acceptedKeyword;
+  const acceptedKeyword = normalizeKeyword(kws?.last_keyword);
+  const decision = kws?.last_decision || '';
 
-  const confidence = latestCandidate
-    ? (kws?.last_candidate_confidence ?? 0)
-    : (runtime?.audioDistress.confidence ?? 0);
+  if (!latestCandidate && !acceptedKeyword) {
+    return {
+      keyword: '',
+      confidence: 0,
+      decision: 'WAITING',
+      state: 'waiting',
+      crossCheck: 'Waiting for trained keyword and camera evidence.',
+    };
+  }
 
-  const decision = kws?.last_decision || (acceptedKeyword ? 'accepted' : '');
-  const speechAccepted = decision === 'accepted';
+  if (decision && decision !== 'accepted') {
+    const reasons: Record<string, string> = {
+      negative_not_ready: 'UNKNOWN/non-keyword validation is not ready.',
+      duration_mismatch: 'Keyword duration does not match the trained examples.',
+      below_threshold: 'Keyword confidence is below the trained acceptance threshold.',
+      too_close_to_unknown: 'Candidate is too similar to UNKNOWN/non-keyword speech.',
+      insufficient_margin: 'Candidate is too close to another trained keyword.',
+      no_ready_candidate: 'No trained keyword candidate is ready.',
+    };
+    return {
+      keyword: latestCandidate,
+      confidence: kws?.last_candidate_confidence ?? 0,
+      decision: 'REJECTED',
+      state: 'rejected',
+      crossCheck: reasons[decision] || `Keyword candidate rejected: ${decision}.`,
+    };
+  }
 
+  const keyword = acceptedKeyword || latestCandidate;
+  const confidence = kws?.last_confidence ?? kws?.last_candidate_confidence ?? 0;
   const normalized = keyword.toLowerCase();
-  const isHelp = normalized === 'help';
-  const isFire = normalized === 'fire';
-  const hasFacialContext = Boolean(runtime?.faceDistress.detected);
+  const face = runtime?.faceDistress;
+  const hasDistressFace = Boolean(
+    face?.detected
+    && (face.label === 'Angry' || face.label === 'Frightened'),
+  );
   const hasVisualHazard = Boolean(runtime?.fire.detected || runtime?.smoke.detected);
-  const distressValidated = speechAccepted && isHelp && hasFacialContext;
-  const fireValidated = speechAccepted && isFire && hasVisualHazard;
 
-  const state: ValidationViewState = !keyword
-    ? 'waiting'
-    : decision && !speechAccepted
-      ? 'rejected'
-      : distressValidated || fireValidated
-        ? 'validated'
-        : 'pending';
+  if (normalized === 'help') {
+    if (hasDistressFace) {
+      return {
+        keyword,
+        confidence,
+        decision: 'ACCEPTED',
+        state: 'validated',
+        crossCheck: `Accepted help + ${face?.label || 'distress face'}.`,
+      };
+    }
+    return {
+      keyword,
+      confidence,
+      decision: 'PENDING',
+      state: 'pending',
+      crossCheck: 'Help accepted; waiting for Angry/Frightened facial evidence.',
+    };
+  }
 
-  const crossCheck = !keyword
-    ? 'waiting'
-    : fireValidated
-      ? 'fire + visual hazard'
-      : distressValidated
-        ? 'help + Angry/Frightened'
-        : speechAccepted
-          ? 'accepted keyword; no required context'
-          : 'speech not accepted';
+  if (normalized === 'fire') {
+    if (hasVisualHazard) {
+      return {
+        keyword,
+        confidence,
+        decision: 'ACCEPTED',
+        state: 'validated',
+        crossCheck: 'Accepted fire + current visual fire/smoke evidence.',
+      };
+    }
+    return {
+      keyword,
+      confidence,
+      decision: 'PENDING',
+      state: 'pending',
+      crossCheck: 'Fire accepted; waiting for current visual hazard evidence.',
+    };
+  }
 
-  return { keyword, confidence, decision, state, crossCheck };
+  return {
+    keyword,
+    confidence,
+    decision: 'REJECTED',
+    state: 'rejected',
+    crossCheck: `Accepted "${keyword}", but it is not configured for multimodal alert fusion.`,
+  };
 }
 
 export default function ValidationLayer({ cameraId, cameraName }: ValidationLayerProps) {
@@ -75,12 +140,12 @@ export default function ValidationLayer({ cameraId, cameraName }: ValidationLaye
         : Clock3;
 
   const statusLabel = validation.state === 'validated'
-    ? 'Validated'
+    ? 'ACCEPTED'
     : validation.state === 'rejected'
-      ? 'Rejected'
+      ? 'REJECTED'
       : validation.state === 'pending'
-        ? 'Pending'
-        : 'Waiting';
+        ? 'PENDING'
+        : 'WAITING';
 
   return (
     <section
@@ -111,7 +176,7 @@ export default function ValidationLayer({ cameraId, cameraName }: ValidationLaye
 
           <span className="text-muted-foreground">Decision:</span>
           <span className="max-w-44 text-right font-mono font-semibold">
-            {validation.decision || 'waiting'}
+            {validation.decision || 'WAITING'}
           </span>
 
           <span className="text-muted-foreground">Cross-check:</span>
@@ -136,7 +201,7 @@ export default function ValidationLayer({ cameraId, cameraName }: ValidationLaye
         </div>
 
         <p className="text-muted-foreground">
-          Distress alerts require accepted "help" plus Angry/Frightened facial evidence.
+          Validation shows the same final decision used by the alert pipeline.
         </p>
       </div>
     </section>
