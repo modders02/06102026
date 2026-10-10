@@ -198,6 +198,8 @@ describe('informational emotion history', () => {
   it.each([
     ['Happy', 0.96],
     ['Sad', 0.91],
+    ['Angry', 0.94],
+    ['Frightened', 0.93],
     ['Shock', 0.93],
     ['Neutral', 0.95],
     ['Disgust', 0.90],
