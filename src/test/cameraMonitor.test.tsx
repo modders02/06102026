@@ -623,6 +623,107 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
   });
 
+  it('moves accepted help from PENDING to REJECTED when facial evidence never arrives', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
+      status: 'pending',
+      keyword: 'help',
+    });
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
+      status: 'rejected',
+      keyword: 'help',
+    });
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.reason)
+      .toMatch(/no Angry\/Frightened face/i);
+  });
+
+  it('shows a rejected KWS candidate reason without creating an alert event', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({
+      events: [],
+      status: {
+        thread_running: true,
+        connected: true,
+        chunks_received: 1,
+        bytes_received: 32000,
+        last_chunk_at: '2026-10-02T00:00:01Z',
+        last_transcription_at: null,
+        last_transcript: '',
+        error: null,
+        ffmpeg_error: null,
+        custom_kws: {
+          last_segment_at: '2026-10-02T00:00:01Z',
+          last_candidate: 'help',
+          last_candidate_confidence: 0.61,
+          last_decision: 'below_threshold',
+        },
+      },
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
+      status: 'rejected',
+      keyword: 'help',
+      sourceDecision: 'below_threshold',
+    });
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.reason)
+      .toMatch(/below the trained acceptance threshold/i);
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
+  });
+
+  it('allows consecutive valid help triggers without duplicating one trigger', async () => {
+    const firstHelp = {
+      timestamp: '2026-10-02T00:00:01Z',
+      transcript: 'help',
+      keyword: 'help',
+      confidence: 0.96,
+    };
+    const secondHelp = {
+      timestamp: '2026-10-02T00:00:02Z',
+      transcript: 'help',
+      keyword: 'help',
+      confidence: 0.97,
+    };
+    mocked.getAudioEvents
+      .mockResolvedValueOnce({ events: [firstHelp], status: null })
+      .mockResolvedValueOnce({ events: [], status: null })
+      .mockResolvedValueOnce({ events: [secondHelp], status: null });
+    mocked.analyzeFace.mockImplementation(async () => {
+      mocked.distress = {
+        hasFace: true,
+        expression: 'angry',
+        probability: 0.95,
+        distressScore: 90,
+        distressLevel: 'severe',
+      };
+    });
+
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+
+    const distressCalls = () => onEvent.mock.calls
+      .map(([event]) => event)
+      .filter(event => event.type === 'multimodal-distress');
+    expect(distressCalls()).toHaveLength(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(distressCalls()).toHaveLength(2);
+    expect(distressCalls()[0].label).toBe('Verified distress: Angry + "help"');
+    expect(distressCalls()[1].label).toBe('Verified distress: Angry + "help"');
+  });
+
   it('does not alarm on fire without a visual fire candidate', async () => {
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
