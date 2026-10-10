@@ -7,13 +7,22 @@ export interface PriorityScenarioDecision {
   reason: string | null;
 }
 
-type PriorityEventInput = Pick<DetectionEvent, 'type' | 'label'> & {
+type PriorityEventInput = Pick<DetectionEvent, 'type' | 'label' | 'alertValidation'> & {
   priorityScenario?: boolean;
 };
 
 function isValidatedSpokenDistress(event: PriorityEventInput): boolean {
   if (event.type !== 'multimodal-distress') return false;
-  return /^verified distress:\s*(?:Angry|Frightened)\s*\+\s*"help"\s*$/i.test(event.label.trim());
+  const match = /^verified distress:\s*(Angry|Frightened)\s*\+\s*"help"\s*$/i.exec(event.label.trim());
+  if (!match) return false;
+  const validation = event.alertValidation;
+  if (validation?.status !== 'accepted') return false;
+  return validation.keyword.trim().toLowerCase() === 'help'
+    && validation.emotion.trim().toLowerCase() === match[1].toLowerCase();
+}
+
+function hasAcceptedValidation(event: PriorityEventInput): boolean {
+  return event.alertValidation?.status === 'accepted';
 }
 
 function shouldOpenEmergencyPopup(
@@ -66,7 +75,14 @@ export function classifyPriorityScenario(
     return { priority: false, emergency: false, reason: null };
   }
 
+  if (event.alertValidation?.status === 'rejected') {
+    return { priority: false, emergency: false, reason: null };
+  }
+
   if (event.type === 'fire' || event.type === 'smoke') {
+    if (!hasAcceptedValidation(event)) {
+      return { priority: false, emergency: false, reason: null };
+    }
     return {
       priority: true,
       emergency: shouldOpenEmergencyPopup(event, severity),
@@ -85,7 +101,7 @@ export function classifyPriorityScenario(
 
   if (event.type === 'motion-anomaly' && /person collapse/i.test(event.label)) {
     return {
-      priority: true,
+      priority: hasAcceptedValidation(event),
       emergency: false,
       reason: 'possible person collapse',
     };
@@ -93,7 +109,7 @@ export function classifyPriorityScenario(
 
   if (event.type === 'attention-alert' && /priority object/i.test(event.label)) {
     return {
-      priority: true,
+      priority: hasAcceptedValidation(event),
       emergency: false,
       reason: 'configured priority object',
     };
@@ -116,11 +132,11 @@ export function classifyPriorityScenario(
 /** Persisted Camera alerts must carry or intrinsically satisfy priority policy. */
 export function isPriorityCameraAlert(event: PriorityEventInput): boolean {
   if (event.priorityScenario === false) return false;
+  if (event.alertValidation?.status !== 'accepted') return false;
   // Never trust legacy promotion flags for raw audio or multimodal labels:
   // re-validate those against the current strict alert contract.
-  if (event.type === 'audio-distress') return false;
+  if (event.type === 'audio-distress' || event.type === 'face-distress') return false;
   if (event.type === 'multimodal-distress') return isValidatedSpokenDistress(event);
-  if (event.priorityScenario === true) return true;
   return classifyPriorityScenario(event).priority;
 }
 
