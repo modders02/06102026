@@ -177,6 +177,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const lastAudioPollStartedAtRef = useRef(0);
   const face = useFaceDistress(camera.enabled && camera.aiEnabled);
   const analyzeFace = face.analyze;
+  const cameraAiEnabledRef = useRef(camera.aiEnabled);
+  cameraAiEnabledRef.current = camera.aiEnabled;
+  const faceErrorRef = useRef<string | null>(face.error);
+  faceErrorRef.current = face.error;
   const streamUrl = hlsUrlFor(camera, settings);
 
   // Visible camera cards share this player only while the live page is open.
@@ -222,6 +226,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       fireStateRef.current = createFireState();
       motionStateRef.current = createMotionAnomalyState();
       recentDistressFaceRef.current = null;
+      const pendingSpeech = recentDistressSpeechRef.current;
       recentDistressSpeechRef.current = null;
       if (distressValidationTimerRef.current) {
         window.clearTimeout(distressValidationTimerRef.current);
@@ -229,15 +234,58 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       }
       recentFireVisualRef.current = null;
       recentFireSpeechRef.current = null;
+      const currentValidation = runtimeRef.current.alertValidation;
       patch({
         objects: [], humanCount: 0, saliencyScore: 0, attentionScore: 0,
         fire: { detected: false, candidate: false, confidence: 0 },
         smoke: { detected: false, confidence: 0 },
         faceDistress: { detected: false, label: '', confidence: 0 },
+        ...(pendingSpeech || (currentValidation?.status === 'pending' && currentValidation.keyword === 'help')
+          ? {
+              alertValidation: {
+                status: 'rejected' as const,
+                keyword: pendingSpeech?.keyword || currentValidation?.keyword || 'help',
+                confidence: pendingSpeech?.confidence ?? currentValidation?.confidence ?? 0,
+                emotion: currentValidation?.emotion || '',
+                emotionConfidence: currentValidation?.emotionConfidence ?? 0,
+                reason: !camera.enabled
+                  ? 'Accepted "help", but the camera is unavailable for facial validation.'
+                  : 'Accepted "help", but camera AI was disabled before facial validation completed.',
+                evaluatedAt: new Date().toISOString(),
+                sourceDecision: 'accepted',
+              },
+            }
+          : {}),
       });
     }
     return () => { analysisRevisionRef.current += 1; };
   }, [camera.enabled, camera.aiEnabled, camera.id, sourceStream, playbackEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.saliencyMode, settings.attentionThreshold, settings.priorityObjects, patch]);
+
+  // If facial inference fails while accepted help is waiting, fail closed with
+  // the real reason instead of leaving Validation stuck on PENDING.
+  useEffect(() => {
+    if (!face.error) return;
+    const pending = recentDistressSpeechRef.current;
+    const current = runtimeRef.current.alertValidation;
+    if (!pending && !(current?.status === 'pending' && current.keyword === 'help')) return;
+    if (distressValidationTimerRef.current) {
+      window.clearTimeout(distressValidationTimerRef.current);
+      distressValidationTimerRef.current = undefined;
+    }
+    recentDistressSpeechRef.current = null;
+    patch({
+      alertValidation: {
+        status: 'rejected',
+        keyword: pending?.keyword || current?.keyword || 'help',
+        confidence: pending?.confidence ?? current?.confidence ?? 0,
+        emotion: current?.emotion || '',
+        emotionConfidence: current?.emotionConfidence ?? 0,
+        reason: `Accepted "help", but facial-expression detection failed: ${face.error}`,
+        evaluatedAt: new Date().toISOString(),
+        sourceDecision: 'accepted',
+      },
+    });
+  }, [face.error, patch]);
 
   /** Newest accepted camera-audio event replaces the old one and clears after 5 s. */
   const showTranscript = useCallback((text: string) => {
@@ -1021,7 +1069,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
               recentDistressSpeechRef.current = distressSpeech;
 
               const currentFace = runtimeRef.current.faceDistress;
-              if (!camera.aiEnabled || face.error) {
+              const currentAiEnabled = cameraAiEnabledRef.current;
+              const currentFaceError = faceErrorRef.current;
+              if (!currentAiEnabled || currentFaceError) {
                 recentDistressSpeechRef.current = null;
                 patch({
                   alertValidation: {
@@ -1030,9 +1080,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                     confidence: distressSpeech.confidence,
                     emotion: currentFace.label,
                     emotionConfidence: currentFace.confidence,
-                    reason: !camera.aiEnabled
+                    reason: !currentAiEnabled
                       ? 'Accepted "help", but camera AI is disabled so facial validation is unavailable.'
-                      : `Accepted "help", but facial-expression detection failed: ${face.error}`,
+                      : `Accepted "help", but facial-expression detection failed: ${currentFaceError}`,
                     evaluatedAt: e.timestamp,
                     sourceDecision: 'accepted',
                   },
@@ -1137,7 +1187,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       }
       patch({ audioListening: false, audioDistress: { detected: false, keyword: '', confidence: 0, transcript: '' } });
     };
-  }, [camera.enabled, camera.id, camera.aiEnabled, sourceStream, settings.pythonServer, settings.audioThreshold, face.error, patch, emit, maybeEmitVerifiedDistress, maybeEmitVerifiedFire, showTranscript]);
+  }, [camera.enabled, camera.id, sourceStream, settings.pythonServer, settings.audioThreshold, patch, emit, maybeEmitVerifiedDistress, maybeEmitVerifiedFire, showTranscript]);
 
 
   const reconnect = useCallback(() => {
