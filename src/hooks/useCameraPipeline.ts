@@ -1100,6 +1100,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             const fireSpeech = makeFireSpeechSignal(sourceText, confidence, spokenAt);
             if (fireSpeech) {
               reservedForFusion = true;
+              // Store the accepted speech before requesting a fresh frame so a
+              // fast snapshot cannot finish before the evidence is visible.
+              recentFireSpeechRef.current = fireSpeech;
               patch({
                 alertValidation: {
                   status: 'pending',
@@ -1113,11 +1116,6 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                 },
               });
               snapshotAnalysisKickRef.current?.();
-              // Store speech only. Fire verification is performed by the next
-              // current visual analysis frame, after device-screen suppression.
-              // This prevents an older unsuppressed frame from combining with
-              // "fire" before a TV/phone is recognized on the next frame.
-              recentFireSpeechRef.current = fireSpeech;
             }
 
             const distressSpeech = makeDistressSpeechSignal(sourceText, confidence, spokenAt);
