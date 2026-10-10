@@ -2,7 +2,7 @@ export const MULTIMODAL_FUSION_WINDOW_MS = 10_000;
 export const DISTRESS_FACE_MIN_CONFIDENCE = 0.55;
 
 export type DistressFaceLabel = 'Angry' | 'Frightened';
-export type DistressKeyword = 'help' | 'emergency' | 'scream';
+export type DistressKeyword = 'help';
 
 export interface DistressFaceSignal {
   label: DistressFaceLabel;
@@ -27,9 +27,7 @@ export interface VerifiedMultimodalDistress {
 export function isMultimodalDistressExpression(expression: string | null | undefined) {
   const normalized = (expression ?? '').trim().toLowerCase();
   return normalized === 'angry' || normalized === 'anger'
-    || normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
-    || normalized === 'surprised' || normalized === 'surprise'
-    || normalized === 'shock' || normalized === 'shocked';
+    || normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened';
 }
 
 export function makeDistressFaceSignal(
@@ -44,8 +42,6 @@ export function makeDistressFaceSignal(
   }
   if (
     normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
-    || normalized === 'surprised' || normalized === 'surprise'
-    || normalized === 'shock' || normalized === 'shocked'
   ) {
     return { label: 'Frightened', confidence, at };
   }
@@ -53,8 +49,8 @@ export function makeDistressFaceSignal(
 }
 
 /**
- * English-only distress words reserved for face+speech verification.
- * Other English emergency words continue through the validated wake-word path.
+ * Distress fusion is intentionally strict: only the accepted word "help"
+ * can combine with an Angry/Frightened face to create a distress alert.
  */
 export function makeDistressSpeechSignal(
   transcript: string | null | undefined,
@@ -62,11 +58,8 @@ export function makeDistressSpeechSignal(
   at = Date.now(),
 ): DistressSpeechSignal | null {
   const text = (transcript ?? '').toLowerCase();
-  const keyword: DistressKeyword | null =
-    /(^|[^a-z])help([^a-z]|$)/i.test(text) ? 'help'
-      : /(^|[^a-z])emergency([^a-z]|$)/i.test(text) ? 'emergency'
-        : null;
-  if (!keyword) return null;
+  if (!/(^|[^a-z])help([^a-z]|$)/i.test(text)) return null;
+  const keyword: DistressKeyword = 'help';
   return {
     keyword,
     transcript: (transcript ?? '').trim(),
@@ -76,18 +69,13 @@ export function makeDistressSpeechSignal(
 }
 
 export function makeDistressSoundSignal(
-  sound: string | null | undefined,
-  confidence = 1,
-  at = Date.now(),
+  _sound: string | null | undefined,
+  _confidence = 1,
+  _at = Date.now(),
 ): DistressSpeechSignal | null {
-  const normalized = (sound ?? '').trim().toLowerCase();
-  if (normalized !== 'scream' && normalized !== 'screaming') return null;
-  return {
-    keyword: 'scream',
-    transcript: '',
-    confidence: Math.max(0, Math.min(1, Number.isFinite(confidence) ? confidence : 0)),
-    at,
-  };
+  // Sound-only cues such as screaming are diagnostic only. They do not satisfy
+  // the distress alert fusion rule without the accepted spoken word "help".
+  return null;
 }
 
 export function fuseDistressSignals(
@@ -98,10 +86,8 @@ export function fuseDistressSignals(
   if (!face || !speech || Math.abs(face.at - speech.at) > windowMs) return null;
 
   const compatible =
-    ((speech.keyword === 'help' || speech.keyword === 'emergency')
-      && (face.label === 'Angry' || face.label === 'Frightened'))
-    || (speech.keyword === 'scream'
-      && (face.label === 'Angry' || face.label === 'Frightened'));
+    speech.keyword === 'help'
+    && (face.label === 'Angry' || face.label === 'Frightened');
 
   if (!compatible) return null;
 
@@ -114,6 +100,5 @@ export function fuseDistressSignals(
 }
 
 export function multimodalDistressLabel(result: VerifiedMultimodalDistress) {
-  const cue = result.speech.keyword === 'scream' ? 'screaming' : `"${result.speech.keyword}"`;
-  return `Verified distress: ${result.face.label} + ${cue}`;
+  return `Verified distress: ${result.face.label} + "help"`;
 }
