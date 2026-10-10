@@ -787,7 +787,13 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         });
       }
       if (motionAnomaly.detected && validation.visualUsable) {
-        emit('motion-anomaly', motionAnomaly.label, motionAnomaly.confidence);
+        const motionReason = `Visual motion validation accepted: ${motionAnomaly.label}.`;
+        emit('motion-anomaly', motionAnomaly.label, motionAnomaly.confidence, {
+          status: 'accepted',
+          reason: motionReason,
+          keyword: '',
+          emotion: 'motion',
+        });
       }
 
       // Crossing the thesis attention threshold marks a scene as salient. The
@@ -812,7 +818,18 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
           const reason = alertReason === 'priority-object+loud-audio'
             ? 'priority object + loud audio'
             : alertReason === 'priority-object' ? 'priority object' : 'loud audio';
-          emit('attention-alert', `Attention alert: ${reason} (α=${attentionScore})`, attentionScore / 100);
+          const attentionReason = `Attention validation accepted: ${reason}; score α=${attentionScore} exceeded the configured threshold.`;
+          emit(
+            'attention-alert',
+            `Attention alert: ${reason} (α=${attentionScore})`,
+            attentionScore / 100,
+            {
+              status: 'accepted',
+              reason: attentionReason,
+              keyword: '',
+              emotion: reason,
+            },
+          );
         }
       }
     } catch {
