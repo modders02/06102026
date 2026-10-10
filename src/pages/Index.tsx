@@ -275,9 +275,14 @@ export default function Index() {
   const raiseAlert = useCallback((event: Omit<DetectionEvent, 'id'>, severity: Alert['severity'], alreadyStored = false) => {
     const key = `${event.cameraId}:${event.label}`;
     const now = Date.now();
-    const cooldownMs = settings.alertCooldownMs ?? 3000;
-    if (now - (alertCooldown.current.get(key) || 0) < cooldownMs) return;
-    alertCooldown.current.set(key, now);
+    // Multimodal distress is already de-duplicated by consuming its exact
+    // face+speech evidence pair. Do not suppress a separately valid consecutive
+    // trigger just because it has the same human-readable label.
+    const cooldownMs = event.type === 'multimodal-distress'
+      ? 0
+      : (settings.alertCooldownMs ?? 3000);
+    if (cooldownMs > 0 && now - (alertCooldown.current.get(key) || 0) < cooldownMs) return;
+    if (cooldownMs > 0) alertCooldown.current.set(key, now);
     const priority = classifyPriorityScenario(event, severity);
     const storedEvent = { ...event, priorityScenario: priority.priority };
     const id = alreadyStored ? crypto.randomUUID() : storeEvent(storedEvent);
