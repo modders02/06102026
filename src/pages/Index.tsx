@@ -46,12 +46,12 @@ import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import { getCameraSession } from '@/lib/cameraSessions';
 import { clipFileName, recordClip, saveClip } from '@/lib/clipRecorder';
 import { CAMERA_HISTORY_LIMIT } from '@/lib/cameraRegistry';
+import { classifyPriorityScenario } from '@/lib/priorityScenario';
 import type { CameraRuntime, DetectionEvent } from '@/types/multicam';
 import type { Alert, QualityMode } from '@/types/dashboard';
 import { DEFAULT_PRIORITY_OBJECTS } from '@/types/dashboard';
 
 const monitoringSession = { running: false };
-const EMERGENCY_TYPES = new Set<DetectionEvent['type']>(['fire', 'smoke', 'face-distress', 'audio-distress', 'multimodal-distress', 'motion-anomaly']);
 
 const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   vision: [
@@ -252,8 +252,9 @@ export default function Index() {
     const id = crypto.randomUUID();
     addEvent({ ...event, id });
     const video = getCameraSession(event.cameraId).video;
-    // Recording borrows an already-playing live feed; it never opens video on the dashboard.
-    if (!video || !EMERGENCY_TYPES.has(event.type) || recordingCameras.current.has(event.cameraId)) return id;
+    // Recording is reserved for priority scenarios. Ordinary detections remain
+    // in Event History without producing emergency clips.
+    if (!video || !event.priorityScenario || recordingCameras.current.has(event.cameraId)) return id;
     recordingCameras.current.add(event.cameraId);
     void recordClip(video).then(async blob => {
       if (!blob) {
@@ -277,26 +278,32 @@ export default function Index() {
     const cooldownMs = settings.alertCooldownMs ?? 3000;
     if (now - (alertCooldown.current.get(key) || 0) < cooldownMs) return;
     alertCooldown.current.set(key, now);
-    const id = alreadyStored ? crypto.randomUUID() : storeEvent(event);
+    const priority = classifyPriorityScenario(event, severity);
+    const storedEvent = { ...event, priorityScenario: priority.priority };
+    const id = alreadyStored ? crypto.randomUUID() : storeEvent(storedEvent);
+
+    // Non-priority events are still recorded in Event History, but they do not
+    // enter Camera alerts, announcements, email, or the emergency popup.
+    if (!priority.priority) return;
+
     const index = Number(event.cameraId.replace('slot-', '')) || 1;
     setAlerts(previous => [{ id, snapshotId: alreadyStored ? undefined : id, timestamp: new Date(event.timestamp), message: `${event.cameraName}: ${event.label}`, severity, cameraId: index }, ...previous].slice(0, CAMERA_HISTORY_LIMIT));
-    if (severity === 'high' || severity === 'critical') {
-      announce(`Alert. ${event.cameraName}. ${event.label}`, true);
-      void logAlert(event.type, `${event.cameraName}: ${event.label}`);
-      if (householdId) void sendAlertEmail({
-        householdId, alertId: id, alertType: event.type, message: `${event.cameraName}: ${event.label}`,
-        severity, cameraLabel: event.cameraName, occurredAt: event.timestamp, confidence: event.confidence,
-        trigger: event.label, details: { Location: event.location || undefined },
-        snapshotDataUrl: event.snapshot,
-      }).then(result => {
-        if (result.reason === 'error') {
-          toast.error('Alert email could not be sent. Open Household → Notifications and send a test email to check the setup.', { id: 'camera-alert-email' });
-        } else if (result.reason === 'no_recipients') {
-          toast.error('Add an email recipient in Household → Notifications to receive alerts.', { id: 'camera-alert-email' });
-        }
-      });
-      if (EMERGENCY_TYPES.has(event.type)) setShowEmergency(true);
-    }
+
+    announce(`Alert. ${event.cameraName}. ${event.label}`, true);
+    void logAlert(event.type, `${event.cameraName}: ${event.label}`);
+    if (householdId) void sendAlertEmail({
+      householdId, alertId: id, alertType: event.type, message: `${event.cameraName}: ${event.label}`,
+      severity, cameraLabel: event.cameraName, occurredAt: event.timestamp, confidence: event.confidence,
+      trigger: event.label, details: { Location: event.location || undefined, PriorityScenario: priority.reason || undefined },
+      snapshotDataUrl: event.snapshot,
+    }).then(result => {
+      if (result.reason === 'error') {
+        toast.error('Alert email could not be sent. Open Household → Notifications and send a test email to check the setup.', { id: 'camera-alert-email' });
+      } else if (result.reason === 'no_recipients') {
+        toast.error('Add an email recipient in Household → Notifications to receive alerts.', { id: 'camera-alert-email' });
+      }
+    });
+    if (priority.emergency) setShowEmergency(true);
   }, [storeEvent, logAlert, householdId, settings.alertCooldownMs]);
 
   const handleEvent = useCallback((event: Omit<DetectionEvent, 'id'>) => {
@@ -307,11 +314,15 @@ export default function Index() {
       return;
     }
 
+    // Only explicitly prioritized scenarios become Camera alerts. Generic
+    // motion, face-only distress and ordinary audio candidates remain history.
     const severity: Alert['severity'] = event.type === 'attention-alert'
       ? 'medium'
       : event.type === 'fire' || event.type === 'smoke' || event.type === 'multimodal-distress'
         ? 'critical'
-        : 'high';
+        : event.type === 'motion-anomaly' && /person collapse/i.test(event.label)
+          ? 'critical'
+          : 'high';
     raiseAlert(event, severity);
 
     // A verified face+voice/fire+voice event also passes through the household
@@ -358,6 +369,7 @@ export default function Index() {
     const slot = slots[index - 1];
     raiseAlert({ cameraId: `slot-${index}`, cameraName: slot.name, location: slot.ip,
       type: 'audio-distress', label: `Wake word: "${match.phrase}"`, confidence: 1,
+      priorityScenario: match.isEmergency,
       timestamp: new Date(now).toISOString(),
     }, match.isEmergency ? 'critical' : 'high');
     void logNotification(match.wakeWordId, match.phrase, match.actionType, match.isEmergency);
@@ -430,6 +442,7 @@ export default function Index() {
     const slot = slots[0];
     raiseAlert({ cameraId: 'slot-1', cameraName: slot.name, location: '', type: 'audio-distress',
       label: `Wake word: "${phrase}"`, confidence: household.matched ? 1 : safety.confidence,
+      priorityScenario: emergency,
       timestamp: new Date().toISOString(),
     }, emergency ? 'critical' : 'high');
   }, [running, localCameras.length, connected.length, speech.transcript, speech.interimTranscript, checkForWakeWord, slots, raiseAlert, runtimes]);
