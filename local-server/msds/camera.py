@@ -32,6 +32,8 @@ if AUDIO_ENGINE != "custom":
 else:
     WHISPER = None
 
+KWS_REPEAT_GUARD_SECONDS = 0.75
+
 NO_AUDIO_MESSAGE = (
     "This camera's RTSP stream does not expose a usable audio track, so there is "
     "nothing for the trained keyword detector to analyze. Enable the microphone in the camera's own settings "
