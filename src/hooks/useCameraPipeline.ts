@@ -16,7 +16,6 @@ import { createMotionAnomalyState, detectMotionAnomaly } from '@/lib/motionAnoma
 import { createFireState, detectFire } from '@/lib/fireDetection';
 import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/multiCamServer';
 import { useFaceDistress } from '@/hooks/useFaceDistress';
-import { matchWakeWord } from '@/lib/safetyLexicon';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
 import {
   SMOKE_REGION_MIN_RATIO,
@@ -827,10 +826,11 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             showTranscript(spoken);
           }
           for (const e of fresh) {
-            // Backend accepted keyword OR the English-only safety lexicon.
-            const safety = matchWakeWord(e.transcript || '');
-            const keyword = safety.matched ? safety.phrase : e.keyword;
-            const confidence = Math.max(e.confidence || 0, safety.matched ? safety.confidence : 0);
+            // The trained backend KWS decision is authoritative. Transcript text
+            // is display-only and must never manufacture a safety keyword such
+            // as "help" after a transcription error.
+            const keyword = (e.keyword || '').trim();
+            const confidence = e.confidence || 0;
             if (!keyword || confidence < settings.audioThreshold) continue;
             patch({
               audioDistress: {
@@ -847,7 +847,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             // Hold them briefly so either speech-first or face-first ordering can
             // verify the same-camera Angry/Frightened + help/emergency combination.
             const spokenAt = Number.isNaN(Date.parse(e.timestamp)) ? Date.now() : Date.parse(e.timestamp);
-            const sourceText = `${e.transcript || ''} ${e.keyword || ''}`;
+            // Fusion also uses only the accepted trained keyword. A displayed
+            // transcript that happens to contain "help" is not alert evidence.
+            const sourceText = keyword;
             let reservedForFusion = false;
 
             const fireSpeech = makeFireSpeechSignal(sourceText, confidence, spokenAt);
