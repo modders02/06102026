@@ -13,7 +13,7 @@ type PriorityEventInput = Pick<DetectionEvent, 'type' | 'label'> & {
 
 function isValidatedSpokenDistress(event: PriorityEventInput): boolean {
   if (event.type !== 'multimodal-distress') return false;
-  return /verified distress:.*\+\s*"(?:help|emergency)"/i.test(event.label);
+  return /verified distress:.*\+\s*"help"/i.test(event.label);
 }
 
 function shouldOpenEmergencyPopup(
@@ -35,9 +35,10 @@ function shouldOpenEmergencyPopup(
  * - an attention event that explicitly contains a configured priority object,
  * - accepted safety speech explicitly promoted by the caller.
  *
- * The emergency popup is stricter than Camera alerts: distress opens it only
- * after validated face + spoken "help"/"emergency". Generic audio, screaming,
- * face-only distress, motion anomalies, and attention events never open it.
+ * The distress alert rule is strict: only validated Angry/Frightened +
+ * accepted "help" is a priority distress alert. Generic audio, "emergency",
+ * screaming, face-only distress, motion anomalies, and attention events never
+ * satisfy this distress rule. Fire/smoke remain separate hazard alerts.
  */
 export function classifyPriorityScenario(
   event: PriorityEventInput,
@@ -63,12 +64,11 @@ export function classifyPriorityScenario(
   }
 
   if (event.type === 'multimodal-distress') {
+    const validatedHelpDistress = isValidatedSpokenDistress(event);
     return {
-      priority: true,
-      emergency: shouldOpenEmergencyPopup(event, severity),
-      reason: isValidatedSpokenDistress(event)
-        ? 'validated spoken multimodal distress'
-        : 'validated non-speech distress cue',
+      priority: validatedHelpDistress,
+      emergency: validatedHelpDistress && shouldOpenEmergencyPopup(event, severity),
+      reason: validatedHelpDistress ? 'validated help + distress face' : null,
     };
   }
 
