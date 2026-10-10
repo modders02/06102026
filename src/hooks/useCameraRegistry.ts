@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   loadCameras, saveCameras, loadSettings, saveSettings, loadEventHistory, saveEventHistory,
-  isCameraAlert, makeCamera, revokeUnusedEventClips, type CameraEventHistory,
+  archiveCameraAlert, isCameraAlert, makeCamera, revokeUnusedEventClips, type CameraEventHistory,
 } from '@/lib/cameraRegistry';
 import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import type { CameraConfig, DetectionEvent, MultiCamSettings } from '@/types/multicam';
@@ -71,13 +71,19 @@ export function useCameraRegistry() {
     const captured = { ...evt, snapshot: evt.snapshot || captureCameraEventSnapshot(evt.cameraId) };
     const alert = isCameraAlert(captured);
     commitHistory({
-      // A priority scenario belongs to Camera alerts only. Every other
-      // detection belongs to Event history only.
+      // Camera Alert is intentionally a single active accepted trigger. When a
+      // new valid trigger arrives, archive the previous active alert into Event
+      // History instead of stacking it in the Camera Alert panel.
       events: alert
-        ? current.events.filter(event => event.id !== evt.id)
+        ? [
+            ...current.alertEvents
+              .filter(event => event.id !== evt.id)
+              .map(archiveCameraAlert),
+            ...current.events.filter(event => event.id !== evt.id),
+          ]
         : [captured, ...current.events.filter(event => event.id !== evt.id)],
       alertEvents: alert
-        ? [captured, ...current.alertEvents.filter(event => event.id !== evt.id)]
+        ? [captured]
         : current.alertEvents.filter(event => event.id !== evt.id),
     });
   }, [commitHistory]);
