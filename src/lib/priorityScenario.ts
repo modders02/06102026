@@ -11,6 +11,20 @@ type PriorityEventInput = Pick<DetectionEvent, 'type' | 'label'> & {
   priorityScenario?: boolean;
 };
 
+function isValidatedSpokenDistress(event: PriorityEventInput): boolean {
+  if (event.type !== 'multimodal-distress') return false;
+  return /verified distress:.*\+\s*"(?:help|emergency)"/i.test(event.label);
+}
+
+function shouldOpenEmergencyPopup(
+  event: PriorityEventInput,
+  severity?: AlertSeverity,
+): boolean {
+  if (severity !== undefined && severity !== 'critical') return false;
+  if (event.type === 'fire' || event.type === 'smoke') return true;
+  return isValidatedSpokenDistress(event);
+}
+
 /**
  * Camera alerts are intentionally narrower than Event History.
  *
@@ -19,10 +33,11 @@ type PriorityEventInput = Pick<DetectionEvent, 'type' | 'label'> & {
  * - verified multimodal distress,
  * - a validated person-collapse motion anomaly,
  * - an attention event that explicitly contains a configured priority object,
- * - critical accepted safety speech promoted by the caller.
+ * - accepted safety speech explicitly promoted by the caller.
  *
- * Generic emotion, face-only distress, loud-audio-only attention, rapid motion,
- * ordinary falling objects, and non-critical wake words stay in Event History.
+ * The emergency popup is stricter than Camera alerts: distress opens it only
+ * after validated face + spoken "help"/"emergency". Generic audio, screaming,
+ * face-only distress, motion anomalies, and attention events never open it.
  */
 export function classifyPriorityScenario(
   event: PriorityEventInput,
@@ -31,7 +46,7 @@ export function classifyPriorityScenario(
   if (event.priorityScenario === true) {
     return {
       priority: true,
-      emergency: severity === 'critical',
+      emergency: shouldOpenEmergencyPopup(event, severity),
       reason: 'explicit priority scenario',
     };
   }
@@ -42,7 +57,7 @@ export function classifyPriorityScenario(
   if (event.type === 'fire' || event.type === 'smoke') {
     return {
       priority: true,
-      emergency: severity === undefined || severity === 'critical',
+      emergency: shouldOpenEmergencyPopup(event, severity),
       reason: 'fire/smoke hazard',
     };
   }
@@ -50,15 +65,17 @@ export function classifyPriorityScenario(
   if (event.type === 'multimodal-distress') {
     return {
       priority: true,
-      emergency: severity === undefined || severity === 'critical',
-      reason: 'validated multimodal distress',
+      emergency: shouldOpenEmergencyPopup(event, severity),
+      reason: isValidatedSpokenDistress(event)
+        ? 'validated spoken multimodal distress'
+        : 'validated non-speech distress cue',
     };
   }
 
   if (event.type === 'motion-anomaly' && /person collapse/i.test(event.label)) {
     return {
       priority: true,
-      emergency: severity === 'critical',
+      emergency: false,
       reason: 'possible person collapse',
     };
   }
@@ -71,11 +88,14 @@ export function classifyPriorityScenario(
     };
   }
 
-  if (event.type === 'audio-distress' && severity === 'critical') {
+  // Raw/generic audio is never promoted solely because a caller labels it
+  // critical. Accepted household speech can still opt into Camera alerts with
+  // priorityScenario=true, but it cannot open the emergency popup by itself.
+  if (event.type === 'audio-distress') {
     return {
-      priority: true,
-      emergency: true,
-      reason: 'critical accepted safety speech',
+      priority: false,
+      emergency: false,
+      reason: null,
     };
   }
 
