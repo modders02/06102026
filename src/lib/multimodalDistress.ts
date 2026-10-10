@@ -1,5 +1,6 @@
 export const MULTIMODAL_FUSION_WINDOW_MS = 10_000;
 export const DISTRESS_FACE_MIN_CONFIDENCE = 0.55;
+export const DISTRESS_FACE_FRESHNESS_MS = 2500;
 
 export type DistressFaceLabel = 'Angry' | 'Frightened';
 export type DistressKeyword = 'help';
