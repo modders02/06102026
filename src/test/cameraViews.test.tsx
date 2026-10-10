@@ -344,7 +344,7 @@ describe('camera alerts and event history', () => {
       .toHaveTextContent('1');
   });
 
-  it('keeps the immutable accepted Camera Alert when a later live validation is REJECTED', () => {
+  it('removes the active Camera Alert when a newer live validation is REJECTED', async () => {
     publishCameraSession('slot-2', {
       runtime: {
         ...onlineRuntime,
@@ -364,9 +364,30 @@ describe('camera alerts and event history', () => {
 
     render(<MemoryRouter initialEntries={['/cameras?camera=slot-2']}><Monitoring /></MemoryRouter>);
 
+    await waitFor(() => expect(mocks.archiveActiveAlert).toHaveBeenCalledWith('second'));
+  });
+
+  it('does not let an older stale REJECTED result erase a newer accepted Camera Alert', () => {
+    publishCameraSession('slot-2', {
+      runtime: {
+        ...onlineRuntime,
+        cameraId: 'slot-2',
+        alertValidation: {
+          status: 'rejected',
+          keyword: 'help',
+          confidence: 0.61,
+          emotion: 'Happy',
+          emotionConfidence: 0.95,
+          reason: 'Old rejected attempt.',
+          evaluatedAt: '2026-10-02T02:40:00Z',
+          sourceDecision: 'below_threshold',
+        },
+      },
+    });
+
+    render(<MemoryRouter initialEntries={['/cameras?camera=slot-2']}><Monitoring /></MemoryRouter>);
+
     expect(screen.getByText(/Kitchen fire/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'View snapshot: Kitchen fire from Camera 2' }))
-      .toBeInTheDocument();
     expect(mocks.archiveActiveAlert).not.toHaveBeenCalled();
   });
 
