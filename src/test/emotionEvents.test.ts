@@ -12,7 +12,9 @@ describe('emotion display mapping', () => {
     },
   );
 
-  it('keeps unrelated informational emotions unchanged', () => {
+  it('keeps configured informational emotions unchanged', () => {
+    expect(historyEmotionMeta('angry')?.label).toBe('Angry');
+    expect(historyEmotionMeta('anger')?.label).toBe('Angry');
     expect(historyEmotionMeta('sad')?.label).toBe('Sad');
     expect(historyEmotionMeta('happy')?.label).toBe('Happy');
     expect(historyEmotionMeta('neutral')?.label).toBe('Neutral');
