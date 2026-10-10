@@ -21,6 +21,7 @@ const mocked = vi.hoisted(() => ({
   computeSaliency: vi.fn(), detectFire: vi.fn(),
   openCameraWebRtc: vi.fn(), rtc: [] as MockRtc[],
   distress: { hasFace: false, expression: null as string | null, probability: 0, distressScore: 0, distressLevel: 'none' as 'none' | 'mild' | 'severe' },
+  faceError: null as string | null,
 }));
 vi.mock('@/lib/cameraWebRtc', () => ({ openCameraWebRtc: mocked.openCameraWebRtc }));
 vi.mock('hls.js', () => ({
@@ -44,7 +45,7 @@ vi.mock('@/lib/fireDetection', () => ({
   detectFire: mocked.detectFire,
 }));
 vi.mock('@/hooks/useFaceDistress', () => {
-  return { useFaceDistress: () => ({ ready: false, distress: mocked.distress, analyze: mocked.analyzeFace }) };
+  return { useFaceDistress: () => ({ ready: false, error: mocked.faceError, distress: mocked.distress, analyze: mocked.analyzeFace }) };
 });
 vi.mock('@/lib/multiCamServer', () => ({
   getAudioEvents: mocked.getAudioEvents, getCameraSnapshot: mocked.getCameraSnapshot,
@@ -69,6 +70,7 @@ beforeEach(() => {
   mocked.detectObjects.mockReset().mockResolvedValue([]);
   mocked.analyzeFace.mockReset().mockResolvedValue(undefined);
   mocked.distress = { hasFace: false, expression: null, probability: 0, distressScore: 0, distressLevel: 'none' };
+  mocked.faceError = null;
   mocked.computeSaliency.mockClear();
   mocked.detectFire.mockReset().mockReturnValue({ fireCandidate: false, fireDetected: false, smokeEmergency: false, confidence: 0, firePixelRatio: 0, smokeRatio: 0, visibility: 100 });
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue();
@@ -448,7 +450,17 @@ describe('camera snapshots and page-scoped playback', () => {
       label: `Verified distress: ${faceLabel} + "${keyword}"`,
       confidence: 0.94,
       snapshot: 'data:image/jpeg;base64,preview',
+      alertValidation: expect.objectContaining({
+        status: 'accepted',
+        keyword: 'help',
+        emotion: faceLabel,
+      }),
     }));
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
+      status: 'accepted',
+      keyword: 'help',
+      emotion: faceLabel,
+    });
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress' }));
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
   });
@@ -620,6 +632,23 @@ describe('camera snapshots and page-scoped playback', () => {
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
+  });
+
+  it('rejects accepted help when facial-expression detection is unavailable', async () => {
+    mocked.faceError = 'Face model unavailable';
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
+      status: 'rejected',
+      keyword: 'help',
+    });
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.reason)
+      .toMatch(/facial-expression detection failed/i);
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
   });
 
