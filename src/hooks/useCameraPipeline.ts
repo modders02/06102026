@@ -798,9 +798,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   }, [camera.enabled, camera.aiEnabled, playbackEnabled]);
 
   // Facial expression tracking.
-  // Every base expression is non-alerting by itself. Only Angry/Frightened can
-  // verify an accepted "help" keyword. Surprise/shock and all other expressions
-  // remain informational history only.
+  // Every base expression is non-alerting by itself. Angry and the configured
+  // Frightened aliases (fearful/surprised/shock) can verify accepted "help".
+  // All other expressions remain informational history only.
   useEffect(() => {
     if (!camera.enabled || !camera.aiEnabled || faceAnalysisRevisionRef.current !== analysisRevisionRef.current) return;
     const d = face.distress;
