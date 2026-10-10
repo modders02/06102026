@@ -6,7 +6,6 @@ import { useCamera } from '@/hooks/useCamera';
 import { useCameraSlots, slotCamera, slotSettings, type CameraSlot } from '@/hooks/useCameraSlots';
 import LiveCameraFeed from '@/components/multicam/LiveCameraFeed';
 import DashboardEvents from '@/components/dashboard/DashboardEvents';
-import ValidationLayer from '@/components/dashboard/ValidationLayer';
 
 /** Displays existing monitoring sessions; changing the view never starts another pipeline. */
 export default function Monitoring() {
@@ -92,9 +91,12 @@ export default function Monitoring() {
               </button>
             ))}
           </section>
-          <aside aria-label="Camera controls and activity" className="min-w-0 space-y-4">
-            <DashboardEvents initialFilter={focused || 'all'} />
-            <ValidationLayer cameraId={validationCameraId} cameraName={validationCameraName} />
+          <aside aria-label="Camera controls and activity" className="min-w-0">
+            <DashboardEvents
+              initialFilter={focused || 'all'}
+              validationCameraId={validationCameraId}
+              validationCameraName={validationCameraName}
+            />
           </aside>
         </div>
       </main>
