@@ -45,8 +45,16 @@ export function classifyPriorityScenario(
   severity?: AlertSeverity,
 ): PriorityScenarioDecision {
   if (event.priorityScenario === true) {
-    if (event.type === 'audio-distress') {
+    if (event.type === 'audio-distress' || event.type === 'face-distress') {
       return { priority: false, emergency: false, reason: null };
+    }
+    if (event.type === 'multimodal-distress') {
+      const validatedHelpDistress = isValidatedSpokenDistress(event);
+      return {
+        priority: validatedHelpDistress,
+        emergency: validatedHelpDistress && shouldOpenEmergencyPopup(event, severity),
+        reason: validatedHelpDistress ? 'validated help + distress face' : null,
+      };
     }
     return {
       priority: true,
