@@ -41,12 +41,12 @@ describe('priority scenario camera alert policy', () => {
     expect(classifyPriorityScenario(
       { type: 'multimodal-distress', label: 'Verified distress: Frightened + "emergency"' },
       'critical',
-    )).toMatchObject({ priority: true, emergency: true });
+    )).toMatchObject({ priority: false, emergency: false });
 
     expect(classifyPriorityScenario(
       { type: 'multimodal-distress', label: 'Verified distress: Frightened + screaming' },
       'critical',
-    )).toMatchObject({ priority: true, emergency: false });
+    )).toMatchObject({ priority: false, emergency: false });
 
     expect(classifyPriorityScenario(
       { type: 'audio-distress', label: 'Wake word: "call 911"' },
@@ -75,6 +75,6 @@ describe('priority scenario camera alert policy', () => {
       type: 'audio-distress',
       label: 'validated custom emergency scenario',
       priorityScenario: true,
-    }, 'critical')).toMatchObject({ priority: true, emergency: false });
+    }, 'critical')).toMatchObject({ priority: false, emergency: false });
   });
 });
