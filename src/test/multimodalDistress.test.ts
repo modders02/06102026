@@ -76,7 +76,7 @@ describe('multimodal distress fusion', () => {
     expect(multimodalDistressLabel(result!)).toBe(`Verified distress: ${label} + "help"`);
   });
 
-  it('verifies either ordering inside the ten-second same-camera window', () => {
+  it('verifies either ordering inside the configured same-camera window', () => {
     const face = makeDistressFaceSignal('fearful', 0.91, 10_000)!;
     const speechAfter = makeDistressSpeechSignal('help me', 0.96, 10_000 + MULTIMODAL_FUSION_WINDOW_MS)!;
     const speechBefore = makeDistressSpeechSignal('help', 0.88, 10_000 - MULTIMODAL_FUSION_WINDOW_MS)!;
