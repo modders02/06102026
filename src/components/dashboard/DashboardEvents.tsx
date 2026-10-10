@@ -8,6 +8,7 @@ import { clipFolderSupported, getClipFolderLabel, getClipSeconds, pickClipFolder
 import { CAMERA_HISTORY_LIMIT } from '@/lib/cameraRegistry';
 import type { DetectionEvent, DetectionType } from '@/types/multicam';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
+import { useCameraSession } from '@/lib/cameraSessions';
 import ValidationLayer from '@/components/dashboard/ValidationLayer';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
 
@@ -26,7 +27,7 @@ export default function DashboardEvents({
   validationCameraId?: string;
   validationCameraName?: string;
 }) {
-  const { events, alertEvents, clearEvents } = useCameraRegistry();
+  const { events, alertEvents, archiveActiveAlert, clearEvents } = useCameraRegistry();
   const { activeSlots } = useCameraSlots();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedFilter = searchParams.get('events') || initialFilter || 'all';
@@ -55,6 +56,29 @@ export default function DashboardEvents({
     return Array.from(names.entries());
   }, [activeSlots, events, alertEvents, filter]);
   const filtered = useMemo(() => filter === 'all' ? events : events.filter(event => event.cameraId === filter), [events, filter]);
+  const newestStoredAlert = useMemo(
+    () => (alertEvents ?? [])
+      .filter(event => isPriorityCameraAlert(event) && event.alertValidation?.status === 'accepted')
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0],
+    [alertEvents],
+  );
+  const activeAlertSession = useCameraSession(
+    newestStoredAlert?.cameraId || validationCameraId || 'slot-1',
+  );
+
+  useEffect(() => {
+    if (!newestStoredAlert) return;
+    const liveValidation = activeAlertSession.runtime?.alertValidation;
+    if (!liveValidation || liveValidation.status === 'accepted') return;
+    archiveActiveAlert(newestStoredAlert.id);
+    if (viewingId === newestStoredAlert.id) setViewingId(null);
+  }, [
+    newestStoredAlert,
+    activeAlertSession.runtime?.alertValidation,
+    archiveActiveAlert,
+    viewingId,
+  ]);
+
   const alerts = useMemo(
     () => (alertEvents ?? [])
       .filter(
