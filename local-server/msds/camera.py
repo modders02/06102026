@@ -45,9 +45,9 @@ def detect_scream_pcm(data: bytes) -> float:
     """Return a conservative 0..1 scream confidence from 16 kHz mono s16 PCM.
 
     The chunk is scanned in overlapping 0.5 s windows so a short scream is not
-    diluted by several seconds of quiet audio. A positive result is never an
-    alarm by itself; the renderer still requires an Angry or Frightened face
-    from the same camera within the multimodal fusion window.
+    diluted by several seconds of quiet audio. A positive result is diagnostic
+    only and never satisfies the facial-distress alert rule; that rule requires
+    the accepted trained keyword "help" plus configured facial evidence.
     """
     if len(data) < 16000:
         return 0.0
