@@ -53,6 +53,16 @@ export function classifyPriorityScenario(
   event: PriorityEventInput,
   severity?: AlertSeverity,
 ): PriorityScenarioDecision {
+  const validationRequired = event.type === 'fire'
+    || event.type === 'smoke'
+    || event.type === 'multimodal-distress'
+    || event.type === 'motion-anomaly'
+    || event.type === 'attention-alert';
+
+  if (validationRequired && !hasAcceptedValidation(event)) {
+    return { priority: false, emergency: false, reason: null };
+  }
+
   if (event.priorityScenario === true) {
     if (event.type === 'audio-distress' || event.type === 'face-distress') {
       return { priority: false, emergency: false, reason: null };
