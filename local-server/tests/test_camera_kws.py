@@ -67,12 +67,21 @@ class CameraCustomKeywordTests(unittest.TestCase):
         self.assertEqual(cam.kws_segments_seen, 1)
         self.assertGreaterEqual(cam.events[0]["processing_ms"], 0)
 
-        # Same keyword inside the 3 s cooldown cannot duplicate the event.
-        with patch.object(KWS_ENGINE, "has_ready_templates", return_value=True), \
+        # An accidental duplicate callback inside the short guard is suppressed.
+        with patch("msds.camera.time.time", return_value=cam._last_kws_publish_ts + 0.1), \
+                patch.object(KWS_ENGINE, "has_ready_templates", return_value=True), \
                 patch.object(cam.kws_segmenter, "feed", return_value=[segment]), \
                 patch.object(KWS_ENGINE, "diagnose", return_value=match):
             cam._process_custom_kws_pcm(b"pcm")
         self.assertEqual(len(cam.events), 1)
+
+        # A separately completed repeat is a new valid trigger and must publish.
+        with patch("msds.camera.time.time", return_value=cam._last_kws_publish_ts + 0.6), \
+                patch.object(KWS_ENGINE, "has_ready_templates", return_value=True), \
+                patch.object(cam.kws_segmenter, "feed", return_value=[segment]), \
+                patch.object(KWS_ENGINE, "diagnose", return_value=match):
+            cam._process_custom_kws_pcm(b"pcm")
+        self.assertEqual(len(cam.events), 2)
 
     def test_rejected_candidate_is_visible_in_diagnostics(self):
         cam = self.make_camera()
