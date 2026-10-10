@@ -418,9 +418,12 @@ class Camera:
 
     def _publish_kws_match(self, match, processing_ms: float) -> None:
         now_ts = time.time()
+        # The streaming segmenter already emits each completed speech segment
+        # once. Keep only a very small guard for accidental duplicate callbacks;
+        # a separately spoken repeated keyword must remain eligible immediately.
         if (
             match.keyword == self.kws_last_keyword
-            and now_ts - self._last_kws_publish_ts < 3.0
+            and now_ts - self._last_kws_publish_ts < 0.35
         ):
             return
         self._last_kws_publish_ts = now_ts
