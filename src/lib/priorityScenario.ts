@@ -7,7 +7,7 @@ export interface PriorityScenarioDecision {
   reason: string | null;
 }
 
-type PriorityEventInput = Pick<DetectionEvent, 'type' | 'label' | 'alertValidation'> & {
+type PriorityEventInput = Pick<DetectionEvent, 'type' | 'label' | 'alertValidation' | 'fireConfirmed'> & {
   priorityScenario?: boolean;
 };
 
@@ -89,15 +89,21 @@ export function classifyPriorityScenario(
     return { priority: false, emergency: false, reason: null };
   }
 
-  if (event.type === 'fire' || event.type === 'smoke') {
-    if (!hasAcceptedValidation(event)) {
+  if (event.type === 'fire') {
+    if (!hasAcceptedValidation(event) || event.fireConfirmed !== true) {
       return { priority: false, emergency: false, reason: null };
     }
     return {
       priority: true,
       emergency: shouldOpenEmergencyPopup(event, severity),
-      reason: 'fire/smoke hazard',
+      reason: 'detector-confirmed fire',
     };
+  }
+
+  // Smoke remains supporting/diagnostic evidence. It cannot independently
+  // become an emergency fire alert.
+  if (event.type === 'smoke') {
+    return { priority: false, emergency: false, reason: null };
   }
 
   if (event.type === 'multimodal-distress') {
