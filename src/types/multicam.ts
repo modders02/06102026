@@ -72,6 +72,8 @@ export interface DetectionEvent {
   priorityScenario?: boolean;
   /** Fire alerts require this detector-originated confirmation bit. */
   fireConfirmed?: boolean;
+  /** Smoke alerts require this detector-originated confirmation bit. */
+  smokeConfirmed?: boolean;
   /** Validation outcome captured at the exact time this event was emitted. */
   alertValidation?: {
     status: 'accepted' | 'rejected';
