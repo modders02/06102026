@@ -18,7 +18,6 @@ import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/mu
 import { useFaceDistress } from '@/hooks/useFaceDistress';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
 import {
-  SMOKE_REGION_MIN_RATIO,
   makeFireVisualSignal,
   makeFireSpeechSignal,
   type FireVisualSignal,
@@ -164,6 +163,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   // Continuous detectors are edge-triggered: one accepted condition produces
   // one Camera Alert snapshot until the condition clears or materially changes.
   const visualFireAlertActiveRef = useRef(false);
+  const visualSmokeAlertActiveRef = useRef(false);
   const motionAlertKeyRef = useRef<string | null>(null);
   const attentionAlertKeyRef = useRef<string | null>(null);
 
@@ -238,6 +238,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       recentFireVisualRef.current = null;
       recentFireSpeechRef.current = null;
       visualFireAlertActiveRef.current = false;
+      visualSmokeAlertActiveRef.current = false;
       motionAlertKeyRef.current = null;
       attentionAlertKeyRef.current = null;
       const currentValidation = runtimeRef.current.alertValidation;
@@ -318,11 +319,13 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       confidence: number,
       eventValidation?: DetectionEvent['alertValidation'],
       fireConfirmed = false,
+      smokeConfirmed = false,
     ) => {
       const now = Date.now();
-      const key = type === 'fire' ? 'fire' : `${type}:${label}`;
+      const key = type === 'fire' || type === 'smoke' ? type : `${type}:${label}`;
       const edgeDeduped = type === 'multimodal-distress'
         || type === 'fire'
+        || type === 'smoke'
         || type === 'motion-anomaly'
         || type === 'attention-alert';
       const cooldownMs = edgeDeduped ? 0 : (settings.alertCooldownMs ?? 3000);
@@ -338,6 +341,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         confidence,
         alertValidation: eventValidation,
         fireConfirmed: type === 'fire' ? fireConfirmed : undefined,
+        smokeConfirmed: type === 'smoke' ? smokeConfirmed : undefined,
         timestamp: new Date().toISOString(),
         snapshot: snapshot(),
       });
@@ -677,7 +681,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       if (fireVisual) recentFireVisualRef.current = fireVisual;
       const thresholdFireDetected =
         fire.fireDetected === true && fire.confidence >= settings.fireThreshold;
+      const thresholdSmokeDetected =
+        !fire.screenSuppressed && fire.smokeEmergency === true;
       if (!thresholdFireDetected) visualFireAlertActiveRef.current = false;
+      if (!thresholdSmokeDetected || thresholdFireDetected) visualSmokeAlertActiveRef.current = false;
 
       const pendingFireSpeech = recentFireSpeechRef.current;
       if (!thresholdFireDetected && pendingFireSpeech) {
@@ -717,11 +724,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
           candidateAt: fireVisual?.at ?? previousFire.candidateAt,
           bbox: fire.smoothedBbox,
         },
-        // Smoke is diagnostic/display evidence only. It never authorizes the
-        // emergency popup unless the fire detector itself confirms fire.
         smoke: {
-          detected: !fire.screenSuppressed && fire.smokeRatio >= SMOKE_REGION_MIN_RATIO,
-          confidence: fire.screenSuppressed ? 0 : fire.smokeRatio,
+          detected: thresholdSmokeDetected,
+          confidence: thresholdSmokeDetected ? fire.confidence : 0,
         },
         lastDetectionAt: new Date().toISOString(),
         detections: runtimeRef.current.detections + objects.length,
@@ -760,6 +765,29 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             keyword: supportingSpeech ? 'fire' : '',
             emotion: 'visual fire',
           }, true);
+        }
+      } else if (thresholdSmokeDetected) {
+        const smokeReason = 'Smoke detector confirmed sustained smoke with degrading visibility.';
+        patch({
+          alertValidation: {
+            status: 'accepted',
+            keyword: '',
+            confidence: fire.confidence,
+            emotion: 'visual smoke',
+            emotionConfidence: fire.confidence,
+            reason: smokeReason,
+            evaluatedAt: new Date().toISOString(),
+            sourceDecision: 'accepted',
+          },
+        });
+        if (!visualSmokeAlertActiveRef.current) {
+          visualSmokeAlertActiveRef.current = true;
+          emit('smoke', 'Smoke detected', fire.confidence, {
+            status: 'accepted',
+            reason: smokeReason,
+            keyword: '',
+            emotion: 'visual smoke',
+          }, false, true);
         }
       }
 
