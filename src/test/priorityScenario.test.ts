@@ -47,7 +47,15 @@ describe('priority scenario camera alert policy', () => {
     expect(isPriorityCameraAlert({
       type: 'smoke',
       label: 'Smoke detected',
-      alertValidation: accepted('', 'visual fire/smoke'),
+      smokeConfirmed: true,
+      alertValidation: accepted('', 'visual smoke'),
+    })).toBe(true);
+
+    expect(isPriorityCameraAlert({
+      type: 'smoke',
+      label: 'Smoke candidate only',
+      smokeConfirmed: false,
+      alertValidation: accepted('', 'visual smoke candidate'),
     })).toBe(false);
 
     expect(isPriorityCameraAlert({
@@ -143,9 +151,17 @@ describe('priority scenario camera alert policy', () => {
 
     expect(classifyPriorityScenario({
       type: 'smoke',
-      label: 'Heavy smoke',
+      label: 'Smoke detected',
+      smokeConfirmed: true,
+      alertValidation: accepted('', 'visual smoke'),
+    }, 'critical')).toMatchObject({ priority: true, emergency: true });
+
+    expect(classifyPriorityScenario({
+      type: 'smoke',
+      label: 'Smoke candidate only',
       priorityScenario: true,
-      alertValidation: accepted('', 'smoke'),
+      smokeConfirmed: false,
+      alertValidation: accepted('', 'visual smoke candidate'),
     }, 'critical')).toMatchObject({ priority: false, emergency: false });
   });
 
