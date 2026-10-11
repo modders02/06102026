@@ -38,7 +38,7 @@ function shouldOpenEmergencyPopup(
  * Camera alerts are intentionally narrower than Event History.
  *
  * Priority scenarios are:
- * - verified/standalone fire or smoke hazards,
+ * - detector-confirmed fire hazards,
  * - verified multimodal distress,
  * - a validated person-collapse motion anomaly,
  * - an attention event that explicitly contains a configured priority object,
@@ -47,7 +47,8 @@ function shouldOpenEmergencyPopup(
  * The distress alert rule is strict: only validated Angry/Frightened +
  * accepted "help" is a priority distress alert. Generic audio, "emergency",
  * screaming, face-only distress, motion anomalies, and attention events never
- * satisfy this distress rule. Fire/smoke remain separate hazard alerts.
+ * satisfy this distress rule. Smoke remains diagnostic; fire requires the
+ * detector-originated fireConfirmed flag.
  */
 export function classifyPriorityScenario(
   event: PriorityEventInput,
@@ -64,7 +65,10 @@ export function classifyPriorityScenario(
   }
 
   if (event.priorityScenario === true) {
-    if (event.type === 'audio-distress' || event.type === 'face-distress') {
+    if (event.type === 'audio-distress' || event.type === 'face-distress' || event.type === 'smoke') {
+      return { priority: false, emergency: false, reason: null };
+    }
+    if (event.type === 'fire' && event.fireConfirmed !== true) {
       return { priority: false, emergency: false, reason: null };
     }
     if (event.type === 'multimodal-distress') {
