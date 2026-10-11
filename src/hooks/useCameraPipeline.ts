@@ -317,6 +317,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       label: string,
       confidence: number,
       eventValidation?: DetectionEvent['alertValidation'],
+      fireConfirmed = false,
     ) => {
       const now = Date.now();
       const key = type === 'fire' ? 'fire' : `${type}:${label}`;
@@ -336,6 +337,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         label,
         confidence,
         alertValidation: eventValidation,
+        fireConfirmed: type === 'fire' ? fireConfirmed : undefined,
         timestamp: new Date().toISOString(),
         snapshot: snapshot(),
       });
@@ -757,7 +759,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             reason: validationReason,
             keyword: supportingSpeech ? 'fire' : '',
             emotion: 'visual fire',
-          });
+          }, true);
         }
       }
 
@@ -1330,7 +1332,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       }
       patch({ audioListening: false, audioDistress: { detected: false, keyword: '', confidence: 0, transcript: '' } });
     };
-  }, [camera.enabled, camera.id, sourceStream, settings.pythonServer, settings.audioThreshold, patch, emit, maybeEmitVerifiedDistress, maybeEmitVerifiedFire, showTranscript]);
+  }, [camera.enabled, camera.id, sourceStream, settings.pythonServer, settings.audioThreshold, patch, emit, maybeEmitVerifiedDistress, showTranscript]);
 
 
   const reconnect = useCallback(() => {
