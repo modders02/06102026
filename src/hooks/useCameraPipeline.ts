@@ -19,10 +19,6 @@ import { useFaceDistress } from '@/hooks/useFaceDistress';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
 import {
   SMOKE_REGION_MIN_RATIO,
-  fireSmokeLabel,
-  fireSpeechLabel,
-  fuseFireWithSpeech,
-  isImmediateFireSmoke,
   makeFireVisualSignal,
   makeFireSpeechSignal,
   type FireVisualSignal,
@@ -399,37 +395,6 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     return true;
   }, [emit, patch]);
 
-  const maybeEmitVerifiedFire = useCallback(() => {
-    const verified = fuseFireWithSpeech(recentFireVisualRef.current, recentFireSpeechRef.current);
-    if (!verified) return false;
-    recentFireVisualRef.current = null;
-    recentFireSpeechRef.current = null;
-    patch({
-      alertValidation: {
-        status: 'accepted',
-        keyword: 'fire',
-        confidence: verified.speech.confidence,
-        emotion: 'visual fire',
-        emotionConfidence: verified.fire.confidence,
-        reason: 'Accepted "fire" keyword matched current visual fire evidence.',
-        evaluatedAt: new Date(verified.at).toISOString(),
-        sourceDecision: 'accepted',
-      },
-    });
-    emit(
-      'fire',
-      fireSpeechLabel(),
-      verified.confidence,
-      {
-        status: 'accepted',
-        reason: 'Accepted "fire" keyword matched current visual fire evidence.',
-        keyword: 'fire',
-        emotion: 'visual fire',
-      },
-    );
-    return true;
-  }, [emit, patch]);
-
   // Keep camera playback realtime; retry WebRTC rather than downgrading to HLS.
   const whepUrl = webrtcUrlFor(camera, settings);
 
@@ -703,49 +668,32 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         }
       }
 
-      // Publish fusion only after this frame is still confirmed current. Speech
-      // may have arrived while face analysis was running; storing it first and
-      // checking here makes either signal order work without stale-frame alerts.
+      // A candidate, smoke, low visibility, night-vision hotspot, or spoken
+      // "fire" is supporting evidence only. Emergency fire detection is
+      // authorized exclusively by the detector's confirmed fireDetected flag
+      // at the configured confidence threshold.
       if (fireVisual) recentFireVisualRef.current = fireVisual;
-      const immediateFireSmoke = isImmediateFireSmoke(fireVisual);
-      const thresholdFireDetected = fire.fireDetected && fire.confidence >= settings.fireThreshold;
-      const persistentVisualFire = immediateFireSmoke || thresholdFireDetected;
-      if (!persistentVisualFire) visualFireAlertActiveRef.current = false;
+      const thresholdFireDetected =
+        fire.fireDetected === true && fire.confidence >= settings.fireThreshold;
+      if (!thresholdFireDetected) visualFireAlertActiveRef.current = false;
 
-      let verifiedFireSpeech = false;
-      if (immediateFireSmoke && fireVisual) {
+      const pendingFireSpeech = recentFireSpeechRef.current;
+      if (!thresholdFireDetected && pendingFireSpeech) {
         recentFireSpeechRef.current = null;
-        recentFireVisualRef.current = null;
-        const validationReason = 'Visual fire/smoke evidence independently satisfied the hazard rule.';
         patch({
           alertValidation: {
-            status: 'accepted',
-            keyword: '',
-            confidence: fireVisual.confidence,
-            emotion: 'visual fire/smoke',
-            emotionConfidence: fireVisual.confidence,
-            reason: validationReason,
-            evaluatedAt: new Date(fireVisual.at).toISOString(),
+            status: 'rejected',
+            keyword: 'fire',
+            confidence: pendingFireSpeech.confidence,
+            emotion: fire.fireCandidate ? 'visual fire candidate' : '',
+            emotionConfidence: fire.confidence,
+            reason: fire.fireCandidate
+              ? 'Accepted "fire", but the visual detector did not confirm an actual fire.'
+              : 'Accepted "fire", but no visual fire was detected.',
+            evaluatedAt: new Date().toISOString(),
+            sourceDecision: 'accepted',
           },
         });
-        if (!visualFireAlertActiveRef.current) {
-          visualFireAlertActiveRef.current = true;
-          emit(
-            'fire',
-            fireSmokeLabel(fireVisual),
-            fireVisual.confidence,
-            {
-              status: 'accepted',
-              reason: validationReason,
-              keyword: '',
-              emotion: 'visual fire/smoke',
-            },
-          );
-        }
-      } else if (fireVisual) {
-        // Speech-correlated fire is already one-shot because the accepted
-        // speech signal is consumed after successful fusion.
-        verifiedFireSpeech = maybeEmitVerifiedFire();
       }
 
       const previousFire = runtimeRef.current.fire;
@@ -757,8 +705,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         motionAnomaly,
         frameWidth: canvas.width, frameHeight: canvas.height,
         fire: {
-          detected: immediateFireSmoke || verifiedFireSpeech
-            || (fire.fireDetected && fire.confidence >= settings.fireThreshold),
+          detected: thresholdFireDetected,
           candidate: !!fireVisual,
           confidence: fire.confidence,
           candidateConfidence: fireVisual?.confidence ?? previousFire.candidateConfidence,
@@ -768,8 +715,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
           candidateAt: fireVisual?.at ?? previousFire.candidateAt,
           bbox: fire.smoothedBbox,
         },
-        // Smoke can be displayed as a visual condition, but smoke by itself no
-        // longer emits an emergency alert. It must corroborate a fire candidate.
+        // Smoke is diagnostic/display evidence only. It never authorizes the
+        // emergency popup unless the fire detector itself confirms fire.
         smoke: {
           detected: !fire.screenSuppressed && fire.smokeRatio >= SMOKE_REGION_MIN_RATIO,
           confidence: fire.screenSuppressed ? 0 : fire.smokeRatio,
@@ -784,25 +731,31 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         : objects;
       for (const object of historyObjects) emit('object', object.label, object.confidence);
       if (humanCount > 0) emit('human', `${humanCount} person(s)`, 0.9);
-      if (!immediateFireSmoke && !verifiedFireSpeech && thresholdFireDetected) {
-        const validationReason = 'Fire detector confidence satisfied the configured fire threshold.';
+      if (thresholdFireDetected) {
+        const supportingSpeech = recentFireSpeechRef.current;
+        recentFireSpeechRef.current = null;
+        recentFireVisualRef.current = null;
+        const validationReason = fire.nightVisionMode
+          ? 'Night-vision fire detector confirmed an actual fire above the configured threshold.'
+          : 'Fire detector confirmed an actual fire above the configured threshold.';
         patch({
           alertValidation: {
             status: 'accepted',
-            keyword: '',
+            keyword: supportingSpeech ? 'fire' : '',
             confidence: fire.confidence,
             emotion: 'visual fire',
             emotionConfidence: fire.confidence,
             reason: validationReason,
             evaluatedAt: new Date().toISOString(),
+            sourceDecision: 'accepted',
           },
         });
         if (!visualFireAlertActiveRef.current) {
           visualFireAlertActiveRef.current = true;
-          emit('fire', 'Fire detected', fire.confidence, {
+          emit('fire', fire.nightVisionMode ? 'Fire detected (night vision)' : 'Fire detected', fire.confidence, {
             status: 'accepted',
             reason: validationReason,
-            keyword: '',
+            keyword: supportingSpeech ? 'fire' : '',
             emotion: 'visual fire',
           });
         }
@@ -873,7 +826,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     } finally {
       busyRef.current = false;
     }
-  }, [camera.enabled, camera.aiEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.saliencyMode, settings.attentionThreshold, settings.alertCooldownMs, settings.priorityObjects, analyzeFace, drawWorkFrame, patch, emit, maybeEmitVerifiedFire, maybeEmitVerifiedDistress]);
+  }, [camera.enabled, camera.aiEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.saliencyMode, settings.attentionThreshold, settings.alertCooldownMs, settings.priorityObjects, analyzeFace, drawWorkFrame, patch, emit, maybeEmitVerifiedDistress]);
   const analyzeFrameRef = useRef(analyzeFrame);
   analyzeFrameRef.current = analyzeFrame;
 
