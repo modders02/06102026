@@ -422,39 +422,9 @@ export default function Index() {
 
     const fireSpeech = makeFireSpeechSignal(text);
     if (fireSpeech) {
-      const fireState = runtime?.fire;
-      const candidateAt = fireState?.candidateAt ?? 0;
-      const recentCandidate = candidateAt > 0 && Date.now() - candidateAt <= 10_000;
-      const fireVisual = fireState ? makeFireVisualSignal(
-        recentCandidate,
-        fireState.candidateConfidence ?? fireState.confidence,
-        fireState.firePixelRatio ?? 0,
-        fireState.smokeRatio ?? 0,
-        fireState.visibility ?? 100,
-        candidateAt || Date.now(),
-      ) : null;
-      const verifiedFire = fuseFireWithSpeech(fireVisual, fireSpeech);
-      if (verifiedFire) {
-        const slot = slots[0];
-        raiseAlert({
-          cameraId: 'slot-1',
-          cameraName: slot.name,
-          location: 'Local webcam',
-          type: 'fire',
-          label: fireSpeechLabel(),
-          confidence: verifiedFire.confidence,
-          alertValidation: {
-            status: 'accepted',
-            reason: 'Accepted "fire" keyword matched current visual fire evidence.',
-            keyword: 'fire',
-            emotion: 'visual fire',
-          },
-          timestamp: new Date(verifiedFire.at).toISOString(),
-          snapshot: captureCameraEventSnapshot('slot-1'),
-        }, 'critical');
-      }
-      // "fire" is reserved for fire verification and must never continue to
-      // the generic wake-word path when visual fire is absent.
+      // Spoken "fire" is supporting evidence only. The camera pipeline itself
+      // is the sole authority for fire emergencies and must first set
+      // fireDetected=true at the configured threshold.
       return;
     }
 
