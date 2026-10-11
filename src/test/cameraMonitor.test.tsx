@@ -1011,22 +1011,79 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(getCameraSession('slot-1').runtime?.fire.detected).toBe(false);
   });
 
-  it('does not alarm on smoke region alone without a visual fire candidate', async () => {
+  it('alerts on detector-confirmed standalone smoke without fabricating fire', async () => {
     mocked.detectFire.mockReturnValueOnce({
       fireCandidate: false,
       fireDetected: false,
       smokeEmergency: true,
-      confidence: 0.7,
+      confidence: 0.72,
       firePixelRatio: 0,
-      smokeRatio: 0.3,
-      visibility: 35,
+      smokeRatio: 0.32,
+      visibility: 34,
+      smokeCorroborated: true,
+      lowVisibilityCorroborated: true,
     });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     const onEvent = vi.fn();
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
+
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
-    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'smoke' }));
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'smoke',
+      label: 'Smoke detected',
+      smokeConfirmed: true,
+      alertValidation: { status: 'accepted' },
+      snapshot: 'data:image/jpeg;base64,preview',
+    }));
+    expect(getCameraSession('slot-1').runtime?.smoke).toMatchObject({
+      detected: true,
+      confidence: 0.72,
+    });
+  });
+
+  it('emits one smoke alert for one continuous smoke condition and retriggers after clear', async () => {
+    const smoke = {
+      fireCandidate: false,
+      fireDetected: false,
+      smokeEmergency: true,
+      confidence: 0.75,
+      firePixelRatio: 0,
+      smokeRatio: 0.35,
+      visibility: 30,
+      smokeCorroborated: true,
+      lowVisibilityCorroborated: true,
+    };
+    mocked.detectFire.mockReturnValue(smoke);
+
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+
+    const smokeCalls = () => onEvent.mock.calls
+      .map(([event]) => event)
+      .filter(event => event.type === 'smoke');
+
+    expect(smokeCalls()).toHaveLength(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(4500); });
+    expect(smokeCalls()).toHaveLength(1);
+
+    mocked.detectFire.mockReturnValue({
+      fireCandidate: false,
+      fireDetected: false,
+      smokeEmergency: false,
+      confidence: 0,
+      firePixelRatio: 0,
+      smokeRatio: 0.05,
+      visibility: 90,
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+
+    mocked.detectFire.mockReturnValue(smoke);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(smokeCalls()).toHaveLength(2);
   });
 
   it.each([
