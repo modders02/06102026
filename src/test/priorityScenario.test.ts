@@ -33,14 +33,22 @@ describe('priority scenario camera alert policy', () => {
     expect(isPriorityCameraAlert({
       type: 'fire',
       label: 'Fire detected',
+      fireConfirmed: true,
       alertValidation: accepted('', 'visual fire'),
     })).toBe(true);
+
+    expect(isPriorityCameraAlert({
+      type: 'fire',
+      label: 'Fire candidate only',
+      fireConfirmed: false,
+      alertValidation: accepted('', 'visual fire candidate'),
+    })).toBe(false);
 
     expect(isPriorityCameraAlert({
       type: 'smoke',
       label: 'Smoke detected',
       alertValidation: accepted('', 'visual fire/smoke'),
-    })).toBe(true);
+    })).toBe(false);
 
     expect(isPriorityCameraAlert({
       type: 'multimodal-distress',
@@ -121,9 +129,17 @@ describe('priority scenario camera alert policy', () => {
 
     expect(classifyPriorityScenario({
       type: 'fire',
-      label: 'Verified fire: visual fire + smoke',
-      alertValidation: accepted('', 'visual fire/smoke'),
+      label: 'Fire detected',
+      fireConfirmed: true,
+      alertValidation: accepted('', 'visual fire'),
     }, 'critical')).toMatchObject({ priority: true, emergency: true });
+
+    expect(classifyPriorityScenario({
+      type: 'fire',
+      label: 'Visual fire candidate + smoke',
+      fireConfirmed: false,
+      alertValidation: accepted('', 'visual fire candidate'),
+    }, 'critical')).toMatchObject({ priority: false, emergency: false });
   });
 
   it('does not let priorityScenario bypass the validation result', () => {
