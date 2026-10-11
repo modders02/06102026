@@ -17,7 +17,7 @@ const CORE_ALGORITHMS: AlgorithmCard[] = [
     id: 'vision',
     name: 'Visual Saliency + Object Detection',
     file: 'saliency.ts · detectionEngine.ts',
-    summary: 'Finds motion and strong edges, then identifies people and everyday objects with COCO-SSD.',
+    summary: 'Finds motion and strong edges, then identifies people and relevant indoor objects with COCO-SSD.',
     icon: ScanSearch,
   },
   {
