@@ -266,6 +266,7 @@ describe('camera alerts and event history', () => {
         clipUrl: 'blob:test-recording',
         snapshot: 'data:image/jpeg;base64,test',
         priorityScenario: true,
+        fireConfirmed: true,
         alertValidation: {
           status: 'accepted',
           reason: 'Fire detector confidence satisfied the configured fire threshold.',
