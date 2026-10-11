@@ -253,7 +253,8 @@ export default function Index() {
   const storeEvent = useCallback((event: Omit<DetectionEvent, 'id'>) => {
     const id = crypto.randomUUID();
     const rejectedValidation = event.alertValidation?.status === 'rejected';
-    const storedEvent = rejectedValidation
+    const unconfirmedFire = event.type === 'fire' && event.fireConfirmed !== true;
+    const storedEvent = rejectedValidation || unconfirmedFire
       ? { ...event, snapshot: undefined, priorityScenario: false }
       : event;
     addEvent({ ...storedEvent, id });
