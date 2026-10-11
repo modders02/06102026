@@ -13,9 +13,11 @@ const event = (
   const label = extra.label ?? `${type} ${index}`;
   const distress = /^Verified distress: (Angry|Frightened) \+ "help"$/.exec(label);
   const defaultValidation: DetectionEvent['alertValidation'] | undefined =
-    type === 'fire' || type === 'smoke'
-      ? { status: 'accepted', reason: 'validated visual hazard', keyword: '', emotion: 'visual fire' }
-      : type === 'multimodal-distress' && distress
+    type === 'fire'
+      ? { status: 'accepted', reason: 'validated visual fire', keyword: '', emotion: 'visual fire' }
+      : type === 'smoke'
+        ? { status: 'accepted', reason: 'validated visual smoke', keyword: '', emotion: 'visual smoke' }
+        : type === 'multimodal-distress' && distress
         ? { status: 'accepted', reason: 'validated help + face', keyword: 'help', emotion: distress[1] }
         : type === 'motion-anomaly' && /person collapse/i.test(label)
           ? { status: 'accepted', reason: 'validated person collapse', keyword: '', emotion: 'motion' }
