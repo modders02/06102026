@@ -7,7 +7,7 @@ export interface PriorityScenarioDecision {
   reason: string | null;
 }
 
-type PriorityEventInput = Pick<DetectionEvent, 'type' | 'label' | 'alertValidation' | 'fireConfirmed'> & {
+type PriorityEventInput = Pick<DetectionEvent, 'type' | 'label' | 'alertValidation' | 'fireConfirmed' | 'smokeConfirmed'> & {
   priorityScenario?: boolean;
 };
 
@@ -33,7 +33,9 @@ function shouldOpenEmergencyPopup(
   if (event.type === 'fire') {
     return event.fireConfirmed === true && hasAcceptedValidation(event);
   }
-  if (event.type === 'smoke') return false;
+  if (event.type === 'smoke') {
+    return event.smokeConfirmed === true && hasAcceptedValidation(event);
+  }
   return isValidatedSpokenDistress(event);
 }
 
@@ -50,8 +52,8 @@ function shouldOpenEmergencyPopup(
  * The distress alert rule is strict: only validated Angry/Frightened +
  * accepted "help" is a priority distress alert. Generic audio, "emergency",
  * screaming, face-only distress, motion anomalies, and attention events never
- * satisfy this distress rule. Smoke remains diagnostic; fire requires the
- * detector-originated fireConfirmed flag.
+ * satisfy this distress rule. Fire and smoke each require their own
+ * detector-originated confirmation flag.
  */
 export function classifyPriorityScenario(
   event: PriorityEventInput,
@@ -68,10 +70,13 @@ export function classifyPriorityScenario(
   }
 
   if (event.priorityScenario === true) {
-    if (event.type === 'audio-distress' || event.type === 'face-distress' || event.type === 'smoke') {
+    if (event.type === 'audio-distress' || event.type === 'face-distress') {
       return { priority: false, emergency: false, reason: null };
     }
     if (event.type === 'fire' && event.fireConfirmed !== true) {
+      return { priority: false, emergency: false, reason: null };
+    }
+    if (event.type === 'smoke' && event.smokeConfirmed !== true) {
       return { priority: false, emergency: false, reason: null };
     }
     if (event.type === 'multimodal-distress') {
@@ -107,10 +112,15 @@ export function classifyPriorityScenario(
     };
   }
 
-  // Smoke remains supporting/diagnostic evidence. It cannot independently
-  // become an emergency fire alert.
   if (event.type === 'smoke') {
-    return { priority: false, emergency: false, reason: null };
+    if (!hasAcceptedValidation(event) || event.smokeConfirmed !== true) {
+      return { priority: false, emergency: false, reason: null };
+    }
+    return {
+      priority: true,
+      emergency: shouldOpenEmergencyPopup(event, severity),
+      reason: 'detector-confirmed smoke',
+    };
   }
 
   if (event.type === 'multimodal-distress') {
