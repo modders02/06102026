@@ -10,7 +10,7 @@ const event = (
   type: DetectionEvent['type'] = 'object',
   extra: Partial<DetectionEvent> = {},
 ): DetectionEvent => {
-  const label = extra.label ?? `${type} ${index}`;
+  const label = extra.label ?? (type === 'object' ? 'chair' : `${type} ${index}`);
   const distress = /^Verified distress: (Angry|Frightened) \+ "help"$/.exec(label);
   const defaultValidation: DetectionEvent['alertValidation'] | undefined =
     type === 'fire'
@@ -64,6 +64,26 @@ afterEach(() => {
 });
 
 describe('single active Camera Alert with bounded Event History', () => {
+  it('purges legacy irrelevant object detections while keeping relevant indoor history', () => {
+    const legacy = [
+      event(1, 'object', { label: 'dog' }),
+      event(2, 'object', { label: 'cat' }),
+      event(3, 'object', { label: 'remote' }),
+      event(4, 'object', { label: 'car' }),
+      event(5, 'object', { label: 'person' }),
+      event(6, 'object', { label: 'oven' }),
+    ];
+    localStorage.setItem('msd-detection-events-v1', JSON.stringify(legacy));
+    localStorage.setItem('msd-camera-alerts-v1', JSON.stringify([]));
+
+    const history = loadEventHistory();
+
+    expect(history.events.map(item => item.label)).toEqual(['oven', 'person']);
+    expect(JSON.parse(localStorage.getItem('msd-detection-events-v1')!)
+      .map((item: DetectionEvent) => item.label)).toEqual(['oven', 'person']);
+  });
+
+
   it('migrates legacy stacked alerts to one active alert and historical records', () => {
     const alerts = [
       event(30, 'fire', { clipUrl: 'blob:alert-30' }),
