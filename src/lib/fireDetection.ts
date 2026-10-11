@@ -10,9 +10,9 @@
 //                               static red surfaces (low flicker),
 //                               planar uniform regions (posters/wallpapers)
 //
-// Decision: standalone visual fire still requires color + flicker. Broader
-// smoke/low-visibility evidence is exposed for corroboration with a visual
-// fire candidate; the camera pipeline does not alert on smoke alone.
+// Decision: standalone visual fire requires temporal flame confirmation.
+// Standalone smoke is independently confirmed only after sustained smoke
+// coverage rises while scene visibility meaningfully degrades.
 
 import type { DetectedObject } from '@/types/dashboard';
 
