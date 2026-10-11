@@ -254,7 +254,8 @@ export default function Index() {
     const id = crypto.randomUUID();
     const rejectedValidation = event.alertValidation?.status === 'rejected';
     const unconfirmedFire = event.type === 'fire' && event.fireConfirmed !== true;
-    const storedEvent = rejectedValidation || unconfirmedFire
+    const unconfirmedSmoke = event.type === 'smoke' && event.smokeConfirmed !== true;
+    const storedEvent = rejectedValidation || unconfirmedFire || unconfirmedSmoke
       ? { ...event, snapshot: undefined, priorityScenario: false }
       : event;
     addEvent({ ...storedEvent, id });
