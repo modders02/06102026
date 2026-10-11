@@ -213,6 +213,28 @@ describe('validation gate for Camera Alert', () => {
     expect(registry.result.current.events[0].snapshot).toBeUndefined();
   });
 
+  it('keeps unconfirmed fire out of Camera Alert and strips its snapshot', () => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => registry.result.current.addEvent(event(1, 'fire', {
+      fireConfirmed: false,
+      snapshot: 'data:image/jpeg;base64,false-fire',
+      alertValidation: {
+        status: 'accepted',
+        reason: 'candidate only',
+        keyword: '',
+        emotion: 'visual fire candidate',
+      },
+    })));
+
+    expect(registry.result.current.alertEvents).toEqual([]);
+    expect(registry.result.current.events[0]).toMatchObject({
+      type: 'fire',
+      fireConfirmed: false,
+      priorityScenario: false,
+    });
+    expect(registry.result.current.events[0].snapshot).toBeUndefined();
+  });
+
   it('keeps raw audio distress in Event History even when marked priority by a caller', () => {
     const registry = renderHook(useCameraRegistry);
     act(() => registry.result.current.addEvent(event(1, 'audio-distress', {
