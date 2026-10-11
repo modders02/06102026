@@ -5,6 +5,7 @@ import {
   MultiCamSettings,
 } from '@/types/multicam';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
+import { isRelevantIndoorObject } from '@/types/dashboard';
 
 const CAMERAS_KEY = 'msd-cameras-v1';
 const SETTINGS_KEY = 'msd-multicam-settings-v1';
@@ -12,6 +13,8 @@ const EVENTS_KEY = 'msd-detection-events-v1';
 const ALERTS_KEY = 'msd-camera-alerts-v1';
 export const CAMERA_HISTORY_LIMIT = 50;
 export const isCameraAlert = (event: DetectionEvent) => isPriorityCameraAlert(event);
+const isRelevantStoredEvent = (event: DetectionEvent) =>
+  event.type !== 'object' || isRelevantIndoorObject(event.label);
 
 /** Once an alert is no longer the active Camera Alert, keep it as history only. */
 export const archiveCameraAlert = (event: DetectionEvent): DetectionEvent => ({
@@ -83,7 +86,7 @@ function readEventHistory(): CameraEventHistory {
   if (historyCache && source.eventsRaw === historyCache.eventsRaw && source.alertsRaw === historyCache.alertsRaw) {
     return historyCache.history;
   }
-  const storedEvents = parseEventArray(source.eventsRaw);
+  const storedEvents = parseEventArray(source.eventsRaw).filter(isRelevantStoredEvent);
   // Camera Alert is a live/current slot, not a second history list. Keep only
   // the newest still-valid ACCEPTED alert active. Older accepted alerts become
   // ordinary Event History records so their snapshots/clips remain available.
@@ -124,7 +127,7 @@ export function saveEventHistory(next: CameraEventHistory): CameraEventHistory {
   const archivedAlerts = validAlerts.slice(1).map(archiveCameraAlert);
   const seen = new Set<string>();
   const retainedEvents = [...next.events, ...archivedAlerts]
-    .filter(event => !isCameraAlert(event))
+    .filter(event => !isCameraAlert(event) && isRelevantStoredEvent(event))
     .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
     .filter(event => {
       if (seen.has(event.id)) return false;
@@ -150,9 +153,11 @@ export function loadEventHistory(): CameraEventHistory {
   const history = readEventHistory();
   if (history === historyCache?.history) return history;
   const source = readHistoryStorage();
+  const rawStoredEvents = parseEventArray(source.eventsRaw);
   const storedAlertCount = parseEventArray(source.alertsRaw).filter(isCameraAlert).length;
   let needsMigration = history.events.length > CAMERA_HISTORY_LIMIT
-    || storedAlertCount > 1;
+    || storedAlertCount > 1
+    || rawStoredEvents.some(event => !isRelevantStoredEvent(event));
   try { needsMigration ||= localStorage.getItem(ALERTS_KEY) === null; } catch { /* unavailable storage */ }
   return needsMigration ? saveEventHistory(history) : history;
 }
