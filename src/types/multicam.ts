@@ -70,6 +70,8 @@ export interface DetectionEvent {
   confidence: number;    // 0..1
   /** True only when the event passed the priority-scenario alert gate. */
   priorityScenario?: boolean;
+  /** Fire alerts require this detector-originated confirmation bit. */
+  fireConfirmed?: boolean;
   /** Validation outcome captured at the exact time this event was emitted. */
   alertValidation?: {
     status: 'accepted' | 'rejected';
