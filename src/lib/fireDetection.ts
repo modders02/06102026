@@ -41,6 +41,8 @@ export interface FireDetectionResult {
   /** Visibility dropped over time enough to corroborate a flame candidate. */
   lowVisibilityCorroborated?: boolean;
   confidence: number;            // 0..1 fused
+  /** True when low-light/grayscale hotspot analysis is active. */
+  nightVisionMode?: boolean;
   firePixelRatio: number;
   flickerScore: number;
   smokeRatio: number;            // 0..1 portion of frame matching smoke palette
@@ -60,7 +62,11 @@ export interface FireDetectionResult {
 }
 
 export interface FireDetectorState {
-  history: number[];             // recent fire-pixel ratios (flicker)
+  history: number[];             // recent effective fire-pixel ratios (flicker)
+  /** Mean brightness of night-vision hotspot pixels for temporal flicker. */
+  nightBrightnessHistory: number[];
+  /** Reset temporal evidence when switching between color and night analysis. */
+  mode: 'color' | 'night' | null;
   smokeHistory: number[];        // recent smoke ratios (rising smoke trend)
   visibilityHistory: number[];   // recent visibility scores (drop trend)
   lastBbox: [number, number, number, number] | null;
@@ -73,6 +79,8 @@ export interface FireDetectorState {
 export function createFireState(): FireDetectorState {
   return {
     history: [],
+    nightBrightnessHistory: [],
+    mode: null,
     smokeHistory: [],
     visibilityHistory: [],
     lastBbox: null,
@@ -100,13 +108,28 @@ const PERSON_FIRE_MIN_HISTORY = 3;
 const PERSON_FIRE_PIXEL_DOMINANCE = 0.70;
 
 const MIN_FIRE_RATIO = 0.004;
+const NIGHT_MIN_FIRE_RATIO = 0.003;
 const LIGHTER_AREA_RATIO = 0.002;
 const MIN_FLICKER = 0.000002;
+
+// Night-vision / low-light fire path. Infrared CCTV often removes the red/orange
+// chroma used by the normal detector, leaving flames as a bright neutral hotspot.
+// Requiring temporal change prevents a static lamp, reflection, or white object
+// from becoming an immediate fire alert.
+const NIGHT_SCENE_MEAN_LUM = 0.36;
+const NIGHT_DARK_LUM = 0.22;
+const NIGHT_DARK_PIXEL_SHARE = 0.45;
+const NIGHT_HOT_LUM = 0.62;
+const NIGHT_HOT_MAX_SAT = 0.35;
+const NIGHT_MIN_HISTORY = 2;
+const NIGHT_MIN_RATIO_FLICKER = 0.0000005;
+const NIGHT_MIN_BRIGHTNESS_FLICKER = 0.0002;
 // Legacy smoke-emergency score; the camera pipeline uses smoke as corroboration.
 const SMOKE_COVERAGE_HIGH = 0.18;     // ≥18% of frame
 const VISIBILITY_LOW = 45;            // visibility score (0..100)
 // Poster/wallpaper guard: fire bbox sitting in a very flat, low-edge region.
 const PLANAR_EDGE_DENSITY = 0.03;
+const NIGHT_PLANAR_EDGE_DENSITY = 0.008;
 
 // Temporal smoothing: exponential moving average on the bbox, with a hold
 // window so a couple of dropped frames don't make the overlay flicker off.
@@ -239,8 +262,13 @@ export function detectFire(
   // Single pass: fire pixels, smoke pixels, luminance stats, simple edge count.
   let fireCount = 0;
   let fireCountInsidePerson = 0;
+  let nightHotCount = 0;
+  let nightHotInsidePerson = 0;
+  let nightHotLumSum = 0;
+  let darkPixelCount = 0;
   let smokeCount = 0;
   let minX = width, minY = height, maxX = 0, maxY = 0;
+  let nightMinX = width, nightMinY = height, nightMaxX = 0, nightMaxY = 0;
 
   let lumSum = 0, lumSqSum = 0, lumN = 0;
   let satSum = 0;
@@ -270,6 +298,22 @@ export function detectFire(
         if (y > maxY) maxY = y;
       }
 
+      if (lum <= NIGHT_DARK_LUM) darkPixelCount++;
+
+      // Infrared/night-vision flame candidate: bright, mostly neutral pixels
+      // standing out from a dark scene. Temporal verification happens below.
+      if (lum >= NIGHT_HOT_LUM && sat <= NIGHT_HOT_MAX_SAT) {
+        nightHotCount++;
+        nightHotLumSum += lum;
+        if (personBboxes.some(person => pointInsideBbox(x, y, person))) {
+          nightHotInsidePerson++;
+        }
+        if (x < nightMinX) nightMinX = x;
+        if (y < nightMinY) nightMinY = y;
+        if (x > nightMaxX) nightMaxX = x;
+        if (y > nightMaxY) nightMaxY = y;
+      }
+
       // SMOKE CANDIDATE: dark, grey, or pale/white low-saturation haze.
       // The palette is intentionally broad because smoke never alarms alone;
       // it must cover a meaningful region and corroborate visual fire.
@@ -288,16 +332,29 @@ export function detectFire(
   }
 
   const sampledTotal = Math.ceil(width / step) * Math.ceil(height / step);
-  const ratio = fireCount / sampledTotal;
+  const colorRatio = fireCount / sampledTotal;
+  const nightRatio = nightHotCount / sampledTotal;
   const smokeRatio = smokeCount / sampledTotal;
-  const personFirePixelShare = fireCount > 0 ? fireCountInsidePerson / fireCount : 0;
-  const outsidePersonFirePixelRatio = Math.max(0, fireCount - fireCountInsidePerson) / sampledTotal;
 
   const meanLum = lumSum / Math.max(1, lumN);
   const varLum = Math.max(0, lumSqSum / Math.max(1, lumN) - meanLum * meanLum);
   const contrast = Math.sqrt(varLum);                   // 0..~0.5
   const meanSat = satSum / Math.max(1, lumN);           // 0..1
   const edgeDensity = edgeN ? edgeCount / edgeN : 0;    // 0..1
+  const darkPixelShare = darkPixelCount / Math.max(1, sampledTotal);
+  const nightVisionMode =
+    (meanLum <= NIGHT_SCENE_MEAN_LUM || darkPixelShare >= NIGHT_DARK_PIXEL_SHARE)
+    && meanSat <= 0.45;
+  const useNightHotspot = nightVisionMode && nightRatio > colorRatio;
+  const detectorMode: 'color' | 'night' = useNightHotspot ? 'night' : 'color';
+  const ratio = useNightHotspot ? nightRatio : colorRatio;
+  const effectiveFireCount = useNightHotspot ? nightHotCount : fireCount;
+  const effectiveFireInsidePerson = useNightHotspot ? nightHotInsidePerson : fireCountInsidePerson;
+  const personFirePixelShare = effectiveFireCount > 0
+    ? effectiveFireInsidePerson / effectiveFireCount
+    : 0;
+  const outsidePersonFirePixelRatio = Math.max(0, effectiveFireCount - effectiveFireInsidePerson)
+    / sampledTotal;
 
   // Visibility heuristic: high contrast + edges + saturation => clear (100).
   // Low contrast + few edges + desaturated + bright haze => smoke-blinded (0).
@@ -313,12 +370,36 @@ export function detectFire(
     ),
   );
 
-  // Flicker
+  // Do not mix color-fire and IR-hotspot temporal history: changing camera
+  // modes would otherwise manufacture artificial flicker.
+  if (state.mode !== detectorMode) {
+    state.mode = detectorMode;
+    state.history = [];
+    state.nightBrightnessHistory = [];
+  }
+
   state.history.push(ratio);
   if (state.history.length > 10) state.history.shift();
   const mean = state.history.reduce((s, v) => s + v, 0) / state.history.length;
   const variance =
     state.history.reduce((s, v) => s + (v - mean) ** 2, 0) / state.history.length;
+
+  const nightHotMeanLum = nightHotCount > 0 ? nightHotLumSum / nightHotCount : 0;
+  state.nightBrightnessHistory.push(useNightHotspot ? nightHotMeanLum : 0);
+  if (state.nightBrightnessHistory.length > 10) state.nightBrightnessHistory.shift();
+  const nightBrightnessMean = state.nightBrightnessHistory.reduce((sum, value) => sum + value, 0)
+    / state.nightBrightnessHistory.length;
+  const nightBrightnessVariance = state.nightBrightnessHistory.reduce(
+    (sum, value) => sum + (value - nightBrightnessMean) ** 2,
+    0,
+  ) / state.nightBrightnessHistory.length;
+  const nightTemporalVerified = !useNightHotspot || (
+    state.history.length >= NIGHT_MIN_HISTORY
+    && (
+      variance >= NIGHT_MIN_RATIO_FLICKER
+      || nightBrightnessVariance >= NIGHT_MIN_BRIGHTNESS_FLICKER
+    )
+  );
 
   // Smoke + visibility temporal trend
   state.smokeHistory.push(smokeRatio);
@@ -327,7 +408,10 @@ export function detectFire(
   if (state.visibilityHistory.length > 12) state.visibilityHistory.shift();
 
   let bbox: [number, number, number, number] | undefined;
-  if (fireCount > 0 && maxX > minX && maxY > minY) {
+  if (useNightHotspot && nightHotCount > 0 && nightMaxX > nightMinX && nightMaxY > nightMinY) {
+    bbox = [nightMinX, nightMinY, nightMaxX - nightMinX, nightMaxY - nightMinY];
+    state.lastBbox = bbox;
+  } else if (fireCount > 0 && maxX > minX && maxY > minY) {
     bbox = [minX, minY, maxX - minX, maxY - minY];
     state.lastBbox = bbox;
   }
@@ -357,7 +441,8 @@ export function detectFire(
     suppressionLabel,
   });
 
-  const fireCandidate = ratio > 0 && !!bbox;
+  const minimumRatio = useNightHotspot ? NIGHT_MIN_FIRE_RATIO : 0;
+  const fireCandidate = ratio > minimumRatio && !!bbox && nightTemporalVerified;
 
   // Temporal corroboration. A naturally gray room, gray wall, white ceiling,
   // or dark CCTV image can have a large low-saturation area without smoke.
@@ -379,6 +464,7 @@ export function detectFire(
   const baseResult = {
     screenSuppressed: false,
     fireCandidate,
+    nightVisionMode: useNightHotspot,
     firePixelRatio: ratio,
     flickerScore: variance,
     smokeRatio,
@@ -464,8 +550,22 @@ export function detectFire(
     };
   }
 
+  if (useNightHotspot && ratio >= NIGHT_MIN_FIRE_RATIO && !nightTemporalVerified) {
+    return {
+      ...baseResult,
+      detected: false,
+      fireCandidate: false,
+      fireDetected: false,
+      smokeEmergency: false,
+      confidence: 0.15,
+      rejectedReason: 'night-vision hotspot awaiting flame flicker',
+      saliency: makeSaliency(0, positive * 0.75, 'night hotspot lacks temporal flame evidence'),
+    };
+  }
+
   // ---- Fire rejection ladder ----
-  if (ratio < MIN_FIRE_RATIO) {
+  const activeMinFireRatio = useNightHotspot ? NIGHT_MIN_FIRE_RATIO : MIN_FIRE_RATIO;
+  if (ratio < activeMinFireRatio) {
     return {
       ...baseResult,
       detected: smokeEmergency,
@@ -495,7 +595,9 @@ export function detectFire(
 
     // Poster / wallpaper guard: fire candidate sits in a very low-edge,
     // low-flicker region => printed/displayed surface, not a real flame.
-    if (edgeDensity < PLANAR_EDGE_DENSITY && variance < MIN_FLICKER * 2) {
+    const planarEdgeThreshold = useNightHotspot ? NIGHT_PLANAR_EDGE_DENSITY : PLANAR_EDGE_DENSITY;
+    const weakTemporalEvidence = useNightHotspot ? !nightTemporalVerified : variance < MIN_FLICKER * 2;
+    if (edgeDensity < planarEdgeThreshold && weakTemporalEvidence) {
       return {
         ...baseResult,
         detected: false,
@@ -509,7 +611,7 @@ export function detectFire(
     }
   }
 
-  if (state.history.length >= 5 && variance < MIN_FLICKER) {
+  if (!useNightHotspot && state.history.length >= 5 && variance < MIN_FLICKER) {
     return {
       ...baseResult,
       detected: smokeEmergency,
@@ -523,6 +625,14 @@ export function detectFire(
 
   // ---- Real fire confidence ----
   let conf = Math.min(1, ratio * 30 + Math.min(0.5, variance * 50000));
+  if (useNightHotspot) {
+    conf = Math.min(
+      1,
+      conf
+        + Math.min(0.2, nightBrightnessVariance * 300)
+        + 0.12,
+    );
+  }
   // Smoke + flames together is the strongest possible signal -> boost.
   if (smokeRatio > 0.08) conf = Math.min(1, conf + 0.15);
   // Vanishing visibility while flames present -> boost.
