@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeAttentionScore } from '@/lib/attentionFusion';
 import { validateFusionCycle } from '@/lib/signalValidation';
+import { classifyPriorityScenario } from '@/lib/priorityScenario';
 import {
   fuseDistressSignals,
   makeDistressFaceSignal,
@@ -42,15 +43,39 @@ describe('panelist realistic-condition scenario matrix', () => {
     expect(fuseDistressSignals(face, speech)).not.toBeNull();
   });
 
-  it('fire-colored visuals need corroboration when they are only candidates', () => {
+  it('fire candidate + spoken fire remains supporting evidence, not an emergency', () => {
     const candidate = makeFireVisualSignal(true, 0.4, 0.002, 0.03, 80, 1000);
     expect(isImmediateFireSmoke(candidate)).toBe(false);
     expect(fuseFireWithSpeech(candidate, null)).toBeNull();
     expect(fuseFireWithSpeech(candidate, makeFireSpeechSignal('fire', 0.95, 1500))).not.toBeNull();
+
+    expect(classifyPriorityScenario({
+      type: 'fire',
+      label: 'Visual fire candidate + "fire"',
+      fireConfirmed: false,
+      alertValidation: {
+        status: 'accepted',
+        reason: 'supporting evidence only',
+        keyword: 'fire',
+        emotion: 'visual fire candidate',
+      },
+    }, 'critical')).toMatchObject({ priority: false, emergency: false });
   });
 
-  it('visual fire + temporal smoke evidence remains valid without speech', () => {
+  it('fire candidate + temporal smoke remains supporting evidence until fire is confirmed', () => {
     const candidate = makeFireVisualSignal(true, 0.5, 0.01, 0.25, 55, 1000, true, false);
     expect(isImmediateFireSmoke(candidate)).toBe(true);
+
+    expect(classifyPriorityScenario({
+      type: 'fire',
+      label: 'Visual fire candidate + smoke',
+      fireConfirmed: false,
+      alertValidation: {
+        status: 'accepted',
+        reason: 'smoke corroboration only',
+        keyword: '',
+        emotion: 'visual fire candidate',
+      },
+    }, 'critical')).toMatchObject({ priority: false, emergency: false });
   });
 });
