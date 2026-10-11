@@ -140,6 +140,13 @@ describe('priority scenario camera alert policy', () => {
       fireConfirmed: false,
       alertValidation: accepted('', 'visual fire candidate'),
     }, 'critical')).toMatchObject({ priority: false, emergency: false });
+
+    expect(classifyPriorityScenario({
+      type: 'smoke',
+      label: 'Heavy smoke',
+      priorityScenario: true,
+      alertValidation: accepted('', 'smoke'),
+    }, 'critical')).toMatchObject({ priority: false, emergency: false });
   });
 
   it('does not let priorityScenario bypass detector-confirmed fire', () => {
