@@ -31,6 +31,7 @@ const event = (
     type,
     label,
     confidence: 0.9,
+    fireConfirmed: type === 'fire' ? true : undefined,
     alertValidation: defaultValidation,
     timestamp: new Date(index * 1000).toISOString(),
     ...extra,
