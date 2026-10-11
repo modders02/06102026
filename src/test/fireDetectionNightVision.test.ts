@@ -50,17 +50,44 @@ describe('night-vision fire detection', () => {
     expect(first.rejectedReason).toMatch(/night-vision hotspot/i);
 
     const second = detectFire(
-      nightFrame(120, 80, [46, 22, 30, 40], 238),
+      nightFrame(120, 80, [46, 22, 30, 40], 232),
+      state,
+    );
+    expect(second.fireDetected).toBe(false);
+
+    const third = detectFire(
+      nightFrame(120, 80, [50, 20, 22, 44], 248),
       state,
     );
 
-    expect(second.nightVisionMode).toBe(true);
-    expect(second.firePixelRatio).toBeGreaterThan(0.003);
-    expect(second.fireCandidate).toBe(true);
-    expect(second.fireDetected).toBe(true);
-    expect(second.detected).toBe(true);
-    expect(second.confidence).toBeGreaterThan(0.3);
-    expect(second.bbox).toBeDefined();
+    expect(third.nightVisionMode).toBe(true);
+    expect(third.firePixelRatio).toBeGreaterThan(0.003);
+    expect(third.fireCandidate).toBe(true);
+    expect(third.fireDetected).toBe(true);
+    expect(third.detected).toBe(true);
+    expect(third.confidence).toBeGreaterThan(0.3);
+    expect(third.bbox).toBeDefined();
+  });
+
+  it('does not treat IR auto-exposure brightness fluctuation on a fixed hotspot as fire', () => {
+    const state = createFireState();
+
+    const levels = [205, 235, 215, 245, 225];
+    let result = detectFire(
+      nightFrame(120, 80, [48, 24, 24, 36], levels[0]),
+      state,
+    );
+    for (const level of levels.slice(1)) {
+      result = detectFire(
+        nightFrame(120, 80, [48, 24, 24, 36], level),
+        state,
+      );
+    }
+
+    expect(result.nightVisionMode).toBe(true);
+    expect(result.fireCandidate).toBe(false);
+    expect(result.fireDetected).toBe(false);
+    expect(result.detected).toBe(false);
   });
 
   it('does not call a static bright lamp in darkness a fire', () => {
