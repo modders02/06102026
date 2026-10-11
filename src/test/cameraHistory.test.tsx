@@ -32,6 +32,7 @@ const event = (
     label,
     confidence: 0.9,
     fireConfirmed: type === 'fire' ? true : undefined,
+    smokeConfirmed: type === 'smoke' ? true : undefined,
     alertValidation: defaultValidation,
     timestamp: new Date(index * 1000).toISOString(),
     ...extra,
@@ -230,6 +231,28 @@ describe('validation gate for Camera Alert', () => {
     expect(registry.result.current.events[0]).toMatchObject({
       type: 'fire',
       fireConfirmed: false,
+      priorityScenario: false,
+    });
+    expect(registry.result.current.events[0].snapshot).toBeUndefined();
+  });
+
+  it('keeps unconfirmed smoke out of Camera Alert and strips its snapshot', () => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => registry.result.current.addEvent(event(1, 'smoke', {
+      smokeConfirmed: false,
+      snapshot: 'data:image/jpeg;base64,false-smoke',
+      alertValidation: {
+        status: 'accepted',
+        reason: 'candidate only',
+        keyword: '',
+        emotion: 'visual smoke candidate',
+      },
+    })));
+
+    expect(registry.result.current.alertEvents).toEqual([]);
+    expect(registry.result.current.events[0]).toMatchObject({
+      type: 'smoke',
+      smokeConfirmed: false,
       priorityScenario: false,
     });
     expect(registry.result.current.events[0].snapshot).toBeUndefined();
