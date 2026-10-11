@@ -114,14 +114,14 @@ const MIN_FLICKER = 0.000002;
 
 // Night-vision / low-light fire path. Infrared CCTV often removes the red/orange
 // chroma used by the normal detector, leaving flames as a bright neutral hotspot.
-// Requiring temporal change prevents a static lamp, reflection, or white object
-// from becoming an immediate fire alert.
+// Requiring both hotspot-area change and brightness flicker prevents static
+// lamps, IR reflections, or camera auto-exposure from becoming fire alerts.
 const NIGHT_SCENE_MEAN_LUM = 0.36;
 const NIGHT_DARK_LUM = 0.22;
 const NIGHT_DARK_PIXEL_SHARE = 0.45;
 const NIGHT_HOT_LUM = 0.62;
 const NIGHT_HOT_MAX_SAT = 0.35;
-const NIGHT_MIN_HISTORY = 2;
+const NIGHT_MIN_HISTORY = 3;
 const NIGHT_MIN_RATIO_FLICKER = 0.0000005;
 const NIGHT_MIN_BRIGHTNESS_FLICKER = 0.0002;
 // Legacy smoke-emergency score; the camera pipeline uses smoke as corroboration.
@@ -397,7 +397,7 @@ export function detectFire(
     state.history.length >= NIGHT_MIN_HISTORY
     && (
       variance >= NIGHT_MIN_RATIO_FLICKER
-      || nightBrightnessVariance >= NIGHT_MIN_BRIGHTNESS_FLICKER
+      && nightBrightnessVariance >= NIGHT_MIN_BRIGHTNESS_FLICKER
     )
   );
 
