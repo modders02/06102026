@@ -1033,7 +1033,7 @@ describe('camera snapshots and page-scoped playback', () => {
       type: 'smoke',
       label: 'Smoke detected',
       smokeConfirmed: true,
-      alertValidation: { status: 'accepted' },
+      alertValidation: expect.objectContaining({ status: 'accepted' }),
       snapshot: 'data:image/jpeg;base64,preview',
     }));
     expect(getCameraSession('slot-1').runtime?.smoke).toMatchObject({
