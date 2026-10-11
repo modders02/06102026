@@ -460,7 +460,8 @@ export function detectFire(
   const smokeEmergency =
     smokeRatio >= SMOKE_COVERAGE_HIGH &&
     visibility <= VISIBILITY_LOW &&
-    (smokeRising || visibilityDropping);
+    smokeRising &&
+    visibilityDropping;
 
   const baseResult = {
     screenSuppressed: false,
