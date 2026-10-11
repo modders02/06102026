@@ -30,7 +30,10 @@ function shouldOpenEmergencyPopup(
   severity?: AlertSeverity,
 ): boolean {
   if (severity !== undefined && severity !== 'critical') return false;
-  if (event.type === 'fire' || event.type === 'smoke') return true;
+  if (event.type === 'fire') {
+    return event.fireConfirmed === true && hasAcceptedValidation(event);
+  }
+  if (event.type === 'smoke') return false;
   return isValidatedSpokenDistress(event);
 }
 
