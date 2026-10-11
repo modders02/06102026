@@ -72,24 +72,34 @@ export const DETECTABLE_OBJECTS = [
   'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush',
 ] as const;
 
-// Indoor-only subset — the object picker is narrowed to things that actually
-// appear inside a home (no vehicles, animals, sports or outdoor street items).
+// Application-visible object whitelist for indoor safety/context monitoring.
+// COCO-SSD can classify many more categories, but animals, vehicles, sports,
+// outdoor/street items and low-value household clutter are intentionally hidden.
+// "remote" is explicitly excluded because it adds noise without useful context.
 export const INDOOR_OBJECTS = [
   'person',
-  'chair', 'couch', 'bed', 'dining table', 'potted plant', 'toilet', 'sink',
-  'tv', 'laptop', 'cell phone', 'remote', 'keyboard', 'mouse',
-  'bottle', 'cup', 'wine glass', 'fork', 'knife', 'spoon', 'bowl',
+  'chair', 'couch', 'bed', 'dining table', 'toilet', 'sink',
+  // Screens/electronics are retained for context and fire-on-screen suppression.
+  'tv', 'laptop', 'cell phone', 'keyboard', 'mouse',
+  // Containers and sharp objects can be relevant to indoor safety/context.
+  'bottle', 'cup', 'bowl', 'knife', 'scissors',
+  // Kitchen appliances are relevant to indoor hazard context.
   'microwave', 'oven', 'toaster', 'refrigerator',
-  'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush',
-  'backpack', 'handbag', 'umbrella', 'suitcase',
+  // Bags/luggage can be useful indoor context without enabling outdoor classes.
+  'backpack', 'handbag', 'suitcase',
 ] as const;
+
+const RELEVANT_INDOOR_OBJECTS = new Set<string>(INDOOR_OBJECTS);
+
+export function isRelevantIndoorObject(label: string | null | undefined): boolean {
+  return RELEVANT_INDOOR_OBJECTS.has((label ?? '').trim().toLowerCase());
+}
 
 export const DEFAULT_PRIORITY_OBJECTS = [
   'person',
-  'chair',
-  'book',
-  'potted plant',
-  'bottle', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'wine glass',
-  // Screens are always tracked so fire-inside-TV/phone is flagged as false alarm
+  'chair', 'couch', 'bed', 'dining table',
+  'bottle', 'cup', 'bowl', 'knife', 'scissors',
+  'microwave', 'oven', 'toaster', 'refrigerator',
+  // Screens stay available because fire-inside-TV/phone must be suppressible.
   'tv', 'cell phone', 'laptop',
 ];
