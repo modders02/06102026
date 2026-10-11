@@ -824,7 +824,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
   });
 
-  it('verifies a small visual fire candidate plus fire on a current visual frame', async () => {
+  it('does not alert on spoken fire plus an unconfirmed visual candidate', async () => {
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
     mocked.detectFire.mockReturnValue({
       fireCandidate: true,
@@ -840,13 +840,12 @@ describe('camera snapshots and page-scoped playback', () => {
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
-    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'fire',
-      label: 'Verified fire: visual fire + "fire"',
-      cameraId: 'slot-1',
-      snapshot: 'data:image/jpeg;base64,preview',
-    }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
+      status: 'rejected',
+      keyword: 'fire',
+    });
   });
 
   it('does not let a stale fire candidate plus fire verify fire once a device screen is recognized', async () => {
@@ -898,7 +897,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(getCameraSession('slot-1').runtime?.smoke.detected).toBe(false);
   });
 
-  it('immediately alerts when a visual fire candidate overlaps a smoke region', async () => {
+  it('does not alert when smoke corroborates only an unconfirmed fire candidate', async () => {
     mocked.detectFire.mockReturnValueOnce({
       fireCandidate: true,
       fireDetected: false,
@@ -914,11 +913,8 @@ describe('camera snapshots and page-scoped playback', () => {
     const onEvent = vi.fn();
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
-    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'fire',
-      label: 'Verified fire: fire + smoke region (24%)',
-      cameraId: 'slot-1',
-    }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
+    expect(getCameraSession('slot-1').runtime?.fire.detected).toBe(false);
   });
 
   it('captures one Camera Alert snapshot for one continuous fire trigger, then allows a new trigger after clear', async () => {
@@ -947,6 +943,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(fireCalls()).toHaveLength(1);
     expect(fireCalls()[0]).toMatchObject({
       type: 'fire',
+      fireConfirmed: true,
       alertValidation: { status: 'accepted' },
       snapshot: 'data:image/jpeg;base64,preview',
     });
@@ -973,7 +970,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(fireCalls()).toHaveLength(2);
   });
 
-  it('immediately alerts on visual fire plus low visibility', async () => {
+  it('does not alert on low visibility with only an unconfirmed fire candidate', async () => {
     mocked.detectFire.mockReturnValueOnce({
       fireCandidate: true,
       fireDetected: false,
@@ -989,11 +986,8 @@ describe('camera snapshots and page-scoped playback', () => {
     const onEvent = vi.fn();
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
-    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'fire',
-      label: 'Verified fire: fire + low visibility (40/100)',
-      cameraId: 'slot-1',
-    }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
+    expect(getCameraSession('slot-1').runtime?.fire.detected).toBe(false);
   });
 
   it('does not verify a fire-colored patch plus static gray background as fire', async () => {
