@@ -111,6 +111,7 @@ const MIN_FIRE_RATIO = 0.004;
 const NIGHT_MIN_FIRE_RATIO = 0.003;
 const LIGHTER_AREA_RATIO = 0.002;
 const MIN_FLICKER = 0.000002;
+const COLOR_MIN_HISTORY = 3;
 
 // Night-vision / low-light fire path. Infrared CCTV often removes the red/orange
 // chroma used by the normal detector, leaving flames as a bright neutral hotspot.
@@ -563,6 +564,33 @@ export function detectFire(
     };
   }
 
+  if (!useNightHotspot && ratio >= MIN_FIRE_RATIO) {
+    if (state.history.length < COLOR_MIN_HISTORY) {
+      return {
+        ...baseResult,
+        detected: false,
+        fireCandidate: true,
+        fireDetected: false,
+        smokeEmergency: false,
+        confidence: 0.2,
+        rejectedReason: 'fire-color region awaiting temporal flame confirmation',
+        saliency: makeSaliency(0, positive * 0.6, 'awaiting temporal flame confirmation'),
+      };
+    }
+    if (variance < MIN_FLICKER) {
+      return {
+        ...baseResult,
+        detected: false,
+        fireCandidate: false,
+        fireDetected: false,
+        smokeEmergency: false,
+        confidence: 0.2,
+        rejectedReason: 'no flicker — static red/orange object',
+        saliency: makeSaliency(0, positive, 'no flicker — static red/orange object'),
+      };
+    }
+  }
+
   // ---- Fire rejection ladder ----
   const activeMinFireRatio = useNightHotspot ? NIGHT_MIN_FIRE_RATIO : MIN_FIRE_RATIO;
   if (ratio < activeMinFireRatio) {
@@ -609,18 +637,6 @@ export function detectFire(
         saliency: makeSaliency(0, positive, 'flat planar region (poster/wallpaper)'),
       };
     }
-  }
-
-  if (!useNightHotspot && state.history.length >= 5 && variance < MIN_FLICKER) {
-    return {
-      ...baseResult,
-      detected: smokeEmergency,
-      fireDetected: false,
-      smokeEmergency,
-      confidence: smokeEmergency ? 0.6 : 0.3,
-      rejectedReason: 'no flicker — static red object',
-      saliency: makeSaliency(0, smokeEmergency ? firePts : firePts + flickerPts, 'no flicker — static red object'),
-    };
   }
 
   // ---- Real fire confidence ----
