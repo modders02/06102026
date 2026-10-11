@@ -78,20 +78,13 @@ function inferDistress(objects: DetectedObject[], audioFeatures: AudioFeatures, 
     const activities: string[] = [];
     if (labels.includes('laptop') || labels.includes('keyboard') || labels.includes('mouse')) activities.push('Working on computer');
     if (labels.includes('cell phone')) activities.push('Using phone');
-    if (labels.includes('book')) activities.push('Reading');
-    if (labels.includes('cup') || labels.includes('wine glass') || labels.includes('bottle')) activities.push('Drinking');
-    if (labels.includes('fork') || labels.includes('knife') || labels.includes('spoon') || labels.includes('bowl')) activities.push('Eating');
-    if (labels.includes('pizza') || labels.includes('sandwich') || labels.includes('hot dog') || labels.includes('cake')) activities.push('Eating food');
-    if (labels.includes('tv') || labels.includes('remote')) activities.push('Watching TV');
-    if (labels.includes('scissors')) activities.push('Cutting/Crafting');
-    if (labels.includes('toothbrush')) activities.push('Brushing teeth');
-    if (labels.includes('tie') || labels.includes('backpack') || labels.includes('suitcase')) activities.push('Getting ready');
-    if (labels.includes('sports ball') || labels.includes('tennis racket') || labels.includes('baseball bat')) activities.push('Playing sports');
-    if (labels.includes('bicycle') || labels.includes('motorcycle')) activities.push('Riding');
-    if (labels.includes('cat') || labels.includes('dog')) activities.push('With pet');
+    if (labels.includes('cup') || labels.includes('bottle')) activities.push('Drinking');
+    if (labels.includes('knife') || labels.includes('scissors')) activities.push('Sharp object in use');
+    if (labels.includes('tv')) activities.push('Watching TV');
+    if (labels.includes('backpack') || labels.includes('handbag') || labels.includes('suitcase')) activities.push('Bag/luggage present');
     if (labels.includes('chair') || labels.includes('couch') || labels.includes('bed')) activities.push('Sitting/Resting');
     if (labels.includes('dining table')) activities.push('At table');
-    if (labels.includes('microwave') || labels.includes('oven') || labels.includes('sink') || labels.includes('refrigerator')) activities.push('In kitchen');
+    if (labels.includes('microwave') || labels.includes('oven') || labels.includes('toaster') || labels.includes('sink') || labels.includes('refrigerator')) activities.push('In kitchen');
     if (audioFeatures.speechDetected) activities.push('Speaking');
 
     if (activities.length === 0) {
