@@ -78,17 +78,32 @@ describe('device-screen fire suppression', () => {
     expect(missedDeviceFrame.fireDetected).toBe(false);
   });
 
-  it('does not suppress a real fire region away from the detected screen', () => {
+  it('does not suppress a temporally confirmed real fire region away from the detected screen', () => {
     const state = createFireState();
-    const result = detectFire(
-      fireFrame(100, 100, [55, 55, 40, 40]),
+    const tv = device('tv', [0, 0, 30, 30]);
+
+    const first = detectFire(
+      fireFrame(100, 100, [55, 55, 36, 38]),
       state,
-      [device('tv', [0, 0, 30, 30])],
+      [tv],
+    );
+    const second = detectFire(
+      fireFrame(100, 100, [54, 53, 40, 42]),
+      state,
+      [tv],
+    );
+    const third = detectFire(
+      fireFrame(100, 100, [57, 54, 34, 40]),
+      state,
+      [tv],
     );
 
-    expect(result.screenSuppressed).toBe(false);
-    expect(result.fireCandidate).toBe(true);
-    expect(result.fireDetected).toBe(true);
+    expect(first.screenSuppressed).toBe(false);
+    expect(first.fireDetected).toBe(false);
+    expect(second.fireDetected).toBe(false);
+    expect(third.screenSuppressed).toBe(false);
+    expect(third.fireCandidate).toBe(true);
+    expect(third.fireDetected).toBe(true);
   });
 
   it('expires old screen memory instead of suppressing forever', () => {
