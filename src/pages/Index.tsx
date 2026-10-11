@@ -35,12 +35,7 @@ import {
   computeAttentionScore,
   objectRelevanceScore,
 } from '@/lib/attentionFusion';
-import {
-  fireSpeechLabel,
-  fuseFireWithSpeech,
-  makeFireVisualSignal,
-  makeFireSpeechSignal,
-} from '@/lib/fireFusion';
+import { makeFireSpeechSignal } from '@/lib/fireFusion';
 import {
   DISTRESS_FACE_FRESHNESS_MS,
   makeDistressFaceSignal,
