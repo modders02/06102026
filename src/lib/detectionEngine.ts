@@ -1,6 +1,6 @@
 import * as cocoSsd from '@tensorflow-models/coco-ssd';
 import '@tensorflow/tfjs';
-import type { DetectedObject } from '@/types/dashboard';
+import { isRelevantIndoorObject, type DetectedObject } from '@/types/dashboard';
 
 /**
  * Shared COCO-SSD weights (loaded once), but every camera pipeline keeps its
@@ -29,10 +29,16 @@ export async function detectObjects(
   minConfidence = 0.4,
 ): Promise<DetectedObject[]> {
   const m = model ?? (await loadDetector());
-  const predictions = await m.detect(source, 20, minConfidence);
-  return predictions.map(p => ({
-    label: p.class,
-    confidence: p.score,
-    bbox: [p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3]] as [number, number, number, number],
-  }));
+  // Ask COCO-SSD for a wider raw pool, then expose only app-relevant indoor
+  // classes. This prevents cat/dog/remote/vehicles/sports/outdoor clutter from
+  // displacing useful indoor detections in the final 20 results.
+  const predictions = await m.detect(source, 40, minConfidence);
+  return predictions
+    .filter(prediction => isRelevantIndoorObject(prediction.class))
+    .slice(0, 20)
+    .map(p => ({
+      label: p.class,
+      confidence: p.score,
+      bbox: [p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3]] as [number, number, number, number],
+    }));
 }
