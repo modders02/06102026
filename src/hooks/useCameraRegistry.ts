@@ -70,7 +70,8 @@ export function useCameraRegistry() {
     const current = loadEventHistory();
     const rejectedValidation = evt.alertValidation?.status === 'rejected';
     const unconfirmedFire = evt.type === 'fire' && evt.fireConfirmed !== true;
-    const captured = rejectedValidation || unconfirmedFire
+    const unconfirmedSmoke = evt.type === 'smoke' && evt.smokeConfirmed !== true;
+    const captured = rejectedValidation || unconfirmedFire || unconfirmedSmoke
       ? { ...evt, snapshot: undefined, priorityScenario: false }
       : { ...evt, snapshot: evt.snapshot || captureCameraEventSnapshot(evt.cameraId) };
     const alert = isCameraAlert(captured);
