@@ -23,6 +23,7 @@ from msds.api import app
 from msds.binaries import binary_report, install_hint
 from msds.config import API_PORT, HLS_PORT
 from msds.manager import start_mediamtx, stop_all_cameras, stop_mediamtx, watchdog
+from msds.service_recovery import api_port_in_use
 
 
 def shutdown(*_args):
@@ -32,6 +33,19 @@ def shutdown(*_args):
 
 
 def main() -> None:
+    # Do not start a second MediaMTX if the API port already belongs to
+    # another running MSDS instance (Electron reuses an existing bridge).
+    # Deliberately never kill a healthy/unknown API listener automatically.
+    if api_port_in_use(API_PORT):
+        print(
+            f"[MSDS startup] API port {API_PORT} is already in use. "
+            "The previous camera service may already be running. "
+            "Close that instance before starting another. "
+            "MediaMTX and camera processes have not been started.",
+            file=sys.stderr, flush=True,
+        )
+        raise SystemExit(2)
+
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
