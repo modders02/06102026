@@ -57,7 +57,7 @@ jobs:
       - name: Verify conversion and split isolation
         run: python -m unittest discover -s training/facial_distress/tests -p "test_*.py"
       - name: Check optional training script syntax without heavy torch downloads
-        run: python -m py_compile training/facial_distress/import_fer2013.py training/facial_distress/import_own_photos.py training/facial_distress/train_expressions.py
+        run: python -m py_compile training/facial_distress/import_fer2013.py training/facial_distress/import_own_photos.py training/facial_distress/train_expressions.py training/facial_distress/predict_expressions.py
 
   # Regression coverage for the Python camera bridge and custom keyword spotter.
   local-camera-server:
