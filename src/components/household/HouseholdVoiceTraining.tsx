@@ -22,8 +22,10 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
   const active = useRef(true);
   const manifest = words.map(w => `${w.id}:${w.phrase}`).sort().join('|');
   const eligible = validVoiceWords(words);
+  const hasSavedPhrase = eligible.length > 0;
 
   const refresh = useCallback(async () => {
+    if (!validVoiceWords(words).length) return;
     setBusy(true);
     setError('');
     try {
@@ -53,7 +55,7 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
   };
 
   const start = async (wordId: string, phrase: string) => {
-    if (busy || recording) return;
+    if (busy || recording || !hasSavedPhrase || (wordId !== 'unknown' && !eligible.some(word => word.id === wordId))) return;
     setError('');
     setMessage('');
     let stream: MediaStream | undefined;
@@ -82,7 +84,7 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
           const next = await getHouseholdVoiceStatus();
           if (active.current) {
             setStatus(next);
-            setMessage(`Captured another sample for "${phrase}". The recording is shared with your household.`);
+            setMessage(`Sample saved for "${phrase}".`);
           }
         } catch (e) {
           if (active.current) setError(e instanceof Error ? e.message : String(e));
@@ -106,27 +108,18 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
     { id: 'unknown', phrase: 'Non-keyword speech (unknown)', key: 'unknown', required: UNKNOWN_MINIMUM },
   ];
 
+  if (!hasSavedPhrase) return null;
+
   return (
     <div className="rounded-xl border border-primary/20 bg-card p-4 space-y-4" data-testid="household-voice-training">
       <div className="flex items-center justify-between gap-2">
-        <div>
-          <h4 className="text-sm font-bold flex items-center gap-2"><Mic className="h-4 w-4" /> Household voice training</h4>
-          <p className="text-xs text-muted-foreground mt-1">
-            Members can teach MSDS how they pronounce English wake words. Record each phrase at least three times.
-            Other household members can contribute samples and sync them on their own MSDS desktop.
-          </p>
-        </div>
+        <h4 className="text-sm font-bold flex items-center gap-2"><Mic className="h-4 w-4" /> Household voice training</h4>
         <button type="button" aria-label="Sync household voice training" title="Sync from household"
           onClick={() => void refresh()} disabled={busy || !!recording}
           className="p-2 rounded-lg border border-border hover:bg-muted disabled:opacity-50">
           <RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} />
         </button>
       </div>
-      <p className="text-xs text-muted-foreground">
-        Train the five <strong>unknown</strong> samples using different ordinary, non-emergency phrases.
-        Record from the same room and microphone type used for monitoring when possible.
-        Recorded audio is stored in your household's private Supabase bucket; local MSDS uses acoustic templates.
-      </p>
       <div className="space-y-2">
         {trainingRows.map(word => {
           const count = status?.keywords[word.key] ?? 0;
@@ -166,10 +159,7 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
       {busy && <p className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Processing household voice samples…</p>}
       {message && <p role="status" className="text-xs text-success">{message}</p>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-      {status && <p className="text-xs font-medium">
-        {status.open_set_ready ? 'Voice matching can run. Verify using real CCTV audio before relying on alerts.'
-          : 'Training incomplete: a wake word and the unknown class need sufficient samples.'}
-      </p>}
+      {status && <p className="text-xs font-medium">{status.open_set_ready ? 'Voice training ready' : 'Training incomplete'}</p>}
     </div>
   );
 }
