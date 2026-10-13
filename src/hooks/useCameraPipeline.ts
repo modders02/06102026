@@ -1175,7 +1175,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         const candidate = (kws?.last_candidate || '').replace(/_/g, ' ').trim();
         const decision = kws?.last_decision || '';
         // The ASR-verified outcomes are accepted, not rejected diagnostics.
-        if (candidate && decision && !['accepted', 'verified', 'verified_help_rescue'].includes(decision)) {
+        if (candidate && decision && !['accepted', 'verified', 'verified_help_rescue', 'verification_pending'].includes(decision)) {
           const reasons: Record<string, string> = {
             negative_not_ready: 'UNKNOWN/non-keyword validation is not ready.',
             duration_mismatch: 'Keyword duration does not match the trained examples.',
