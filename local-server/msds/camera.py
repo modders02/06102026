@@ -207,6 +207,9 @@ class Camera:
     kws_verification_target: str = ""
     kws_help_rescue_source: str = ""
     kws_verification_transcript: str = ""
+    kws_verification_raw_transcript: str = ""
+    kws_verification_no_speech_prob: float | None = None
+    kws_verification_avg_logprob: float | None = None
     kws_verification_error: str = ""
     _last_kws_publish_ts: float = 0.0
     _kws_enroll_suppress_until: float = 0.0
@@ -540,12 +543,18 @@ class Camera:
                         self.kws_verification_state = "verifying"
                         self.kws_verification_target = rescue.keyword if rescue else decision.keyword
                         self.kws_verification_transcript = ""
+                        self.kws_verification_raw_transcript = ""
+                        self.kws_verification_no_speech_prob = None
+                        self.kws_verification_avg_logprob = None
                         self.kws_verification_error = ""
                         verification = kws_verifier.verify_kws_segment(
                             segment, self.kws_verification_target
                         )
                         self.kws_verification_state = verification.state
                         self.kws_verification_transcript = verification.transcript
+                        self.kws_verification_raw_transcript = verification.raw_transcript
+                        self.kws_verification_no_speech_prob = verification.no_speech_prob
+                        self.kws_verification_avg_logprob = verification.avg_logprob
                         self.kws_verification_error = verification.error
                         # HELP rescue is stricter than regular verification:
                         # ASR must return the isolated word HELP, nothing else.
@@ -611,6 +620,9 @@ class Camera:
                     self.kws_verification_state = "not_attempted"
                     self.kws_verification_target = ""
                     self.kws_verification_transcript = ""
+                    self.kws_verification_raw_transcript = ""
+                    self.kws_verification_no_speech_prob = None
+                    self.kws_verification_avg_logprob = None
                     self.kws_verification_error = ""
             else:
                 self.kws_last_candidate = ""
@@ -1194,6 +1206,9 @@ class Camera:
         self.kws_verification_target = ""
         self.kws_help_rescue_source = ""
         self.kws_verification_transcript = ""
+        self.kws_verification_raw_transcript = ""
+        self.kws_verification_no_speech_prob = None
+        self.kws_verification_avg_logprob = None
         self.kws_verification_error = ""
         self._last_kws_publish_ts = 0.0
         self._kws_enroll_suppress_until = 0.0
@@ -1294,10 +1309,14 @@ class Camera:
                 "help_rescue_enabled": kws_verifier.help_rescue_enabled(),
                 "verification_enabled": kws_verifier.enabled(),
                 "verification_model": kws_verifier.model_name() if kws_verifier.enabled() else None,
+                "short_help_asr_enabled": kws_verifier.short_help_review_enabled(),
                 "verification_state": self.kws_verification_state or None,
                 "verification_target": self.kws_verification_target or None,
                 "help_rescue_source": self.kws_help_rescue_source or None,
                 "verification_transcript": self.kws_verification_transcript or None,
+                "verification_raw_transcript": self.kws_verification_raw_transcript or None,
+                "verification_no_speech_prob": self.kws_verification_no_speech_prob,
+                "verification_avg_logprob": self.kws_verification_avg_logprob,
                 "verification_error": self.kws_verification_error or None,
                 "last_keyword": self.kws_last_keyword or None,
                 "last_confidence": self.kws_last_confidence,
