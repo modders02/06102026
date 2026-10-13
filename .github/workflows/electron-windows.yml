@@ -22,6 +22,10 @@ jobs:
       - run: npm ci
       - run: npm run electron:test
       - name: Build renderer + package installer
+        # The media downloader reads GITHUB_TOKEN only for api.github.com.
+        # No personal token, release publishing, or user secrets are needed.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run electron:build
       - uses: actions/upload-artifact@v4
         with:
