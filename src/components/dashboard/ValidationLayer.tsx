@@ -56,7 +56,7 @@ export function deriveValidationView(runtime: CameraRuntime | null): ValidationV
     };
   }
 
-  const accepted = decision === 'accepted';
+  const accepted = ['accepted', 'accepted_help_90', 'verified', 'verified_help_rescue'].includes(decision);
   return {
     keyword,
     confidence: kws?.last_candidate_confidence ?? 0,
