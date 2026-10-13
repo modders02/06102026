@@ -43,7 +43,15 @@ def main() -> None:
 
     print(f"MSDSystem multi-camera bridge on http://0.0.0.0:{API_PORT} (HLS :{HLS_PORT})")
     print(f"python   : {sys.executable}")
-    print("audio    : trained custom KWS only (Whisper disabled; no model download)", flush=True)
+    from msds import kws_verifier
+    if kws_verifier.enabled():
+        print(
+            f"audio    : custom KWS + ASR verification trial "
+            f"(Whisper model: {kws_verifier.model_name()}; downloads on first use)",
+            flush=True,
+        )
+    else:
+        print("audio    : trained custom KWS only (ASR verifier off)", flush=True)
 
     uvicorn.run(app, host="0.0.0.0", port=API_PORT, log_level="warning")
 
