@@ -1,15 +1,16 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import HouseholdVoiceTraining from '@/components/household/HouseholdVoiceTraining';
 
-const mocks = vi.hoisted(() => ({ sync: vi.fn() }));
+const mocks = vi.hoisted(() => ({ sync: vi.fn(), remove: vi.fn() }));
 vi.mock('@/integrations/supabase/client', () => ({ supabase: {} }));
 vi.mock('@/lib/householdVoiceTraining', async importOriginal => {
   const real = await importOriginal<typeof import('@/lib/householdVoiceTraining')>();
-  return { ...real, synchronizeHouseholdVoice: mocks.sync };
+  return { ...real, synchronizeHouseholdVoice: mocks.sync, deleteHouseholdVoiceSample: mocks.remove };
 });
 
 beforeEach(() => {
+  mocks.remove.mockReset().mockResolvedValue(undefined);
   mocks.sync.mockReset().mockResolvedValue({
     active_household_id: 'household-1',
     words: [{ id: 'word-1', phrase: 'help me', key: 'help_me' }],
@@ -49,4 +50,26 @@ describe('household voice training workflow', () => {
     expect(screen.queryByText(/Recorded audio is stored/)).not.toBeInTheDocument();
     expect(screen.getByText(/0 \/ 3 samples/)).toBeInTheDocument();
   });
+  it('lists each enrolled recording and removes the requested sample when Delete is clicked', async () => {
+    const sampleId = 'a'.repeat(32);
+    const word = { id: 'word-1', phrase: 'help me' };
+    mocks.sync.mockResolvedValueOnce({
+      active_household_id: 'household-1', words: [], keywords: { help_me: 1, unknown: 0 },
+      sample_ids: { help_me: [sampleId], unknown: [] },
+      ready_keywords: [], negative_ready: false, open_set_ready: false,
+    }).mockResolvedValue({
+      active_household_id: 'household-1', words: [], keywords: { help_me: 0, unknown: 0 },
+      sample_ids: { help_me: [], unknown: [] },
+      ready_keywords: [], negative_ready: false, open_set_ready: false,
+    });
+    render(<HouseholdVoiceTraining householdId="household-1" words={[word]} />);
+    const deleteButton = await screen.findByRole('button', { name: 'Delete sample 1 for help me' });
+    expect(screen.getByRole('button', { name: 'Retry sample 1 for help me' })).toBeEnabled();
+    expect(screen.getByText(/1 \/ 3 samples/)).toBeInTheDocument();
+    fireEvent.click(deleteButton);
+    await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith('household-1', 'word-1', sampleId));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Delete sample 1 for help me' })).not.toBeInTheDocument());
+    expect(screen.getByText(/0 \/ 3 samples/)).toBeInTheDocument();
+  });
+
 });
