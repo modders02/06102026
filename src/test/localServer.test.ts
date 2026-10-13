@@ -1,11 +1,13 @@
 import { EventEmitter } from 'node:events';
 import * as requireCrypto from 'node:crypto';
+import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const nodeRequire = createRequire(import.meta.url);
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
@@ -107,6 +109,7 @@ function fixture(options: { override?: boolean; missingBinaries?: boolean; spawn
       if (name === 'http') return http;
       if (name === 'path') return path;
       if (name === 'crypto') return requireCrypto;
+      if (name === './kwsRuntime.cjs') return nodeRequire(path.resolve('electron/kwsRuntime.cjs'));
       throw new Error(`unexpected require: ${name}`);
     },
   });
@@ -126,6 +129,12 @@ describe('installed camera supervisor', () => {
     expect(bridge[1]).toEqual([path.join(app.source, 'camera_server.py')]);
     expect(bridge[2].cwd).toBe(app.runtime);
     expect(bridge[2].env?.MSDS_RUNTIME_DIR).toBe(app.runtime);
+    // Installed Electron controls KWS flags in the spawned Python process,
+    // without requiring PowerShell environment assignments.
+    expect(bridge[2].env?.MSDS_KWS_VERIFY_ASR).toBe('0');
+    expect(bridge[2].env?.MSDS_KWS_HELP_RESCUE).toBe('0');
+    expect(bridge[2].env?.MSDS_KWS_SHORT_HELP_ASR).toBe('0');
+    expect(bridge[2].env?.MSDS_KWS_HELP_90_FAST_ACCEPT).toBe('1');
     expect(bridge[2].env?.MEDIAMTX_EXE).toBe(path.join(app.source, 'bin', 'mediamtx.exe'));
     expect(fs.existsSync(path.join(app.runtime, '.venv', '.msds-deps'))).toBe(true);
     // Long setup operations must be spawned asynchronously to keep the window
