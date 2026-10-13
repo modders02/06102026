@@ -117,6 +117,92 @@ class HelpRescueTests(unittest.TestCase):
                 else:
                     self.assertEqual(cam.kws_last_keyword, "")
 
+    @staticmethod
+    def fire_confused_with_help(**overrides):
+        # Data from CCTV: FIRE 0.862, HELP 0.809, UNKNOWN 0.817.
+        fields = dict(
+            keyword="fire", confidence=0.862, runner_up_keyword="help",
+            runner_up_confidence=0.809,
+            keyword_scores={"fire": 0.862, "help": 0.809, "ambulance": 0.79},
+            keyword_duration_ratios={"fire": 1.226, "help": 1.206},
+            class_margin=0.0529, required_margin=0.0054,
+            negative_confidence=0.817, negative_second_confidence=0.70,
+            negative_mean2_confidence=0.7585,
+            negative_top_confidences=[0.817, 0.70],
+            duration_ratio=1.226, duration_ms=380,
+            accepted=True, reason="accepted",
+        )
+        fields.update(overrides)
+        return SimpleNamespace(**fields)
+
+    def test_fire_help_disagreement_opt_in_and_limits(self):
+        normal = self.fire_confused_with_help()
+        for verification, recovery in (("0", "1"), ("1", "0"), ("0", "0")):
+            with patch.dict(os.environ, {
+                "MSDS_KWS_VERIFY_ASR": verification,
+                "MSDS_KWS_HELP_RESCUE": recovery,
+            }):
+                self.assertFalse(kws_verifier.eligible_fire_help_disagreement(normal))
+        with patch.dict(os.environ, {
+            "MSDS_KWS_VERIFY_ASR": "1", "MSDS_KWS_HELP_RESCUE": "1",
+        }):
+            self.assertTrue(kws_verifier.eligible_fire_help_disagreement(normal))
+            for change in (
+                {"keyword": "ambulance"},
+                {"accepted": False},
+                {"reason": "too_close_to_unknown"},
+                {"runner_up_keyword": "ambulance"},
+                {"confidence": 0.94},
+                {"keyword_scores": {"fire": 0.862, "help": 0.78}},
+                {"keyword_scores": {"fire": 0.862, "help": 0.801}},
+                {"keyword_duration_ratios": {"fire": 1.226, "help": 1.5}},
+                {"negative_confidence": 0.84},
+                {"negative_confidence": 0.65},
+                {"keyword_scores": {"fire": 0.862}},
+            ):
+                with self.subTest(change=change):
+                    self.assertFalse(kws_verifier.eligible_fire_help_disagreement(
+                        self.fire_confused_with_help(**change)
+                    ))
+
+    def test_accepted_fire_verified_as_help_only_on_exact_whisper_disagreement(self):
+        cases = (
+            (kws_verifier.Verification(False, "verification_mismatch", "Help!"),
+             "verified_help_rescue", "help", 1),
+            (kws_verifier.Verification(True, "verified", "fire"),
+             "verified", "fire", 1),
+            (kws_verifier.Verification(False, "verification_mismatch", "hello"),
+             "verification_mismatch", "", 0),
+            (kws_verifier.Verification(False, "verification_mismatch", "help me"),
+             "verification_mismatch", "", 0),
+            (kws_verifier.Verification(False, "verification_unavailable", error="missing"),
+             "verification_unavailable", "", 0),
+        )
+        for asr_result, expected_decision, event_keyword, count in cases:
+            with self.subTest(result=asr_result):
+                cam, verify = self.process(self.fire_confused_with_help(), asr_result)
+                verify.assert_called_once_with(bytes([1, 0]) * 7000, "fire")
+                self.assertEqual(len(cam.events), count)
+                self.assertEqual(cam.kws_last_candidate, "fire")
+                self.assertEqual(cam.kws_original_decision, "accepted")
+                self.assertEqual(cam.kws_last_decision, expected_decision)
+                if count:
+                    self.assertEqual(cam.events[0]["keyword"], event_keyword)
+                    if event_keyword == "help":
+                        self.assertAlmostEqual(cam.events[0]["confidence"], 0.809)
+                        self.assertEqual(cam.kws_verification_target, "help")
+                        self.assertEqual(cam.kws_help_rescue_source, "fire_disagreement")
+                    else:
+                        self.assertEqual(cam.kws_verification_target, "fire")
+
+    def test_strong_fire_is_not_rewritten_as_help_even_if_whisper_misreads(self):
+        cam, _ = self.process(
+            self.fire_confused_with_help(confidence=0.94),
+            kws_verifier.Verification(False, "verification_mismatch", "Help!"),
+        )
+        self.assertEqual(cam.events, [])
+        self.assertEqual(cam.kws_last_decision, "verification_mismatch")
+
     def test_rescue_requires_isolated_word(self):
         self.assertTrue(kws_verifier.isolated_help("Help!"))
         for spoken in ("fine", "hello", "health", "please help", "help me",
