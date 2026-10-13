@@ -6,3 +6,11 @@ bin/*
 __pycache__/
 *.pyc
 mediamtx.log
+
+# Private CCTV voice recordings, trained feature templates and backups.
+# Never commit household audio or biometric/acoustic training data.
+kws-training-english/**/*.wav
+kws-holdout-english/
+kws-data-v2/
+kws-backups/
+kws-training-english/.review-*
