@@ -12,6 +12,7 @@ sentence transcription.
 """
 from __future__ import annotations
 
+import io
 import os
 import re
 import threading
@@ -447,7 +448,7 @@ class CustomKeywordEngine:
         return key
 
     @staticmethod
-    def _read_wav_as_pcm16k_mono(path: Path) -> bytes:
+    def _read_wav_as_pcm16k_mono(path: Path | bytes) -> bytes:
         """Decode an uncompressed PCM WAV into 16 kHz mono signed-int16.
 
         Dataset training deliberately stays offline and dependency-free. WAV
@@ -455,7 +456,7 @@ class CustomKeywordEngine:
         Unsupported encodings are rejected and reported instead of silently
         producing bad templates.
         """
-        with wave.open(str(path), "rb") as wav_file:
+        with wave.open(io.BytesIO(path) if isinstance(path, bytes) else str(path), "rb") as wav_file:
             channels = wav_file.getnchannels()
             width = wav_file.getsampwidth()
             rate = wav_file.getframerate()
@@ -611,7 +612,8 @@ class CustomKeywordEngine:
             folder.mkdir(parents=True, exist_ok=True)
             stamp = sample_id or f"{time.time_ns()}-{os.getpid()}"
             path = folder / f"{stamp}.npy"
-            if not path.exists():
+            existed = path.exists()
+            if not existed:
                 existing = sorted(folder.glob("*.npy"))
                 maximum = MAX_NEGATIVE_TEMPLATES if key == NEGATIVE_CLASS else MAX_TEMPLATES
                 if len(existing) >= maximum:
@@ -625,7 +627,7 @@ class CustomKeywordEngine:
             "templates": count,
             "ready": count >= minimum,
             "minimum_templates": minimum,
-            "already_enrolled": bool(sample_id and path.exists() and count >= 1),
+            "already_enrolled": existed,
         }
 
     def clear(self, keyword: str) -> dict:
