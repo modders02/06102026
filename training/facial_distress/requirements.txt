@@ -9,3 +9,4 @@ onnx>=1.16
 onnxruntime>=1.19
 
 supabase>=2.0
+kaggle>=1.7.4
