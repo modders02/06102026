@@ -188,9 +188,14 @@ class StreamingSpeechSegmenter:
 class CustomKeywordEngine:
     """Thread-safe log-Mel + DTW template keyword recognizer."""
 
-    def __init__(self, data_dir: Optional[str] = None) -> None:
+    def __init__(self, data_dir: Optional[str] = None, allowed_keywords: Optional[set[str]] = None) -> None:
         default_dir = Path(__file__).resolve().parents[1] / "kws-data-v2"
         self.data_dir = Path(data_dir or os.environ.get("MSD_KWS_DATA_DIR", str(default_dir)))
+        # A household engine receives its own explicit whitelist; the default
+        # thesis engine retains its original eight English keywords.
+        self.allowed_keywords = frozenset(allowed_keywords) if allowed_keywords is not None else ACTIVE_TEMPLATE_KEYS
+        if NEGATIVE_CLASS not in self.allowed_keywords:
+            raise ValueError("The unknown negative class is required.")
         self.lock = threading.RLock()
         self.templates: Dict[str, List[np.ndarray]] = {}
         self._mel_bank: Optional[np.ndarray] = None
@@ -433,13 +438,11 @@ class CustomKeywordEngine:
             + duration_penalty
         )
 
-    @staticmethod
-    def _require_active_keyword(keyword: str) -> str:
-        key = CustomKeywordEngine.normalize_keyword(keyword)
-        if key not in ACTIVE_TEMPLATE_KEYS:
+    def _require_active_keyword(self, keyword: str) -> str:
+        key = self.normalize_keyword(keyword)
+        if key not in self.allowed_keywords:
             raise ValueError(
-                f"Keyword '{key}' is outside the English-only thesis scope. "
-                f"Allowed: {', '.join((*DEFAULT_KEYWORDS, NEGATIVE_CLASS))}."
+                f"Keyword '{key}' is not registered in the active English keyword profile."
             )
         return key
 
@@ -595,8 +598,10 @@ class CustomKeywordEngine:
         report["success"] = True
         return report
 
-    def enroll(self, keyword: str, pcm: bytes) -> dict:
+    def enroll(self, keyword: str, pcm: bytes, sample_id: Optional[str] = None) -> dict:
         key = self._require_active_keyword(keyword)
+        if sample_id is not None and not re.fullmatch(r"[0-9a-f]{32}", sample_id):
+            raise ValueError("Sample ID must be a 32-character lowercase hexadecimal identifier.")
         features = self.extract_features(pcm)
         if len(features) < 12:
             raise ValueError("Enrollment speech is too short or too quiet.")
@@ -604,17 +609,15 @@ class CustomKeywordEngine:
         with self.lock:
             folder = self.data_dir / key
             folder.mkdir(parents=True, exist_ok=True)
-            existing = sorted(folder.glob("*.npy"))
-            maximum = MAX_NEGATIVE_TEMPLATES if key == NEGATIVE_CLASS else MAX_TEMPLATES
-            if len(existing) >= maximum:
-                oldest = existing[0]
-                oldest.unlink(missing_ok=True)
-            # Millisecond filenames can collide when several enrollment samples
-            # are processed in one fast batch, silently overwriting templates.
-            # Nanosecond stamps keep each real sample distinct.
-            stamp = f"{time.time_ns()}-{os.getpid()}"
-            np.save(folder / f"{stamp}.npy", features, allow_pickle=False)
-            self.load()
+            stamp = sample_id or f"{time.time_ns()}-{os.getpid()}"
+            path = folder / f"{stamp}.npy"
+            if not path.exists():
+                existing = sorted(folder.glob("*.npy"))
+                maximum = MAX_NEGATIVE_TEMPLATES if key == NEGATIVE_CLASS else MAX_TEMPLATES
+                if len(existing) >= maximum:
+                    existing[0].unlink(missing_ok=True)
+                np.save(path, features, allow_pickle=False)
+                self.load()
             count = len(self.templates.get(key, []))
         minimum = MIN_NEGATIVE_TEMPLATES if key == NEGATIVE_CLASS else MIN_TEMPLATES
         return {
@@ -622,10 +625,11 @@ class CustomKeywordEngine:
             "templates": count,
             "ready": count >= minimum,
             "minimum_templates": minimum,
+            "already_enrolled": bool(sample_id and path.exists() and count >= 1),
         }
 
     def clear(self, keyword: str) -> dict:
-        key = self.normalize_keyword(keyword)
+        key = self._require_active_keyword(keyword)
         with self.lock:
             folder = self.data_dir / key
             if folder.exists():
@@ -646,7 +650,7 @@ class CustomKeywordEngine:
                     key = self.normalize_keyword(folder.name)
                 except ValueError:
                     continue
-                if key not in ACTIVE_TEMPLATE_KEYS:
+                if key not in self.allowed_keywords:
                     continue
                 items: List[np.ndarray] = []
                 maximum = MAX_NEGATIVE_TEMPLATES if key == NEGATIVE_CLASS else MAX_TEMPLATES
@@ -1042,14 +1046,14 @@ class CustomKeywordEngine:
             ignored_template_folders = sorted(
                 path.name
                 for path in self.data_dir.iterdir()
-                if path.is_dir() and path.name not in ACTIVE_TEMPLATE_KEYS
+                if path.is_dir() and path.name not in self.allowed_keywords
             )
         except Exception:
             pass
         return {
             "engine": "msds-logmel-dtw-v3",
             "language_scope": LANGUAGE_SCOPE,
-            "active_keywords": list(DEFAULT_KEYWORDS),
+            "active_keywords": sorted(self.allowed_keywords - {NEGATIVE_CLASS}),
             "ignored_template_folders": ignored_template_folders,
             "feature_version": FEATURE_VERSION,
             "sample_rate": SAMPLE_RATE,
@@ -1085,7 +1089,7 @@ class CustomKeywordEngine:
                 key for key, count in counts.items()
                 if key != NEGATIVE_CLASS and count >= MIN_TEMPLATES
             ],
-            "suggested_keywords": list(DEFAULT_KEYWORDS),
+            "suggested_keywords": sorted(self.allowed_keywords - {NEGATIVE_CLASS}),
             "data_dir": str(self.data_dir),
             "error": self.last_error,
         }
