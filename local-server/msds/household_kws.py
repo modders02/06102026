@@ -11,6 +11,8 @@ import threading
 from pathlib import Path
 from uuid import UUID
 
+import numpy as np
+
 from .kws_engine import (
     ACTIVE_TEMPLATE_KEYS, DEFAULT_KEYWORDS, KWS_ENGINE, NEGATIVE_CLASS,
     CustomKeywordEngine,
@@ -88,6 +90,23 @@ class HouseholdKeywordProfiles:
         with self._lock:
             return self.engine or KWS_ENGINE
 
+    @staticmethod
+    def validate_sample(pcm: bytes) -> dict:
+        """Reject missing, truncated, clipped or near-silent enrollment samples."""
+        duration = len(pcm) / 32000.0
+        if not 0.30 <= duration <= 2.50:
+            raise ValueError("Speak one short word or phrase lasting 0.3 to 2.5 seconds.")
+        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+        samples -= np.mean(samples)
+        rms = float(np.sqrt(np.mean(samples * samples)))
+        peak = float(np.max(np.abs(samples)))
+        clipped = float(np.mean(np.abs(samples) >= 0.985))
+        if rms < 0.015 or peak < 0.035:
+            raise ValueError("The speech was too quiet. Speak clearly closer to the microphone.")
+        if clipped > 0.02:
+            raise ValueError("The microphone audio is distorted or clipped. Reduce input volume and retry.")
+        return {"duration_ms": round(duration * 1000), "rms": round(rms, 4), "clipped_fraction": round(clipped, 4)}
+
     def enroll(self, household_id: str, word_id: str, sample_id: str, wav_pcm: bytes) -> dict:
         household_id = _uuid(household_id)
         with self._lock:
@@ -97,6 +116,7 @@ class HouseholdKeywordProfiles:
                 key = NEGATIVE_CLASS if word_id == NEGATIVE_CLASS else self.words[_uuid(word_id)]["key"]
             except KeyError:
                 raise ValueError("Wake word is not registered for the active household.") from None
+            self.validate_sample(wav_pcm)
             return self.engine.enroll(key, wav_pcm, sample_id=sample_id)
 
     def status(self) -> dict:
