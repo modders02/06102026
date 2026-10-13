@@ -13,6 +13,7 @@ from typing import Dict, List, Optional
 from .binaries import install_hint, no_window_flags, resolve_exe
 from .camera import Camera
 from .config import MAX_CAMERAS, MEDIAMTX_CONFIG
+from .service_recovery import recover_media_ports
 
 CAMERAS: Dict[str, Camera] = {}
 CAM_LOCK = threading.Lock()
@@ -95,6 +96,24 @@ def start_mediamtx() -> bool:
             _MEDIAMTX_ERROR = install_hint("mediamtx", "MEDIAMTX_EXE")
             _MEDIAMTX_RETRY_AFTER = time.monotonic() + 5
             print(f"[MediaMTX] {_MEDIAMTX_ERROR}", flush=True)
+            return False
+
+        # Reclaim orphaned MediaMTX only if both executable and YAML match
+        # this installation and no live owning parent remains. Never kill a
+        # stranger's port listener or an active MSDS service.
+        recovery = recover_media_ports(exe, MEDIAMTX_CONFIG)
+        for pid in recovery.reclaimed:
+            print(f"[MediaMTX] recovered orphaned MSDS MediaMTX PID {pid}", flush=True)
+        if recovery.blockers or recovery.error:
+            occupied = ", ".join(recovery.blockers)
+            detail = recovery.error or (
+                f"MediaMTX cannot bind: {occupied}. "
+                "The port owner is not a verified orphan of this MSDS install. "
+                "Close the other MSDS instance or application; no process was forcibly stopped."
+            )
+            _MEDIAMTX_ERROR = detail
+            _MEDIAMTX_RETRY_AFTER = time.monotonic() + 5
+            print(f"[MediaMTX] {detail}", flush=True)
             return False
 
         cmd = [exe]
