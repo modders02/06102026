@@ -24,6 +24,7 @@ from .config import (AUDIO_CHUNK_SECONDS, AUDIO_ENGINE, HLS_PORT, HLS_PROBE_TTL,
                      RTSP_PORT, VIDEO_FPS, VIDEO_GOP, VIDEO_MAX_WIDTH,
                      VIDEO_THREADS, WEBRTC_PORT, match_distress)
 from .kws_engine import KWS_ENGINE, StreamingSpeechSegmenter
+from . import kws_verifier
 
 # Presentation/runtime configuration is custom-only, so importing this module
 # must not import Faster-Whisper or touch its model/download path.
@@ -200,6 +201,9 @@ class Camera:
     kws_last_negative_top_confidences: list = field(default_factory=list)
     kws_last_duration_ratio: float = 0.0
     kws_last_decision: str = ""
+    kws_verification_state: str = ""
+    kws_verification_transcript: str = ""
+    kws_verification_error: str = ""
     _last_kws_publish_ts: float = 0.0
     _kws_enroll_suppress_until: float = 0.0
 
@@ -521,7 +525,31 @@ class Camera:
                     flush=True,
                 )
                 if decision.accepted:
-                    self._publish_kws_match(decision, processing_ms)
+                    if kws_verifier.enabled():
+                        verification = kws_verifier.verify_kws_segment(segment, decision.keyword)
+                        self.kws_verification_state = verification.state
+                        self.kws_verification_transcript = verification.transcript
+                        self.kws_verification_error = verification.error
+                        self.kws_last_decision = verification.state
+                        if verification.accepted:
+                            self._publish_kws_match(decision, processing_ms)
+                        else:
+                            print(
+                                f"[KWS {self.id}] ASR verification blocked "
+                                f"{decision.keyword}: {verification.state} "
+                                f"transcript={verification.transcript!r} "
+                                f"error={verification.error!r}",
+                                flush=True,
+                            )
+                    else:
+                        self.kws_verification_state = "disabled"
+                        self.kws_verification_transcript = ""
+                        self.kws_verification_error = ""
+                        self._publish_kws_match(decision, processing_ms)
+                else:
+                    self.kws_verification_state = "not_attempted"
+                    self.kws_verification_transcript = ""
+                    self.kws_verification_error = ""
             else:
                 self.kws_last_candidate = ""
                 self.kws_last_candidate_confidence = 0.0
@@ -537,6 +565,9 @@ class Camera:
                 self.kws_last_negative_top_confidences = []
                 self.kws_last_duration_ratio = 0.0
                 self.kws_last_decision = "no_ready_candidate"
+                self.kws_verification_state = "not_attempted"
+                self.kws_verification_transcript = ""
+                self.kws_verification_error = ""
 
 
     def _publish_scream_if_detected(self, pcm: bytes) -> None:
@@ -1093,6 +1124,9 @@ class Camera:
         self.kws_last_negative_top_confidences = []
         self.kws_last_duration_ratio = 0.0
         self.kws_last_decision = ""
+        self.kws_verification_state = ""
+        self.kws_verification_transcript = ""
+        self.kws_verification_error = ""
         self._last_kws_publish_ts = 0.0
         self._kws_enroll_suppress_until = 0.0
         with self.lock:
@@ -1188,6 +1222,11 @@ class Camera:
                 "last_negative_top_confidences": list(self.kws_last_negative_top_confidences),
                 "last_duration_ratio": self.kws_last_duration_ratio,
                 "last_decision": self.kws_last_decision or None,
+                "verification_enabled": kws_verifier.enabled(),
+                "verification_model": kws_verifier.model_name() if kws_verifier.enabled() else None,
+                "verification_state": self.kws_verification_state or None,
+                "verification_transcript": self.kws_verification_transcript or None,
+                "verification_error": self.kws_verification_error or None,
                 "last_keyword": self.kws_last_keyword or None,
                 "last_confidence": self.kws_last_confidence,
                 "last_detected_at": self.kws_last_detected_at,
