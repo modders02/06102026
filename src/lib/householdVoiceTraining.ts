@@ -64,25 +64,71 @@ export async function synchronizeHouseholdVoice(
 ): Promise<HouseholdVoiceStatus> {
   const eligible = validVoiceWords(words);
   const activated = await activateHouseholdVoice(householdId, eligible);
-  const uploaded = new Set<string>();
   const wordKeys = [{ id: 'unknown', key: 'unknown' },
     ...eligible.map(w => ({ id: w.id, key: voiceKey(w.phrase)! }))];
+  const manifest: Record<string, string[]> = {};
   for (const word of wordKeys) {
     const folder = `${householdId}/${word.id}`;
     const { data: files, error: listError } = await supabase.storage.from(VOICE_BUCKET)
       .list(folder, { limit: 100 });
     if (listError) throw new Error(`Could not load household voice recordings: ${listError.message}`);
+    if ((files || []).length >= 100) {
+      throw new Error('Too many recordings to synchronize safely. Reduce the household sample count.');
+    }
+    const ids = (files || [])
+      .map(file => /^([0-9a-f]{32})\.wav$/.exec(file.name)?.[1])
+      .filter((id): id is string => !!id);
+    manifest[word.id] = ids;
     const existing = new Set(activated.sample_ids?.[word.key] ?? []);
-    for (const file of files || []) {
-      const match = /^([0-9a-f]{32})\.wav$/.exec(file.name);
-      if (!match || existing.has(match[1]) || uploaded.has(`${word.key}/${match[1]}`)) continue;
-      const { data: wav, error } = await supabase.storage.from(VOICE_BUCKET).download(`${folder}/${file.name}`);
+    for (const id of ids) {
+      if (existing.has(id)) continue;
+      const { data: wav, error } = await supabase.storage.from(VOICE_BUCKET)
+        .download(`${folder}/${id}.wav`);
       if (error || !wav) throw new Error(error?.message || 'Could not download a household recording.');
-      await enrollHouseholdSample(householdId, word.id, match[1], wav);
-      uploaded.add(`${word.key}/${match[1]}`);
+      await enrollHouseholdSample(householdId, word.id, id, wav);
     }
   }
+  // All cloud folders must be fetched before removing any cached template.
+  // This also propagates deletions performed by another household member.
+  await reconcileHouseholdVoiceSamples(householdId, manifest);
   return getHouseholdVoiceStatus();
+}
+
+/** Reconcile each locally enrolled sample against the current private bucket. */
+export async function reconcileHouseholdVoiceSamples(
+  householdId: string, samples: Record<string, string[]>,
+) {
+  return localRequest('/kws/household/reconcile', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ household_id: householdId, samples }),
+  });
+}
+
+/** Delete a single private WAV and its local acoustic template. */
+export async function deleteHouseholdVoiceSample(
+  householdId: string, wordId: string, sampleId: string,
+) {
+  if (!/^[0-9a-f]{32}$/.test(sampleId)) throw new Error('Invalid training sample.');
+  const file = `${householdId}/${wordId}/${sampleId}.wav`;
+  const { error } = await supabase.storage.from(VOICE_BUCKET).remove([file]);
+  if (error) throw new Error(`Could not remove the household recording: ${error.message}`);
+  try {
+    await localRequest('/kws/household/sample/delete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ household_id: householdId, word_id: wordId, sample_id: sampleId }),
+    });
+  } catch (e) {
+    throw new Error(`Recording deleted from Supabase, but local cleanup failed. Sync the household to finish: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/** Keep the existing recording when re-recording fails; replace it only after
+ * the new utterance passes validation, cloud upload and local enrollment. */
+export async function replaceHouseholdVoiceSample(
+  householdId: string, wordId: string, oldSampleId: string, audio: Blob,
+) {
+  await uploadHouseholdSample(householdId, wordId, audio);
+  await deleteHouseholdVoiceSample(householdId, wordId, oldSampleId);
 }
 
 export async function enrollHouseholdSample(
