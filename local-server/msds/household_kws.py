@@ -75,7 +75,7 @@ class HouseholdKeywordProfiles:
             if not existing:
                 self.engine = HouseholdEngine(str(_ROOT / household_id), allowed_keywords=keys)
                 self.household_id, self.words = household_id, mapped
-            return self.status()
+            return {**self.status(), "changed": not existing}
 
     def deactivate(self) -> dict:
         with self._lock:
