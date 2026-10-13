@@ -31,11 +31,17 @@ There are two ways to provide Kaggle access. Choose one:
   accept its rules and download `fer2013.tar.gz` (or the official ZIP).
   Pass it as `--archive "D:\Downloads\fer2013.tar.gz"`.
   This does *not* require configuring Kaggle CLI credentials.
-- **Authenticated CLI:** Keep your Kaggle API credentials only on your
-  own computer (for example, your local `~/.kaggle/kaggle.json`
-  or the documented `KAGGLE_API_TOKEN` environment setting),
-  then run without `--archive`. Never send credentials in chat or
-  commit them to GitHub.
+- **Authenticated CLI (recommended):** Open the official Kaggle page,
+  accept its competition rules, and sign in through your own browser:
+
+  ```powershell
+  & ".\\.venv\\Scripts\\kaggle.exe" auth login
+  ```
+
+  This creates local Kaggle OAuth authentication. Alternatively, use
+  your local `~/.kaggle/kaggle.json` or the documented
+  `KAGGLE_API_TOKEN` setting. Then run without `--archive`.
+  Never send credentials in chat or commit them to GitHub.
 
 ## 2. Set private Supabase access (optional cloud upload)
 
