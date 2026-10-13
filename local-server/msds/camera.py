@@ -16,6 +16,7 @@ import urllib.request
 import wave
 from array import array
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import List, Optional
 
 from .binaries import (MissingExecutable, install_hint, need_exe, no_window_flags,
@@ -203,6 +204,8 @@ class Camera:
     kws_last_decision: str = ""
     kws_original_decision: str = ""
     kws_verification_state: str = ""
+    kws_verification_target: str = ""
+    kws_help_rescue_source: str = ""
     kws_verification_transcript: str = ""
     kws_verification_error: str = ""
     _last_kws_publish_ts: float = 0.0
@@ -526,7 +529,8 @@ class Camera:
                     f"processing={processing_ms:.1f}ms",
                     flush=True,
                 )
-                rescue = kws_verifier.eligible_help_rescue(decision)
+                rescue = kws_verifier.help_rescue_target(decision)
+                self.kws_help_rescue_source = rescue.source if rescue else ""
                 if decision.accepted or rescue:
                     if kws_verifier.enabled():
                         # The decoder can take seconds on CPU. Expose an
@@ -534,9 +538,12 @@ class Camera:
                         # provisional KWS rejection for the final verdict.
                         self.kws_last_decision = "verification_pending"
                         self.kws_verification_state = "verifying"
+                        self.kws_verification_target = rescue.keyword if rescue else decision.keyword
                         self.kws_verification_transcript = ""
                         self.kws_verification_error = ""
-                        verification = kws_verifier.verify_kws_segment(segment, decision.keyword)
+                        verification = kws_verifier.verify_kws_segment(
+                            segment, self.kws_verification_target
+                        )
                         self.kws_verification_state = verification.state
                         self.kws_verification_transcript = verification.transcript
                         self.kws_verification_error = verification.error
@@ -552,7 +559,15 @@ class Camera:
                                 "verified_help_rescue" if rescue else "verified"
                             )
                             elapsed_ms = (time.perf_counter() - started) * 1000.0
-                            self._publish_kws_match(decision, elapsed_ms)
+                            publish_decision = (
+                                SimpleNamespace(
+                                    keyword=rescue.keyword,
+                                    confidence=rescue.confidence,
+                                    duration_ms=decision.duration_ms,
+                                )
+                                if rescue else decision
+                            )
+                            self._publish_kws_match(publish_decision, elapsed_ms)
                         else:
                             # Keep the original KWS rejection authoritative when
                             # the optional rescue verifier does not corroborate it.
@@ -568,11 +583,13 @@ class Camera:
                             )
                     elif decision.accepted:
                         self.kws_verification_state = "disabled"
+                        self.kws_verification_target = ""
                         self.kws_verification_transcript = ""
                         self.kws_verification_error = ""
                         self._publish_kws_match(decision, processing_ms)
                 else:
                     self.kws_verification_state = "not_attempted"
+                    self.kws_verification_target = ""
                     self.kws_verification_transcript = ""
                     self.kws_verification_error = ""
             else:
@@ -592,6 +609,8 @@ class Camera:
                 self.kws_last_decision = "no_ready_candidate"
                 self.kws_original_decision = "no_ready_candidate"
                 self.kws_verification_state = "not_attempted"
+                self.kws_verification_target = ""
+                self.kws_help_rescue_source = ""
                 self.kws_verification_transcript = ""
                 self.kws_verification_error = ""
 
@@ -1152,6 +1171,8 @@ class Camera:
         self.kws_last_decision = ""
         self.kws_original_decision = ""
         self.kws_verification_state = ""
+        self.kws_verification_target = ""
+        self.kws_help_rescue_source = ""
         self.kws_verification_transcript = ""
         self.kws_verification_error = ""
         self._last_kws_publish_ts = 0.0
@@ -1254,6 +1275,8 @@ class Camera:
                 "verification_enabled": kws_verifier.enabled(),
                 "verification_model": kws_verifier.model_name() if kws_verifier.enabled() else None,
                 "verification_state": self.kws_verification_state or None,
+                "verification_target": self.kws_verification_target or None,
+                "help_rescue_source": self.kws_help_rescue_source or None,
                 "verification_transcript": self.kws_verification_transcript or None,
                 "verification_error": self.kws_verification_error or None,
                 "last_keyword": self.kws_last_keyword or None,
