@@ -64,6 +64,35 @@ describe('camera connection status', () => {
   const rememberConnection = () => localStorage.setItem('msd-camera-slots-v1', JSON.stringify({
     count: 1, slots: [{ ...makeSlot(1), ip: '192.168.1.10', autoConnect: true }],
   }));
+  it('switches the primary Connect button to Disconnect and exposes icon-only Reconnect when live', async () => {
+    const view = render(<MultiCameraConnect />);
+    await act(async () => {});
+
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled();
+    const reconnect = screen.getByRole('button', { name: 'Reconnect Camera 1' });
+    expect(reconnect).toBeDisabled();
+    expect(reconnect).toHaveAttribute('title', 'Reconnect Camera 1');
+    expect(reconnect).toHaveTextContent('');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    });
+
+    expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeEnabled();
+    expect(reconnect).toBeEnabled();
+    expect(reconnect).toHaveTextContent('');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+    });
+
+    expect(mocks.stopCamera).toHaveBeenCalledWith('http://127.0.0.1:5000', 'slot-1');
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled();
+    expect(reconnect).toBeDisabled();
+    expect(view.container.querySelector('img, video')).toBeNull();
+  });
+
   it('saves network playback endpoints for a bridge on another device', async () => {
     rememberConnection();
     mocks.ready = true;
@@ -100,7 +129,7 @@ describe('camera connection status', () => {
     const createElement = vi.spyOn(document, 'createElement');
     const view = render(<MultiCameraConnect />);
     await act(async () => {});
-    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Reconnect Camera 1' })).toBeDisabled();
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
     expect(mocks.getMultiStatus).toHaveBeenCalledTimes(2);
 
@@ -112,6 +141,7 @@ describe('camera connection status', () => {
     mocks.ready = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(screen.getByRole('button', { name: 'Disconnect' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Reconnect Camera 1' })).toBeEnabled();
     expect(mocks.getMultiStatus).toHaveBeenCalledTimes(3);
 
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
@@ -120,7 +150,7 @@ describe('camera connection status', () => {
     view.rerender(<MultiCameraConnect />);
     mocks.ready = false;
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
-    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Reconnect Camera 1' })).toBeDisabled();
     expect(mocks.getMultiStatus).toHaveBeenCalledTimes(5);
     expect(view.container.querySelector('video')).toBeNull();
     expect(view.container.querySelector('img')).toBeNull();
@@ -166,7 +196,7 @@ describe('camera connection status', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Disconnect' })); });
     await act(async () => complete(oldLiveStatus));
     expect(JSON.parse(localStorage.getItem('msd-camera-slots-v1')!).slots[0]).toMatchObject({ connected: false, autoConnect: false, streamUrl: '', webrtcUrl: '' });
-    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Reconnect Camera 1' })).toBeDisabled();
   });
 
   it('does not claim success when the camera service cannot start the camera', async () => {
@@ -177,7 +207,7 @@ describe('camera connection status', () => {
 
     expect(screen.getByText('Camera credentials were rejected.')).toBeInTheDocument();
     expect(screen.queryByText(/connected successfully/i)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Reconnect Camera 1' })).toBeDisabled();
     expect(JSON.parse(localStorage.getItem('msd-camera-slots-v1')!).slots[0].connected).toBe(false);
   });
 
@@ -189,7 +219,7 @@ describe('camera connection status', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('Waiting for camera connection confirmation.');
     expect(screen.queryByText(/connected successfully/i)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Reconnect Camera 1' })).toBeDisabled();
     expect(JSON.parse(localStorage.getItem('msd-camera-slots-v1')!).slots[0].connected).toBe(false);
 
     mocks.ready = true;
@@ -226,7 +256,7 @@ describe('camera connection status', () => {
     await act(async () => {});
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Reconnect Camera 1' }));
     });
 
     expect(mocks.stopCamera).toHaveBeenCalledWith('http://127.0.0.1:5000', 'slot-1');
