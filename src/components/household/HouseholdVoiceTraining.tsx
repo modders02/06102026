@@ -222,6 +222,27 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
                   <Mic className="h-4 w-4" /> {count ? 'Add sample' : 'Record'}
                 </button>
               )}
+              {sampleIds.length > 0 && (
+                <div className="w-full space-y-1.5 border-t border-border pt-2">
+                  {sampleIds.map((sampleId, index) => (
+                    <div key={sampleId} className="flex items-center gap-2">
+                      <span className="flex-1 text-xs text-muted-foreground">Sample {index + 1}</span>
+                      <button type="button" disabled={busy || !!recording}
+                        aria-label={`Retry sample ${index + 1} for ${word.phrase}`}
+                        onClick={() => void start(word.id, word.phrase, sampleId)}
+                        className="flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50">
+                        <RefreshCw className="h-3 w-3" /> Retry
+                      </button>
+                      <button type="button" disabled={busy || !!recording}
+                        aria-label={`Delete sample ${index + 1} for ${word.phrase}`}
+                        onClick={() => void deleteSample(word.id, word.phrase, sampleId)}
+                        className="flex items-center gap-1 rounded-md border border-destructive/20 px-2 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50">
+                        <Trash2 className="h-3 w-3" /> Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}
