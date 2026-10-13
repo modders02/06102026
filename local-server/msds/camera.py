@@ -201,6 +201,7 @@ class Camera:
     kws_last_negative_top_confidences: list = field(default_factory=list)
     kws_last_duration_ratio: float = 0.0
     kws_last_decision: str = ""
+    kws_original_decision: str = ""
     kws_verification_state: str = ""
     kws_verification_transcript: str = ""
     kws_verification_error: str = ""
@@ -512,6 +513,7 @@ class Camera:
                 self.kws_last_negative_top_confidences = list(decision.negative_top_confidences)
                 self.kws_last_duration_ratio = decision.duration_ratio
                 self.kws_last_decision = decision.reason
+                self.kws_original_decision = decision.reason
                 print(
                     f"[KWS {self.id}] candidate={decision.keyword} "
                     f"confidence={decision.confidence:.3f} "
@@ -524,24 +526,40 @@ class Camera:
                     f"processing={processing_ms:.1f}ms",
                     flush=True,
                 )
-                if decision.accepted:
+                rescue = kws_verifier.eligible_help_rescue(decision)
+                if decision.accepted or rescue:
                     if kws_verifier.enabled():
                         verification = kws_verifier.verify_kws_segment(segment, decision.keyword)
                         self.kws_verification_state = verification.state
                         self.kws_verification_transcript = verification.transcript
                         self.kws_verification_error = verification.error
-                        self.kws_last_decision = verification.state
-                        if verification.accepted:
-                            self._publish_kws_match(decision, processing_ms)
+                        # HELP rescue is stricter than regular verification:
+                        # ASR must return the isolated word HELP, nothing else.
+                        verified = verification.accepted and (
+                            decision.accepted or kws_verifier.isolated_help(verification.transcript)
+                        )
+                        if rescue and verification.accepted and not verified:
+                            self.kws_verification_state = "help_rescue_nonisolated_transcript"
+                        if verified:
+                            self.kws_last_decision = (
+                                "verified_help_rescue" if rescue else "verified"
+                            )
+                            elapsed_ms = (time.perf_counter() - started) * 1000.0
+                            self._publish_kws_match(decision, elapsed_ms)
                         else:
+                            # Keep the original KWS rejection authoritative when
+                            # the optional rescue verifier does not corroborate it.
+                            self.kws_last_decision = (
+                                decision.reason if rescue else self.kws_verification_state
+                            )
                             print(
                                 f"[KWS {self.id}] ASR verification blocked "
-                                f"{decision.keyword}: {verification.state} "
+                                f"{decision.keyword}: {self.kws_verification_state} "
                                 f"transcript={verification.transcript!r} "
                                 f"error={verification.error!r}",
                                 flush=True,
                             )
-                    else:
+                    elif decision.accepted:
                         self.kws_verification_state = "disabled"
                         self.kws_verification_transcript = ""
                         self.kws_verification_error = ""
@@ -565,6 +583,7 @@ class Camera:
                 self.kws_last_negative_top_confidences = []
                 self.kws_last_duration_ratio = 0.0
                 self.kws_last_decision = "no_ready_candidate"
+                self.kws_original_decision = "no_ready_candidate"
                 self.kws_verification_state = "not_attempted"
                 self.kws_verification_transcript = ""
                 self.kws_verification_error = ""
@@ -1124,6 +1143,7 @@ class Camera:
         self.kws_last_negative_top_confidences = []
         self.kws_last_duration_ratio = 0.0
         self.kws_last_decision = ""
+        self.kws_original_decision = ""
         self.kws_verification_state = ""
         self.kws_verification_transcript = ""
         self.kws_verification_error = ""
@@ -1222,6 +1242,8 @@ class Camera:
                 "last_negative_top_confidences": list(self.kws_last_negative_top_confidences),
                 "last_duration_ratio": self.kws_last_duration_ratio,
                 "last_decision": self.kws_last_decision or None,
+                "original_kws_decision": self.kws_original_decision or None,
+                "help_rescue_enabled": kws_verifier.help_rescue_enabled(),
                 "verification_enabled": kws_verifier.enabled(),
                 "verification_model": kws_verifier.model_name() if kws_verifier.enabled() else None,
                 "verification_state": self.kws_verification_state or None,
