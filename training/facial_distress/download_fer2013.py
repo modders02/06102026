@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
+import sys
 import shutil
 import subprocess
 import tarfile
@@ -105,7 +107,9 @@ def validate_csv(path: Path) -> dict:
 def download_official(destination: Path) -> Path:
     """Requires Kaggle account access and competition rules acceptance."""
     destination.mkdir(parents=True, exist_ok=True)
-    command = ["kaggle","competitions","download","-c",COMPETITION,
+    local_cli = Path(sys.executable).with_name("kaggle.exe" if os.name=="nt" else "kaggle")
+    kaggle_executable = str(local_cli) if local_cli.is_file() else "kaggle"
+    command = [kaggle_executable,"competitions","download","-c",COMPETITION,
                "-f","fer2013.tar.gz","-p",str(destination)]
     try:
         subprocess.run(command, check=True, timeout=900)
