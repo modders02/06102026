@@ -43,7 +43,7 @@ DISTRESS_KEYWORDS = {
     # English
     "help": 0.95, "help me": 0.98, "fire": 0.97, "emergency": 0.95,
     "call 911": 0.98, "someone help": 0.97, "i fell": 0.93, "i can't breathe": 0.98,
-    "stop": 0.8, "get away": 0.9, "don't hurt me": 0.97, "please stop": 0.92,
+    "get away": 0.9, "don't hurt me": 0.97,
     "ambulance": 0.95, "police": 0.9, "i'm hurt": 0.95, "save me": 0.97,
     # Tagalog / Filipino
     "tulong": 0.95, "tulungan mo ako": 0.98, "saklolo": 0.98, "sunog": 0.97,
