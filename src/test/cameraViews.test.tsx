@@ -183,6 +183,47 @@ describe('shared live camera views', () => {
     expect(within(diagnostics).getByText('emergency', { selector: 'span.font-mono' })).toBeInTheDocument();
   });
 
+  it('shows accepted_help_90 as a green ACCEPTED voice status without exposing the internal code', () => {
+    makeSession(1, {
+      transcript: '',
+      audioListening: true,
+      audioMessage: 'Listening for safety keywords',
+      audioTone: 'ok',
+      audio: {
+        thread_running: true,
+        connected: true,
+        chunks_received: 2,
+        bytes_received: 32000,
+        last_chunk_at: null,
+        last_transcription_at: null,
+        last_transcript: 'help',
+        recognition_engine: 'custom',
+        custom_kws: {
+          last_candidate: 'help',
+          last_candidate_confidence: 0.95,
+          last_decision: 'accepted_help_90',
+          last_keyword: 'help',
+          last_processing_ms: 125,
+        },
+        error: null,
+        ffmpeg_error: null,
+      },
+    });
+    render(<LiveCameraFeed
+      camera={slotCamera(mocks.slots[0] as CameraSlot)}
+      settings={DEFAULT_SETTINGS}
+      onConnect={vi.fn()}
+    />);
+
+    const diagnostics = screen.getByTestId('voice-diagnostics');
+    const accepted = within(diagnostics).getByText('ACCEPTED');
+    expect(accepted).toHaveClass('text-success');
+    expect(accepted).toHaveClass('bg-success/10');
+    expect(within(diagnostics).queryByText('accepted_help_90')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Candidate: help.*accepted_help_90/)).not.toBeInTheDocument();
+    expect(screen.getByTitle('help')).toHaveTextContent('help');
+  });
+
   it('changes focused camera and layout without changing configured slots', () => {
     const first = makeSession(1);
     const second = makeSession(2);
