@@ -101,9 +101,10 @@ def start_mediamtx() -> bool:
         if os.path.isfile(MEDIAMTX_CONFIG):
             cmd.append(MEDIAMTX_CONFIG)
 
+        # Preserve Electron's explicit writable runtime even when it will be
+        # created by its supervisor. Never redirect a packaged install into
+        # the system temp directory just because the path is not visible yet.
         runtime_dir = os.environ.get("MSDS_RUNTIME_DIR") or os.path.dirname(exe)
-        if not os.path.isdir(runtime_dir):
-            runtime_dir = tempfile.gettempdir()
         fd, log_name = tempfile.mkstemp(prefix="msds-mediamtx-", suffix=".log")
         new_log = Path(log_name)
         try:
