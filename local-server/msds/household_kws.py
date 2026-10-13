@@ -97,14 +97,14 @@ class HouseholdKeywordProfiles:
         if not 0.30 <= duration <= 2.50:
             raise ValueError("Speak one short word or phrase lasting 0.3 to 2.5 seconds.")
         samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+        clipped = float(np.mean(np.abs(samples) >= 0.985))
+        if clipped > 0.02:
+            raise ValueError("The microphone audio is distorted or clipped. Reduce input volume and retry.")
         samples -= np.mean(samples)
         rms = float(np.sqrt(np.mean(samples * samples)))
         peak = float(np.max(np.abs(samples)))
-        clipped = float(np.mean(np.abs(samples) >= 0.985))
         if rms < 0.015 or peak < 0.035:
             raise ValueError("The speech was too quiet. Speak clearly closer to the microphone.")
-        if clipped > 0.02:
-            raise ValueError("The microphone audio is distorted or clipped. Reduce input volume and retry.")
         return {"duration_ms": round(duration * 1000), "rms": round(rms, 4), "clipped_fraction": round(clipped, 4)}
 
     def enroll(self, household_id: str, word_id: str, sample_id: str, wav_pcm: bytes) -> dict:
