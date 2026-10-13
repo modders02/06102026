@@ -120,6 +120,12 @@ class CameraCustomKeywordTests(unittest.TestCase):
         self.assertEqual(cam.kws_last_decision, "below_threshold")
         self.assertEqual(cam.kws_last_keyword, "")
 
+    def test_removed_stop_word_cannot_arm_cctv_enrollment(self):
+        cam = self.make_camera()
+        with self.assertRaisesRegex(ValueError, "outside the English-only thesis scope"):
+            cam.request_kws_enrollment("stop")
+        self.assertIsNone(cam.kws_pending_enrollment)
+
     def test_unknown_enrollment_uses_non_keyword_prompt(self):
         cam = self.make_camera()
         result = cam.request_kws_enrollment("unknown")
