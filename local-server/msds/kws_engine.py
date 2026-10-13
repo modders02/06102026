@@ -35,7 +35,6 @@ DEFAULT_KEYWORDS = (
     "intruder",
     "police",
     "ambulance",
-    "stop",
 )
 FEATURE_VERSION = "logmel-shape-dtw-v3-open-set"
 NEGATIVE_CLASS = "unknown"
