@@ -21,6 +21,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const path = require('path');
 const http = require('http');
+const { withElectronKwsDefaults } = require('./kwsRuntime.cjs');
 
 const IS_WINDOWS = process.platform === 'win32';
 const STATUS_URL = process.env.MSDS_CAMERA_SERVER_URL || 'http://127.0.0.1:5000';
@@ -195,7 +196,7 @@ async function bootstrapEnvironment(dir, runtimeDir = dir) {
   let installed = false;
   try { installed = fs.readFileSync(marker, 'utf8').trim() === wanted; } catch { installed = false; }
   if (!installed && hasReq) {
-    setPhase('deps', 'Installing camera + Whisper dependencies (first run, this can take a few minutes)…');
+    setPhase('deps', 'Installing camera + custom KWS dependencies (first run, this can take a few minutes)…');
     await run(pyExe, [...pyArgs, '-m', 'pip', 'install', '--upgrade', 'pip'], { cwd: runtimeDir }, 5 * 60 * 1000);
     const ok = await run(pyExe, [...pyArgs, '-m', 'pip', 'install', '-r', reqFile], { cwd: runtimeDir });
     if (ok) {
@@ -234,7 +235,15 @@ const getBootstrapStatus = () => ({ ...bootstrap });
 
 /** Env for the child: pin the packaged binaries when they exist. */
 function childEnv(dir, runtimeDir = dir) {
-  const env = { ...process.env, PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1' };
+  // Electron launches the Python bridge using the user's KWS-only HELP mode
+  // even when Windows/Electron was started from a shortcut with no PowerShell
+  // $env: assignments. Explicit operator overrides still take precedence.
+  const env = withElectronKwsDefaults({
+    ...process.env,
+    PYTHONUNBUFFERED: '1',
+    PYTHONIOENCODING: 'utf-8',
+    PYTHONDONTWRITEBYTECODE: '1',
+  });
   env.MSDS_RUNTIME_DIR = runtimeDir;
   const ext = IS_WINDOWS ? '.exe' : '';
   for (const [name, key] of [
@@ -315,7 +324,14 @@ async function startLocalServer() {
   // Someone else (manual run, previous instance) already owns port 5000.
   if (await probeStatus()) {
     log('an instance is already listening on', STATUS_URL, '- reusing it.');
-    return { managed: false, running: true, error: null };
+    // An independently started Python process has its own environment:
+    // Electron cannot retroactively apply the KWS defaults to it.
+    return {
+      managed: false,
+      running: true,
+      error: null,
+      warning: 'Existing external camera server reused; Electron KWS defaults apply only when Electron launches the bridge.',
+    };
   }
 
   const dir = localServerDir();
@@ -356,6 +372,10 @@ async function startLocalServer() {
   log('dir     :', dir);
   log('python  :', python.exe, python.args.join(' '));
   log('runtime :', runtimeDir);
+  const kwsEnv = withElectronKwsDefaults(process.env);
+  log('KWS     : ASR=' + kwsEnv.MSDS_KWS_VERIFY_ASR +
+      ' HELP_RESCUE=' + kwsEnv.MSDS_KWS_HELP_RESCUE +
+      ' HELP_90=' + kwsEnv.MSDS_KWS_HELP_90_FAST_ACCEPT);
 
   try {
     childError = null;
