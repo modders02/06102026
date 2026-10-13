@@ -18,8 +18,8 @@ from fastapi.responses import Response
 from .binaries import (install_hint, lan_ip, no_window_flags, pip_install_command,
                        resolve_exe)
 from .config import AUDIO_ENGINE, HLS_PORT, RTSP_PORT
-from .manager import (CAMERAS, mediamtx_running, snapshot, start_mediamtx,
-                      stop_all_cameras, sync_cameras)
+from .manager import (CAMERAS, mediamtx_last_error, mediamtx_running,
+                      snapshot, start_mediamtx, stop_all_cameras, sync_cameras)
 from .kws_engine import KWS_ENGINE
 
 app = FastAPI(title="MSDSystem multi-camera bridge")
@@ -158,12 +158,18 @@ def status():
     ffmpeg = resolve_exe("ffmpeg", "FFMPEG_EXE")
     ffprobe = resolve_exe("ffprobe", "FFPROBE_EXE")
     problems = []
+    mediamtx_ok = mediamtx_running()
+    media_error = None if mediamtx_ok else mediamtx_last_error()
+    if media_error:
+        problems.append(media_error)
     if not ffmpeg:
         problems.append(install_hint("ffmpeg", "FFMPEG_EXE"))
     if not ffprobe:
         problems.append(install_hint("ffprobe", "FFPROBE_EXE"))
     return {
-        "mediamtx": mediamtx_running(),
+        "mediamtx": mediamtx_ok,
+        "mediamtx_error": media_error,
+        "available_camera_ids": [c["id"] for c in cams],
         "hls_port": HLS_PORT,
         "lan_ip": host,
         "audio_engine": AUDIO_ENGINE,
@@ -193,7 +199,8 @@ def start_one(camera_id: str):
     cam = find_camera(camera_id)
     if not cam:
         return {"success": False, "error": "unknown camera"}
-    start_mediamtx()
+    if not start_mediamtx():
+        return {"success": False, "error": mediamtx_last_error()}
     try:
         cam.enabled = True
         cam.start()
@@ -218,7 +225,8 @@ def stop_one(camera_id: str):
 
 @app.post("/start-all")
 def start_all():
-    start_mediamtx()
+    if not start_mediamtx():
+        return {"success": False, "started": 0, "error": mediamtx_last_error()}
     cams = [c for c in snapshot() if c.enabled]
     for cam in cams:
         try:
@@ -298,9 +306,26 @@ def kws_enroll(camera_id: str, keyword: str):
     """Arm one camera to use the next spoken segment as a keyword template."""
     cam = find_camera(camera_id)
     if not cam:
-        return {"success": False, "error": "unknown camera"}
-    if not cam.enabled:
-        return {"success": False, "error": "camera is disconnected"}
+        return {
+            "success": False,
+            "error": (
+                f"Camera '{camera_id}' is not registered. Connect the CCTV in "
+                "MSDS first, which calls POST /cameras/sync before enrollment."
+            ),
+            "available_camera_ids": [c.id for c in snapshot()],
+        }
+    if not mediamtx_running():
+        return {"success": False, "error": mediamtx_last_error()}
+    if not cam.enabled or not cam.running():
+        return {"success": False, "error": "Camera video is offline. Connect the CCTV in MSDS first."}
+    if cam.has_audio_track is False:
+        return {"success": False, "error": "CCTV stream has no audio track. Enable its microphone."}
+    if not cam.audio_thread or not cam.audio_thread.is_alive() or not cam.audio_connected:
+        return {
+            "success": False,
+            "error": "CCTV microphone is not receiving PCM audio yet. "
+                     "Wait for audio.thread_running and audio.connected in GET /status.",
+        }
     try:
         status = cam.request_kws_enrollment(keyword)
     except ValueError as exc:
