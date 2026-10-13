@@ -85,6 +85,17 @@ class HouseholdVoiceTests(unittest.TestCase):
         self.assertTrue(engine.status()["open_set_ready"])
         self.assertNotIn("unknown", engine.status()["ready_keywords"])
 
+    def test_microphone_quality_rejects_silence_and_distorted_voice(self):
+        with self.assertRaisesRegex(ValueError, "too quiet"):
+            self.profiles.validate_sample(bytes(int(SAMPLE_RATE * 1.0) * 2))
+        clipped = np.full(int(SAMPLE_RATE * 0.65), 32767, dtype="<i2").tobytes()
+        with self.assertRaisesRegex(ValueError, "clipped"):
+            self.profiles.validate_sample(clipped)
+        with self.assertRaisesRegex(ValueError, "0.3 to 2.5"):
+            self.profiles.validate_sample(sample()[:3200])
+        quality = self.profiles.validate_sample(sample())
+        self.assertGreater(quality["rms"], 0.02)
+
     def test_wav_bytes_decode_and_default_scope_stays_fixed(self):
         pcm = sample()
         decoded = CustomKeywordEngine._read_wav_as_pcm16k_mono(wav_bytes(pcm))
