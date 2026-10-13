@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feature/strict-help-facial-alert, feature/kws-asr-verification-trial-20261013, feature/msds-safe-service-autorecovery-20261014, feature/kws-help-second-chance-20261014, feature/kws-help-fire-disagreement-20261014, feature/kws-short-help-asr-diagnostics-20261014, feature/kws-asr-pending-timeout-20261014, feature/kws-help-90-fast-accept-20261014, feature/kws-help-90-green-accepted-20261014, feature/emotion-expression-training-20261014]
+    branches: [main, feature/strict-help-facial-alert, feature/kws-asr-verification-trial-20261013, feature/msds-safe-service-autorecovery-20261014, feature/kws-help-second-chance-20261014, feature/kws-help-fire-disagreement-20261014, feature/kws-short-help-asr-diagnostics-20261014, feature/kws-asr-pending-timeout-20261014, feature/kws-help-90-fast-accept-20261014, feature/kws-help-90-green-accepted-20261014, feature/emotion-expression-training-20261014, feature/fer2013-official-one-command-20261014]
   pull_request:
 
 jobs:
@@ -57,7 +57,7 @@ jobs:
       - name: Verify conversion and split isolation
         run: python -m unittest discover -s training/facial_distress/tests -p "test_*.py"
       - name: Check optional training script syntax without heavy torch downloads
-        run: python -m py_compile training/facial_distress/import_fer2013.py training/facial_distress/import_own_photos.py training/facial_distress/train_expressions.py training/facial_distress/predict_expressions.py
+        run: python -m py_compile training/facial_distress/import_fer2013.py training/facial_distress/import_own_photos.py training/facial_distress/train_expressions.py training/facial_distress/predict_expressions.py training/facial_distress/download_fer2013.py training/facial_distress/sync_fer2013_bundle.py training/facial_distress/run_fer2013.py
 
   # Regression coverage for the Python camera bridge and custom keyword spotter.
   local-camera-server:
