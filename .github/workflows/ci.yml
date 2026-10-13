@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feature/strict-help-facial-alert]
+    branches: [main, feature/strict-help-facial-alert, feature/kws-asr-verification-trial-20261013]
   pull_request:
 
 jobs:
