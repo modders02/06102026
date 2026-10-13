@@ -22,11 +22,19 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
   const status = runtime?.status || 'connecting';
   const customKeywordMode = runtime?.audio?.recognition_engine === 'custom';
   const kws = runtime?.audio?.custom_kws;
-  const diagnosticTone = kws?.last_decision === 'accepted'
-    ? 'text-success'
+  // The backend keeps the precise reason for testing, but the live camera
+  // presents accepted voice recognition using one friendly green label.
+  // This does not imply that face/visual alert fusion has also passed.
+  const kwsAccepted = ['accepted', 'accepted_help_90', 'verified', 'verified_help_rescue']
+    .includes(kws?.last_decision || '');
+  const diagnosticTone = kwsAccepted
+    ? 'bg-success/10 text-success'
     : kws?.last_decision
       ? 'text-amber-500'
       : 'text-muted-foreground';
+  const diagnosticLabel = kws?.last_decision === 'accepted_help_90'
+    ? 'ACCEPTED'
+    : kws?.last_decision || 'waiting';
   const pct = (value?: number) => typeof value === 'number'
     ? `${(value * 100).toFixed(1)}%`
     : '—';
@@ -34,7 +42,7 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
     ? value.toFixed(digits)
     : '—';
   const customSpeechText = customKeywordMode && kws?.last_candidate
-    ? kws.last_decision === 'accepted'
+    ? kwsAccepted
       ? (kws.last_keyword || kws.last_candidate)
       : `Candidate: ${kws.last_candidate} (${pct(kws.last_candidate_confidence)}) · ${kws.last_decision || 'evaluating'}`
     : '';
@@ -183,8 +191,8 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
         <div className="border-t border-border bg-muted/20 px-4 py-3" data-testid="voice-diagnostics">
           <div className="mb-2 flex items-center justify-between gap-3">
             <span className="text-xs font-semibold text-foreground">Voice diagnostics</span>
-            <span className={`text-xs font-semibold ${diagnosticTone}`}>
-              {kws.last_decision || 'waiting'}
+            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${diagnosticTone}`}>
+              {diagnosticLabel}
             </span>
           </div>
           {kws.language_scope && (
