@@ -94,7 +94,7 @@ def help_rescue_target(decision) -> HelpRescueTarget | None:
         # next-closest positive class; Whisper is not a substitute for KWS.
         if decision.class_margin < 0.012:
             return None
-        if decision.confidence - decision.negative_confidence < 0.015:
+        if decision.confidence - decision.negative_confidence < 0.020:
             return None
         return HelpRescueTarget("help", decision.confidence, "primary")
 
