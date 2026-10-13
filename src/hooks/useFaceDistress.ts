@@ -29,7 +29,12 @@ function loadModels(): Promise<void> {
   modelLoadPromise = (async () => {
     await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
     await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
-  })();
+  })().catch(error => {
+    // A transient network/model-cache failure must not permanently poison
+    // the shared promise. Turning camera AI off and back on can retry.
+    modelLoadPromise = null;
+    throw error;
+  });
   return modelLoadPromise;
 }
 
@@ -47,8 +52,9 @@ export function useFaceDistress(active: boolean) {
       return;
     }
     let cancelled = false;
+    setError(null);
     loadModels()
-      .then(() => { if (!cancelled) setReady(true); })
+      .then(() => { if (!cancelled) { setReady(true); setError(null); } })
       .catch(err => {
         console.error('[FaceDistress] Failed to load models:', err);
         if (!cancelled) setError(err?.message || 'Failed to load face models');
