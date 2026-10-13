@@ -1,5 +1,10 @@
 # Custom Facial Distress Training
 
+> For **Happy, Sad, Angry, Fearful/Frightened, Surprised, Neutral, and
+> Disgusted**, see [EXPRESSION-TRAINING.md](EXPRESSION-TRAINING.md).
+> This existing document remains for the separate three-level research
+> classifier (normal/mild/severe); the old weights are not live-deployed.
+
 This workspace trains a **research classifier** for three labels:
 
 - `normal`
