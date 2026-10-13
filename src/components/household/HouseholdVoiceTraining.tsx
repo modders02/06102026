@@ -95,6 +95,7 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
       const analyser = context.createAnalyser();
       analyser.fftSize = 2048;
       source.connect(analyser);
+      if (context.state === 'suspended') await context.resume();
       const pcm = new Float32Array(analyser.fftSize);
       const gate = new SpeechCaptureGate();
       const startedAt = performance.now();
