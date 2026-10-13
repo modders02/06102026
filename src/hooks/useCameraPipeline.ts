@@ -1183,6 +1183,11 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             too_close_to_unknown: 'Candidate is too similar to UNKNOWN/non-keyword speech.',
             insufficient_margin: 'Candidate is too close to another trained keyword.',
             no_ready_candidate: 'No trained keyword candidate is ready.',
+            verification_timeout: 'Whisper speech verification timed out. Detection was not accepted; the model may still be loading.',
+            verification_busy: 'Whisper is still processing an earlier speech segment. This candidate was not accepted.',
+            verification_unavailable: 'Whisper could not run; the keyword remains unverified.',
+            verification_no_speech: 'Whisper returned no usable speech for this candidate.',
+            verification_mismatch: 'Whisper recognized a different word; the keyword was rejected.',
           };
           const evaluatedAt = kws?.last_segment_at || new Date().toISOString();
           const previous = runtimeRef.current.alertValidation;
