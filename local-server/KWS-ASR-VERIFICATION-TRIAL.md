@@ -69,6 +69,61 @@ Run tests from the repository root:
 & ".\local-server\.venv\Scripts\python.exe" -m unittest discover -s local-server/tests -p "test_camera_kws.py" -v
 ```
 
+## Experimental borderline HELP recovery (opt-in)
+
+This trial has an **additional** switch, disabled by default, to investigate
+real HELP speech rejected by the normal KWS UNKNOWN/class-margin gates:
+
+```powershell
+$env:MSDS_KWS_VERIFY_ASR = "1"
+$env:MSDS_KWS_HELP_RESCUE = "1"
+$env:MSDS_KWS_VERIFY_MODEL = "tiny.en"
+& ".\\local-server\\.venv\\Scripts\\python.exe" ".\\local-server\\camera_server.py"
+```
+
+Only a KWS candidate **already identified as HELP** and narrowly blocked by
+`too_close_to_unknown` or `insufficient_margin` is considered. It must
+have: confidence >=0.90; runner-up AMBULANCE; class margin >=0.015 but below
+its required margin; UNKNOWN separation >=0.020; and duration ratio
+0.75–1.30. The *original* 0.70, 0.03, and class-margin acceptance rules stay
+unchanged for every keyword.
+
+The verifier must transcribe the **isolated word `help`**, not merely a
+phrase that contains it. Any ASR error, mismatch, missing model, ambiguous
+phrase, or failure of the bounded KWS criteria still blocks the keyword
+event. Successful recovery reports `last_decision=verified_help_rescue`
+with `original_kws_decision` preserving the initial rejection.
+
+`GET /status` per-camera fields now include
+`help_rescue_enabled`, `original_kws_decision`,
+`verification_state`, and `verification_transcript`. The last accepted
+keyword can be **stale** after subsequent rejections; compare
+`last_segment_at` and `last_decision`.
+
+**Do not activate external emergency notifications for this experiment.**
+Whisper is not guaranteed to distinguish a genuine one-word HELP from other
+short speech, and HELP may still fail the first-stage eligibility guard.
+The separate React facial-distress fusion is still necessary for HELP-related
+alerts but is not validated by this change.
+
+To disable recovery without removing the main ASR gate, restart with:
+`$env:MSDS_KWS_HELP_RESCUE = "0"`. To disable all ASR verification, set
+`$env:MSDS_KWS_VERIFY_ASR = "0"` as before. Changes to environment variables
+require restarting the local Python server.
+
+### Validation sequence
+
+Use a quiet CCTV microphone and repeat at least 10 times each:
+`help`, `hello`, `health`, `ambulance`, and unrelated casual speech.
+Log KWS class/UNKNOWN margins, ASR transcript, `last_decision`, and whether
+a fresh `custom-kws` event was actually published. Also retest FIRE/FINE.
+Do not claim false-positive improvements or deployment readiness from unit
+tests or one demonstration.
+
+```powershell
+& ".\\local-server\\.venv\\Scripts\\python.exe" -m unittest discover -s local-server/tests -p "test_kws_help_rescue.py" -v
+```
+
 ## Rollback
 Stop the backend, then switch back to
 `feature/msds-next-updates-20261013`. For a quick configuration-only
