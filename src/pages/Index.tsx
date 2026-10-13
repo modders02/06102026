@@ -29,6 +29,7 @@ import { announce } from '@/lib/voiceGuide';
 import { sendAlertEmail } from '@/lib/alertEmail';
 import { stopAll as stopAllCameras, stopCamera } from '@/lib/multiCamServer';
 import { matchWakeWord } from '@/lib/safetyLexicon';
+import { deactivateHouseholdVoice, synchronizeHouseholdVoice } from '@/lib/householdVoiceTraining';
 import {
   audioEventScore,
   audioIntensityScoreFromDb,
@@ -133,7 +134,22 @@ export default function Index() {
   const liveView = location.pathname === '/cameras';
   const requestedCamera = searchParams.get('camera');
   const { events, alertEvents, settings, addEvent, updateEvent, updateSettings } = useCameraRegistry();
-  const { householdId, checkForWakeWord, logAlert, logNotification } = useHousehold(user?.id);
+  const { householdId, wakeWords, refetch: refetchHousehold, checkForWakeWord, logAlert, logNotification } = useHousehold(user?.id);
+  useEffect(() => {
+    if (authLoading || !user) return;
+    if (!householdId) {
+      void deactivateHouseholdVoice().catch(() => {});
+      return;
+    }
+    void synchronizeHouseholdVoice(householdId, wakeWords).catch(error => {
+      console.warn('[msds] Household voice profile sync deferred:', error);
+    });
+  }, [authLoading, user?.id, householdId, wakeWords]);
+  useEffect(() => {
+    if (authLoading || !user) return;
+    const interval = window.setInterval(() => { void refetchHousehold(); }, 90000);
+    return () => window.clearInterval(interval);
+  }, [authLoading, user?.id, refetchHousehold]);
   const { cameras, devices, startCameras, stopCameras, enumerateDevices } = useCamera();
   const { count, slots, setCount, updateSlot } = useCameraSlots();
   useCameraSlotConnections(slots, updateSlot);
