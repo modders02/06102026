@@ -400,7 +400,7 @@ class Camera:
                 self.audio_error = f"Audio PCM reader failed: {exc}"
 
     def request_kws_enrollment(self, keyword: str) -> dict:
-        key = KWS_ENGINE.normalize_keyword(keyword)
+        key = KWS_ENGINE._require_active_keyword(keyword)
         self.kws_segmenter.reset()
         self.kws_pending_enrollment = key
         self._kws_enroll_suppress_until = time.time() + 8.0
