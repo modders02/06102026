@@ -93,17 +93,26 @@ class HouseholdKeywordProfiles:
         with self._lock:
             if household_id != self.household_id or self.engine is None:
                 raise ValueError("Activate this household before enrolling audio.")
-            key = NEGATIVE_CLASS if word_id == NEGATIVE_CLASS else self.words[_uuid(word_id)]["key"]
+            try:
+                key = NEGATIVE_CLASS if word_id == NEGATIVE_CLASS else self.words[_uuid(word_id)]["key"]
+            except KeyError:
+                raise ValueError("Wake word is not registered for the active household.") from None
             return self.engine.enroll(key, wav_pcm, sample_id=sample_id)
 
     def status(self) -> dict:
         with self._lock:
             engine = self.current_engine()
             info = engine.status()
+            sample_ids = {}
+            if self.engine is not None:
+                for key in self.engine.allowed_keywords:
+                    folder = self.engine.data_dir / key
+                    sample_ids[key] = sorted(p.stem for p in folder.glob("*.npy")) if folder.exists() else []
             return {
+                **info,
                 "active_household_id": self.household_id,
                 "words": [{"id": word_id, **word} for word_id, word in self.words.items()],
-                **info,
+                "sample_ids": sample_ids,
             }
 
 
