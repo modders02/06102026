@@ -68,11 +68,12 @@ class HouseholdVoiceTests(unittest.TestCase):
         self.assertTrue(second["changed"])
         self.assertNotIn("help_me", second["active_keywords"])
         self.assertEqual(self.profiles.status()["sample_ids"]["stay_safe"], [])
+        self.assertNotEqual(first_engine.data_dir, self.profiles.current_engine().data_dir)
         with self.assertRaises(ValueError):
             self.profiles.enroll(A, WORD_A, "a" * 32, sample())
         self.profiles.activate(A, [{"id": WORD_A, "phrase": "help me"}])
         self.assertEqual(self.profiles.status()["keywords"]["help_me"], 3)
-        self.assertNotEqual(first_engine.data_dir, self.profiles.current_engine().data_dir if self.profiles.household_id == B else Path(self.folder.name) / B)
+        self.assertEqual(first_engine.data_dir, self.profiles.current_engine().data_dir)
 
     def test_negative_examples_required_for_new_profile(self):
         self.profiles.activate(A, [{"id": WORD_A, "phrase": "call ambulance"}])
