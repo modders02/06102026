@@ -19,6 +19,7 @@ const isRelevantStoredEvent = (event: DetectionEvent) =>
 /** Once an alert is no longer the active Camera Alert, keep it as history only. */
 export const archiveCameraAlert = (event: DetectionEvent): DetectionEvent => ({
   ...event,
+  alertValidation: event.alertValidation && { ...event.alertValidation },
   priorityScenario: false,
 });
 
@@ -79,6 +80,35 @@ function parseEventArray(raw: string | null): DetectionEvent[] {
   } catch { return []; }
 }
 
+function newestUniqueEvents(events: DetectionEvent[]): DetectionEvent[] {
+  const seen = new Set<string>();
+  return [...events]
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+    .filter(event => {
+      if (seen.has(event.id)) return false;
+      seen.add(event.id);
+      return true;
+    });
+}
+
+function normalizeEventHistory(next: CameraEventHistory): CameraEventHistory {
+  const events = newestUniqueEvents(next.events
+    .filter(event => !isCameraAlert(event) && isRelevantStoredEvent(event)));
+  const validAlerts = newestUniqueEvents(next.alertEvents.filter(isCameraAlert));
+  const archivedAlerts = [
+    ...validAlerts.slice(1),
+    ...next.alertEvents.filter(event => !isCameraAlert(event) && isRelevantStoredEvent(event)),
+  ].map(alert => archiveCameraAlert({
+    ...alert,
+    // A history copy may already have a completed clip or later updates.
+    ...events.find(event => event.id === alert.id),
+  }));
+  return {
+    events: newestUniqueEvents([...events, ...archivedAlerts]),
+    alertEvents: validAlerts.slice(0, 1),
+  };
+}
+
 function readEventHistory(): CameraEventHistory {
   const source = readHistoryStorage();
   // A failed persistence write must not roll back alerts in this session when
@@ -90,20 +120,10 @@ function readEventHistory(): CameraEventHistory {
   // Camera Alert is a live/current slot, not a second history list. Keep only
   // the newest still-valid ACCEPTED alert active. Older accepted alerts become
   // ordinary Event History records so their snapshots/clips remain available.
-  const storedAlerts = (source.alertsRaw !== null ? parseEventArray(source.alertsRaw) : storedEvents)
-    .filter(isCameraAlert)
-    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
-  const activeAlert = storedAlerts.slice(0, 1);
-  const archivedAlerts = storedAlerts.slice(1).map(archiveCameraAlert);
-  const seen = new Set<string>();
-  const events = [...storedEvents.filter(event => !isCameraAlert(event)), ...archivedAlerts]
-    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
-    .filter(event => {
-      if (seen.has(event.id)) return false;
-      seen.add(event.id);
-      return true;
-    });
-  return { events, alertEvents: activeAlert };
+  const storedAlerts = source.alertsRaw !== null
+    ? parseEventArray(source.alertsRaw)
+    : storedEvents.filter(isCameraAlert);
+  return normalizeEventHistory({ events: storedEvents, alertEvents: storedAlerts });
 }
 
 /** Clips remain usable while either independently bounded history retains them. */
@@ -120,30 +140,20 @@ export function revokeUnusedEventClips(
 
 export function saveEventHistory(next: CameraEventHistory): CameraEventHistory {
   const previous = readEventHistory();
-  const validAlerts = next.alertEvents
-    .filter(isCameraAlert)
-    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
-  const activeAlert = validAlerts.slice(0, 1);
-  const archivedAlerts = validAlerts.slice(1).map(archiveCameraAlert);
-  const seen = new Set<string>();
-  const retainedEvents = [...next.events, ...archivedAlerts]
-    .filter(event => !isCameraAlert(event) && isRelevantStoredEvent(event))
-    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
-    .filter(event => {
-      if (seen.has(event.id)) return false;
-      seen.add(event.id);
-      return true;
-    })
-    .slice(0, CAMERA_HISTORY_LIMIT);
+  const source = readHistoryStorage();
+  const normalized = normalizeEventHistory(next);
   const retained = {
-    events: retainedEvents,
-    alertEvents: activeAlert,
+    events: normalized.events.slice(0, CAMERA_HISTORY_LIMIT),
+    alertEvents: normalized.alertEvents,
   };
   write(EVENTS_KEY, retained.events);
   write(ALERTS_KEY, retained.alertEvents);
   historyCache = { history: retained, ...readHistoryStorage() };
   revokeUnusedEventClips(
-    [...previous.events, ...previous.alertEvents, ...next.events, ...next.alertEvents],
+    [
+      ...parseEventArray(source.eventsRaw), ...parseEventArray(source.alertsRaw),
+      ...previous.events, ...previous.alertEvents, ...next.events, ...next.alertEvents,
+    ],
     [...retained.events, ...retained.alertEvents],
   );
   return retained;
@@ -154,9 +164,10 @@ export function loadEventHistory(): CameraEventHistory {
   if (history === historyCache?.history) return history;
   const source = readHistoryStorage();
   const rawStoredEvents = parseEventArray(source.eventsRaw);
-  const storedAlertCount = parseEventArray(source.alertsRaw).filter(isCameraAlert).length;
+  const storedAlerts = parseEventArray(source.alertsRaw);
   let needsMigration = history.events.length > CAMERA_HISTORY_LIMIT
-    || storedAlertCount > 1
+    || storedAlerts.length > 1
+    || storedAlerts.some(event => !isCameraAlert(event))
     || rawStoredEvents.some(event => !isRelevantStoredEvent(event));
   try { needsMigration ||= localStorage.getItem(ALERTS_KEY) === null; } catch { /* unavailable storage */ }
   return needsMigration ? saveEventHistory(history) : history;

@@ -68,12 +68,27 @@ export function useCameraRegistry() {
 
   const addEvent = useCallback((evt: DetectionEvent) => {
     const current = loadEventHistory();
+    if ([...current.events, ...current.alertEvents].some(event => event.id === evt.id)) {
+      // Repeated/stale emissions must not recapture the accepted frame or
+      // reactivate an older alert. Ongoing changes belong in updateEvent.
+      revokeUnusedEventClips([evt], [...current.events, ...current.alertEvents]);
+      return;
+    }
     const rejectedValidation = evt.alertValidation?.status === 'rejected';
     const unconfirmedFire = evt.type === 'fire' && evt.fireConfirmed !== true;
     const unconfirmedSmoke = evt.type === 'smoke' && evt.smokeConfirmed !== true;
-    const captured = rejectedValidation || unconfirmedFire || unconfirmedSmoke
-      ? { ...evt, snapshot: undefined, priorityScenario: false }
-      : { ...evt, snapshot: evt.snapshot || captureCameraEventSnapshot(evt.cameraId) };
+    const staleAlert = isCameraAlert(evt) && current.alertEvents.some(event =>
+      Date.parse(evt.timestamp) < Date.parse(event.timestamp));
+    const captured = {
+      ...evt,
+      alertValidation: evt.alertValidation && { ...evt.alertValidation },
+      ...(rejectedValidation || unconfirmedFire || unconfirmedSmoke
+        ? { snapshot: undefined, priorityScenario: false }
+        : {
+            snapshot: evt.snapshot || (staleAlert ? undefined : captureCameraEventSnapshot(evt.cameraId)),
+            ...(staleAlert ? { priorityScenario: false } : {}),
+          }),
+    };
     const alert = isCameraAlert(captured);
     commitHistory({
       // Camera Alert is intentionally a single active accepted trigger. When a
@@ -83,8 +98,12 @@ export function useCameraRegistry() {
         ? [
             ...current.alertEvents
               .filter(event => event.id !== evt.id)
-              .map(archiveCameraAlert),
-            ...current.events.filter(event => event.id !== evt.id),
+              .map(event => archiveCameraAlert({
+                ...event,
+                ...current.events.find(item => item.id === event.id),
+              })),
+            ...current.events.filter(event => event.id !== evt.id
+              && !current.alertEvents.some(alertEvent => alertEvent.id === event.id)),
           ]
         : [captured, ...current.events.filter(event => event.id !== evt.id)],
       alertEvents: alert
@@ -95,14 +114,21 @@ export function useCameraRegistry() {
 
   const updateEvent = useCallback((id: string, patch: Partial<DetectionEvent>) => {
     const current = loadEventHistory();
-    if (![...current.events, ...current.alertEvents].some(event => event.id === id)) {
+    const existing = current.events.find(event => event.id === id)
+      ?? current.alertEvents.find(event => event.id === id);
+    if (!existing) {
       // A recording may finish after both histories have evicted its event.
       revokeUnusedEventClips([patch], [...current.events, ...current.alertEvents]);
       return;
     }
     commitHistory({
-      events: current.events.map(event => event.id === id ? { ...event, ...patch } : event),
-      alertEvents: current.alertEvents.map(event => event.id === id ? { ...event, ...patch } : event),
+      // Freeze the active alert at acceptance. Recording results and subsequent
+      // updates are one separate, deduplicated Event History record.
+      events: [
+        archiveCameraAlert({ ...existing, ...patch, id }),
+        ...current.events.filter(event => event.id !== id),
+      ],
+      alertEvents: current.alertEvents,
     });
   }, [commitHistory]);
 
@@ -112,7 +138,10 @@ export function useCameraRegistry() {
     if (!archived.length) return;
     commitHistory({
       events: [
-        ...archived.map(archiveCameraAlert),
+        ...archived.map(event => archiveCameraAlert({
+          ...event,
+          ...current.events.find(item => item.id === event.id),
+        })),
         ...current.events.filter(event => !archived.some(alert => alert.id === event.id)),
       ],
       alertEvents: current.alertEvents.filter(event => !archived.some(alert => alert.id === event.id)),

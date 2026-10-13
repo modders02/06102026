@@ -16,163 +16,52 @@ function isValidatedSpokenDistress(event: PriorityEventInput): boolean {
   const match = /^verified distress:\s*(Angry|Frightened)\s*\+\s*"help"\s*$/i.exec(event.label.trim());
   if (!match) return false;
   const validation = event.alertValidation;
-  if (validation?.status !== 'accepted') return false;
-  return validation.keyword.trim().toLowerCase() === 'help'
+  return validation?.status === 'accepted'
+    && validation.keyword.trim().toLowerCase() === 'help'
     && validation.emotion.trim().toLowerCase() === match[1].toLowerCase();
 }
 
-function hasAcceptedValidation(event: PriorityEventInput): boolean {
-  return event.alertValidation?.status === 'accepted';
-}
-
-function shouldOpenEmergencyPopup(
-  event: PriorityEventInput,
-  severity?: AlertSeverity,
-): boolean {
-  if (severity !== undefined && severity !== 'critical') return false;
-  if (event.type === 'fire') {
-    return event.fireConfirmed === true && hasAcceptedValidation(event);
-  }
-  if (event.type === 'smoke') {
-    return event.smokeConfirmed === true && hasAcceptedValidation(event);
-  }
-  return isValidatedSpokenDistress(event);
+function isValidatedSpokenFire(event: PriorityEventInput): boolean {
+  const validation = event.alertValidation;
+  return event.type === 'fire'
+    && event.fireConfirmed === true
+    && validation?.status === 'accepted'
+    && validation.keyword.trim().toLowerCase() === 'fire'
+    && validation.emotion.trim().toLowerCase() === 'visual fire';
 }
 
 /**
- * Camera alerts are intentionally narrower than Event History.
- *
- * Priority scenarios are:
- * - detector-confirmed fire hazards,
- * - verified multimodal distress,
- * - a validated person-collapse motion anomaly,
- * - an attention event that explicitly contains a configured priority object,
- * - accepted safety speech explicitly promoted by the caller.
- *
- * The distress alert rule is strict: only validated Angry/Frightened +
- * accepted "help" is a priority distress alert. Generic audio, "emergency",
- * screaming, face-only distress, motion anomalies, and attention events never
- * satisfy this distress rule. Fire and smoke each require their own
- * detector-originated confirmation flag.
+ * Camera alerts, notifications, and emergency recordings share this gate.
+ * Both the accepted audio keyword and its matching camera evidence must be
+ * validated by fusion: help + Angry/Frightened, or fire + confirmed visual fire.
+ * Other detections and incomplete/rejected fusion belong in Event History.
+ * An explicit priority flag cannot bypass either evidence requirement.
  */
 export function classifyPriorityScenario(
   event: PriorityEventInput,
   severity?: AlertSeverity,
 ): PriorityScenarioDecision {
-  const validationRequired = event.type === 'fire'
-    || event.type === 'smoke'
-    || event.type === 'multimodal-distress'
-    || event.type === 'motion-anomaly'
-    || event.type === 'attention-alert';
-
-  if (validationRequired && !hasAcceptedValidation(event)) {
-    return { priority: false, emergency: false, reason: null };
-  }
-
-  if (event.priorityScenario === true) {
-    if (event.type === 'audio-distress' || event.type === 'face-distress') {
-      return { priority: false, emergency: false, reason: null };
-    }
-    if (event.type === 'fire' && event.fireConfirmed !== true) {
-      return { priority: false, emergency: false, reason: null };
-    }
-    if (event.type === 'smoke' && event.smokeConfirmed !== true) {
-      return { priority: false, emergency: false, reason: null };
-    }
-    if (event.type === 'multimodal-distress') {
-      const validatedHelpDistress = isValidatedSpokenDistress(event);
-      return {
-        priority: validatedHelpDistress,
-        emergency: validatedHelpDistress && shouldOpenEmergencyPopup(event, severity),
-        reason: validatedHelpDistress ? 'validated help + distress face' : null,
-      };
-    }
-    return {
-      priority: true,
-      emergency: shouldOpenEmergencyPopup(event, severity),
-      reason: 'explicit priority scenario',
-    };
-  }
   if (event.priorityScenario === false) {
     return { priority: false, emergency: false, reason: null };
   }
 
-  if (event.alertValidation?.status === 'rejected') {
-    return { priority: false, emergency: false, reason: null };
-  }
-
-  if (event.type === 'fire') {
-    if (!hasAcceptedValidation(event) || event.fireConfirmed !== true) {
-      return { priority: false, emergency: false, reason: null };
-    }
-    return {
-      priority: true,
-      emergency: shouldOpenEmergencyPopup(event, severity),
-      reason: 'detector-confirmed fire',
-    };
-  }
-
-  if (event.type === 'smoke') {
-    if (!hasAcceptedValidation(event) || event.smokeConfirmed !== true) {
-      return { priority: false, emergency: false, reason: null };
-    }
-    return {
-      priority: true,
-      emergency: shouldOpenEmergencyPopup(event, severity),
-      reason: 'detector-confirmed smoke',
-    };
-  }
-
-  if (event.type === 'multimodal-distress') {
-    const validatedHelpDistress = isValidatedSpokenDistress(event);
-    return {
-      priority: validatedHelpDistress,
-      emergency: validatedHelpDistress && shouldOpenEmergencyPopup(event, severity),
-      reason: validatedHelpDistress ? 'validated help + distress face' : null,
-    };
-  }
-
-  if (event.type === 'motion-anomaly' && /person collapse/i.test(event.label)) {
-    return {
-      priority: hasAcceptedValidation(event),
-      emergency: false,
-      reason: 'possible person collapse',
-    };
-  }
-
-  if (event.type === 'attention-alert' && /priority object/i.test(event.label)) {
-    return {
-      priority: hasAcceptedValidation(event),
-      emergency: false,
-      reason: 'configured priority object',
-    };
-  }
-
-  // Raw/generic audio is never promoted solely because a caller labels it
-  // critical. Accepted household speech can still opt into Camera alerts with
-  // priorityScenario=true, but it cannot open the emergency popup by itself.
-  if (event.type === 'audio-distress') {
-    return {
-      priority: false,
-      emergency: false,
-      reason: null,
-    };
-  }
-
-  return { priority: false, emergency: false, reason: null };
+  const distress = isValidatedSpokenDistress(event);
+  const fire = isValidatedSpokenFire(event);
+  const priority = distress || fire;
+  return {
+    priority,
+    emergency: priority && (severity === undefined || severity === 'critical'),
+    reason: distress
+      ? 'validated help + distress face'
+      : fire ? 'validated fire keyword + confirmed visual fire' : null,
+  };
 }
 
-/** Persisted Camera alerts must carry or intrinsically satisfy priority policy. */
+/** Recheck persisted evidence using the same policy as new alerts. */
 export function isPriorityCameraAlert(event: PriorityEventInput): boolean {
-  if (event.priorityScenario === false) return false;
-  if (event.alertValidation?.status !== 'accepted') return false;
-  // Never trust legacy promotion flags for raw audio or multimodal labels:
-  // re-validate those against the current strict alert contract.
-  if (event.type === 'audio-distress' || event.type === 'face-distress') return false;
-  if (event.type === 'multimodal-distress') return isValidatedSpokenDistress(event);
   return classifyPriorityScenario(event).priority;
 }
 
 export function isPriorityType(type: DetectionType): boolean {
-  return type === 'fire' || type === 'smoke' || type === 'multimodal-distress';
+  return type === 'fire' || type === 'multimodal-distress';
 }

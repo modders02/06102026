@@ -36,18 +36,12 @@ import {
   objectRelevanceScore,
 } from '@/lib/attentionFusion';
 import { makeFireSpeechSignal } from '@/lib/fireFusion';
-import {
-  DISTRESS_FACE_FRESHNESS_MS,
-  makeDistressFaceSignal,
-  makeDistressSpeechSignal,
-  multimodalDistressLabel,
-  fuseDistressSignals,
-} from '@/lib/multimodalDistress';
+import { makeDistressSpeechSignal } from '@/lib/multimodalDistress';
 import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import { getCameraSession } from '@/lib/cameraSessions';
 import { clipFileName, recordClip, saveClip } from '@/lib/clipRecorder';
 import { CAMERA_HISTORY_LIMIT } from '@/lib/cameraRegistry';
-import { classifyPriorityScenario } from '@/lib/priorityScenario';
+import { classifyPriorityScenario, isPriorityCameraAlert } from '@/lib/priorityScenario';
 import type { CameraRuntime, DetectionEvent } from '@/types/multicam';
 import type { Alert, QualityMode } from '@/types/dashboard';
 import { DEFAULT_PRIORITY_OBJECTS } from '@/types/dashboard';
@@ -72,9 +66,9 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   fire: [
     {
       selector: '#tour-fire-analysis', placement: 'top', title: 'Fire and smoke analysis',
-      body: 'The system combines visual fire candidates, smoke-region coverage, visibility, and speech corroboration. “Fire” alone never alarms; a visual fire candidate + “fire”, or visual fire + a smoke region/low visibility, triggers immediately.',
+      body: 'A fire alert requires an accepted “fire” keyword and a current, detector-confirmed visual fire. Visual-only fire and smoke detections continue updating Event history.',
       implementation: 'src/lib/fireDetection.ts',
-      code: `if (visualFire && fireSpeechWithin10s) alert();\nif (visualFire && (smokeRegion || lowVisibility)) alert();`,
+      code: `if (confirmedVisualFire && acceptedFireWithin10s) alert();`,
     },
   ],
   face: [
@@ -82,7 +76,7 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
       selector: '#tour-face-distress', placement: 'top', title: 'Facial distress',
       body: 'TinyFaceDetector finds the main face. Facial expressions never alarm by themselves: only Angry or Frightened can combine with an accepted "help" keyword inside the fusion window.',
       implementation: 'src/hooks/useFaceDistress.ts',
-      code: `alert = fuse(angryOrFrightened, acceptedHelp, 10_000);`,
+      code: `alert = fuse(angryOrFrightened, acceptedHelp, 4_000);`,
     },
   ],
   speech: [
@@ -96,7 +90,7 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
       selector: '#tour-live-transcription', placement: 'bottom', title: 'Safety phrase matching',
       body: 'Only accepted trained safety keywords are published. “Help” requires a recent Angry/Frightened face; “fire” uses its separate visual-fire verification path.',
       implementation: 'src/lib/safetyLexicon.ts',
-      code: `if (angryOrFrightened && hasHelpOrEmergency && within10Seconds) raiseVerifiedAlert();`,
+      code: `if (angryOrFrightened && acceptedHelp && within4Seconds) raiseVerifiedAlert();`,
     },
   ],
   audio: [
@@ -116,15 +110,15 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
     },
     {
       selector: '#tour-saliency-score', placement: 'top', title: '2. Combine attention',
-      body: 'The main attention score combines visual saliency, audio activity, and object confidence. Other critical detectors can independently raise a safety event.',
+      body: 'The attention score combines visual saliency, audio activity, and object confidence. Camera alerts require an accepted keyword and matching camera evidence.',
       implementation: 'src/pages/Index.tsx',
       code: `attention = 0.40*visual + 0.30*audio + 0.30*objects;`,
     },
     {
       selector: '#tour-alert-log', placement: 'left', title: '3. Record the result',
-      body: 'Only meaningful safety events become alerts. The system applies cooldowns, records the source and time, and shows the result in the event log.',
+      body: 'Accepted audio and matching camera evidence produce one alert with its exact trigger snapshot. Ongoing detections and recording updates appear in Event history.',
       implementation: 'src/pages/Index.tsx · src/components/dashboard/AlertLog.tsx',
-      code: `if (safetyEvent && cooldownReady) addAlert(event);`,
+      code: `if (acceptedAudio && acceptedCameraEvidence) addAlert(event);`,
     },
   ],
 };
@@ -171,7 +165,7 @@ export default function Index() {
   const [simulationMode, setSimulationMode] = useState(false);
   const [priorityObjects, setPriorityObjects] = useState<string[]>(DEFAULT_PRIORITY_OBJECTS);
   const alertCooldown = useRef(new Map<string, number>());
-  const lastLocalSpeechTrigger = useRef('');
+  const lastLocalSpeechTrigger = useRef<number | null>(null);
   const recordingCameras = useRef(new Set<string>());
   const householdMatches = useRef(new Map<number, { phrase: string; at: number }>());
   const previousConnections = useRef(new Set<number>());
@@ -260,13 +254,11 @@ export default function Index() {
       : event;
     addEvent({ ...storedEvent, id });
     const video = getCameraSession(storedEvent.cameraId).video;
-    // Emergency recording requires the same ACCEPTED validation that permits
-    // Camera Alert rendering. A rejected detection cannot capture/save an
-    // alert snapshot or start an emergency clip.
+    // Record only after both audio and matching camera evidence pass the same
+    // fusion gate used by Camera alerts and notifications.
     if (
       !video
-      || !storedEvent.priorityScenario
-      || storedEvent.alertValidation?.status !== 'accepted'
+      || !isPriorityCameraAlert(storedEvent)
       || recordingCameras.current.has(storedEvent.cameraId)
     ) return id;
     recordingCameras.current.add(storedEvent.cameraId);
@@ -337,8 +329,8 @@ export default function Index() {
       return;
     }
 
-    // Only explicitly prioritized scenarios become Camera alerts. Generic
-    // motion, face-only distress and ordinary audio candidates remain history.
+    // Only accepted audio + matching camera fusion becomes a Camera alert.
+    // Ongoing visual, audio, motion, and saliency updates remain history.
     const severity: Alert['severity'] = event.type === 'attention-alert'
       ? 'medium'
       : event.type === 'fire' || event.type === 'smoke' || event.type === 'multimodal-distress'
@@ -352,8 +344,7 @@ export default function Index() {
     // wake-word database. This records the configured Supabase wake word only
     // after multimodal verification; an unaccepted KWS candidate never reaches
     // this database/notification path.
-    if (event.type === 'multimodal-distress'
-        || (event.type === 'fire' && /\bfire\b/i.test(event.label))) {
+    if (isPriorityCameraAlert(event)) {
       const match = checkForWakeWord(event.label);
       if (match.matched) {
         void logNotification(match.wakeWordId, match.phrase, match.actionType, match.isEmergency);
@@ -405,60 +396,17 @@ export default function Index() {
   // A local webcam uses the existing local microphone. CCTV speech comes only from its bridge.
   useEffect(() => {
     if (!running || !localCameras.length || connected.length) return;
-    const text = `${speech.transcript} ${speech.interimTranscript}`.trim();
-    if (!text) {
-      lastLocalSpeechTrigger.current = '';
+    const result = speech.finalResult;
+    if (!result) {
+      lastLocalSpeechTrigger.current = null;
       return;
     }
-    // Runtime/face updates can re-render this effect many times while Web
-    // Speech still exposes the same utterance. Process that utterance once;
-    // after speech clears, the same phrase can legitimately trigger again.
-    if (lastLocalSpeechTrigger.current === text) return;
-    lastLocalSpeechTrigger.current = text;
-    const runtime = runtimes[1];
-
-    const fireSpeech = makeFireSpeechSignal(text);
-    if (fireSpeech) {
-      // Spoken "fire" is supporting evidence only. The camera pipeline itself
-      // is the sole authority for fire emergencies and must first set
-      // fireDetected=true at the configured threshold.
-      return;
-    }
-
-    const fusionSpeech = makeDistressSpeechSignal(text);
-    if (fusionSpeech) {
-      const observedAt = runtime?.faceDistress.observedAt
-        ? Date.parse(runtime.faceDistress.observedAt)
-        : NaN;
-      const faceAt = Number.isFinite(observedAt) ? observedAt : 0;
-      const fusionFace = runtime && faceAt > 0 && Date.now() - faceAt <= DISTRESS_FACE_FRESHNESS_MS
-        ? makeDistressFaceSignal(
-            runtime.faceDistress.label,
-            runtime.faceDistress.confidence,
-            faceAt,
-          )
-        : null;
-      const verified = fuseDistressSignals(fusionFace, fusionSpeech);
-      if (!verified) return;
-      const slot = slots[0];
-      raiseAlert({
-        cameraId: 'slot-1',
-        cameraName: slot.name,
-        location: 'Local webcam',
-        type: 'multimodal-distress',
-        label: multimodalDistressLabel(verified),
-        confidence: verified.confidence,
-        alertValidation: {
-          status: 'accepted',
-          reason: `${verified.face.label} + "${verified.speech.keyword}" matched within the fusion window.`,
-          keyword: verified.speech.keyword,
-          emotion: verified.face.label,
-        },
-        timestamp: new Date(verified.at).toISOString(),
-        snapshot: captureCameraEventSnapshot('slot-1'),
-      }, 'critical');
-      return;
-    }
+    // Each final speech segment is consumed once. Reserved help/fire cues use
+    // the camera pipeline's shared fusion path, including pending validation.
+    if (lastLocalSpeechTrigger.current === result.id) return;
+    lastLocalSpeechTrigger.current = result.id;
+    const text = result.transcript;
+    if (makeFireSpeechSignal(text) || makeDistressSpeechSignal(text)) return;
 
     const household = checkForWakeWord(text);
     const safety = matchWakeWord(text);
@@ -471,11 +419,11 @@ export default function Index() {
       location: '',
       type: 'audio-distress',
       label: `Wake word: "${phrase}"`,
-      confidence: household.matched ? 1 : safety.confidence,
+      confidence: result.confidence,
       priorityScenario: false,
-      timestamp: new Date().toISOString(),
+      timestamp: result.timestamp,
     });
-  }, [running, localCameras.length, connected.length, speech.transcript, speech.interimTranscript, checkForWakeWord, slots, raiseAlert, storeEvent, runtimes]);
+  }, [running, localCameras.length, connected.length, speech.finalResult, checkForWakeWord, slots, storeEvent]);
 
   useEffect(() => {
     if (!running || !localCameras.length || connected.length) return;
@@ -589,6 +537,7 @@ export default function Index() {
     <>
       {slots.map(slot => <CameraMonitor key={slot.index} slot={slot} monitoring={running} baseSettings={pipelineSettings}
         localStream={slot.connected ? undefined : cameras[slot.index - 1]?.stream || undefined}
+        localSpeech={slot.index === 1 && localAudioEnabled ? speech.finalResult : null}
         playbackEnabled={liveView && (!focusedLiveCamera || focusedLiveCamera === `slot-${slot.index}`)}
         onEvent={handleEvent} onMetrics={handleMetrics} />)}
       {liveView && <Monitoring />}

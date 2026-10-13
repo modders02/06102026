@@ -14,7 +14,7 @@ const event = (
   const distress = /^Verified distress: (Angry|Frightened) \+ "help"$/.exec(label);
   const defaultValidation: DetectionEvent['alertValidation'] | undefined =
     type === 'fire'
-      ? { status: 'accepted', reason: 'validated visual fire', keyword: '', emotion: 'visual fire' }
+      ? { status: 'accepted', reason: 'validated fire audio + visual fire', keyword: 'fire', emotion: 'visual fire' }
       : type === 'smoke'
         ? { status: 'accepted', reason: 'validated visual smoke', keyword: '', emotion: 'visual smoke' }
         : type === 'multimodal-distress' && distress
@@ -180,6 +180,167 @@ describe('single active Camera Alert with bounded Event History', () => {
       clipFile: 'alert.webm',
     });
     expect(revoke).not.toHaveBeenCalled();
+  });
+
+  it('routes ongoing updates to one history copy while preserving the accepted trigger', () => {
+    const registry = renderHook(useCameraRegistry);
+    const trigger = event(1, 'fire', { snapshot: 'data:image/jpeg;base64,accepted' });
+    act(() => registry.result.current.addEvent(trigger));
+    const acceptedAlert = registry.result.current.alertEvents[0];
+
+    act(() => registry.result.current.updateEvent('event-1', {
+      clipUrl: 'blob:finished',
+      clipFile: 'accepted.webm',
+    }));
+    act(() => registry.result.current.updateEvent('event-1', {
+      label: 'Later detection update',
+      snapshot: 'data:image/jpeg;base64,later',
+      priorityScenario: true,
+      alertValidation: { status: 'rejected', reason: 'Later rejection', keyword: '', emotion: '' },
+    }));
+
+    expect(registry.result.current.alertEvents[0]).toBe(acceptedAlert);
+    expect(registry.result.current.alertEvents[0]).toEqual(trigger);
+    expect(registry.result.current.events).toHaveLength(1);
+    expect(registry.result.current.events[0]).toMatchObject({
+      id: 'event-1',
+      label: 'Later detection update',
+      snapshot: 'data:image/jpeg;base64,later',
+      priorityScenario: false,
+      clipUrl: 'blob:finished',
+      clipFile: 'accepted.webm',
+      alertValidation: { status: 'rejected' },
+    });
+    expect(revoke).not.toHaveBeenCalled();
+  });
+
+  it.each(['replace', 'archive'] as const)('preserves completed history updates when the active alert is %s', action => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => {
+      registry.result.current.addEvent(event(1, 'fire'));
+      registry.result.current.updateEvent('event-1', { clipUrl: 'blob:finished', clipFile: 'accepted.webm' });
+      if (action === 'replace') registry.result.current.addEvent(event(2, 'fire'));
+      else registry.result.current.archiveActiveAlert('event-1');
+    });
+
+    expect(registry.result.current.events.filter(item => item.id === 'event-1')).toHaveLength(1);
+    expect(registry.result.current.events.find(item => item.id === 'event-1')).toMatchObject({
+      priorityScenario: false,
+      clipUrl: 'blob:finished',
+      clipFile: 'accepted.webm',
+    });
+    expect(revoke).not.toHaveBeenCalled();
+  });
+
+  it('reloads the completed history copy separately from the original accepted alert', () => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => {
+      registry.result.current.addEvent(event(1, 'fire', { snapshot: 'data:image/jpeg;base64,accepted' }));
+      registry.result.current.updateEvent('event-1', { clipUrl: 'blob:finished', clipFile: 'accepted.webm' });
+    });
+    // Reformat the persisted values so the next registry reads storage instead
+    // of the in-memory cache, as a new browser session would.
+    for (const key of ['msd-detection-events-v1', 'msd-camera-alerts-v1']) {
+      localStorage.setItem(key, JSON.stringify(JSON.parse(localStorage.getItem(key)!), null, 2));
+    }
+
+    const reloaded = renderHook(useCameraRegistry);
+
+    expect(reloaded.result.current.alertEvents[0]).toMatchObject({ id: 'event-1', snapshot: 'data:image/jpeg;base64,accepted' });
+    expect(reloaded.result.current.alertEvents[0].clipUrl).toBeUndefined();
+    expect(reloaded.result.current.events[0]).toMatchObject({
+      id: 'event-1',
+      priorityScenario: false,
+      clipUrl: 'blob:finished',
+      clipFile: 'accepted.webm',
+    });
+  });
+
+  it('ignores repeated active and archived trigger IDs without recapturing or reopening them', () => {
+    publishCameraSession('history-source', { eventPreview: 'data:image/jpeg;base64,first' });
+    const registry = renderHook(useCameraRegistry);
+    act(() => registry.result.current.addEvent(event(1, 'fire')));
+    const acceptedAlert = registry.result.current.alertEvents[0];
+    publishCameraSession('history-source', { eventPreview: 'data:image/jpeg;base64,later' });
+
+    act(() => registry.result.current.addEvent(event(1, 'fire', { clipUrl: 'blob:duplicate' })));
+    expect(registry.result.current.alertEvents[0]).toBe(acceptedAlert);
+    expect(registry.result.current.alertEvents[0].snapshot).toBe('data:image/jpeg;base64,first');
+    expect(registry.result.current.events).toEqual([]);
+    expect(revoke).toHaveBeenCalledWith('blob:duplicate');
+
+    act(() => {
+      registry.result.current.updateEvent('event-1', { clipUrl: 'blob:finished' });
+      registry.result.current.addEvent(event(2, 'fire'));
+      registry.result.current.addEvent(event(1, 'fire', { label: 'Stale repeated trigger' }));
+    });
+    expect(registry.result.current.alertEvents[0].id).toBe('event-2');
+    expect(registry.result.current.events).toHaveLength(1);
+    expect(registry.result.current.events[0]).toMatchObject({ id: 'event-1', label: 'fire 1', clipUrl: 'blob:finished' });
+    expect(revoke).not.toHaveBeenCalledWith('blob:finished');
+  });
+
+  it('keeps delayed accepted triggers in history without replacing a newer active trigger', () => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => {
+      registry.result.current.addEvent(event(2, 'fire', { snapshot: 'data:image/jpeg;base64,newer' }));
+      registry.result.current.addEvent(event(1, 'fire', { snapshot: 'data:image/jpeg;base64,delayed' }));
+    });
+
+    expect(registry.result.current.alertEvents[0]).toMatchObject({ id: 'event-2', snapshot: 'data:image/jpeg;base64,newer' });
+    expect(registry.result.current.events[0]).toMatchObject({ id: 'event-1', priorityScenario: false });
+  });
+
+  it('retains clips referenced by either copy and revokes them when both copies are cleared', () => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => {
+      registry.result.current.addEvent(event(1, 'fire', { clipUrl: 'blob:trigger' }));
+      registry.result.current.updateEvent('event-1', { clipUrl: 'blob:history' });
+      registry.result.current.updateEvent('event-1', { clipUrl: 'blob:replacement' });
+    });
+
+    expect(revoke).toHaveBeenCalledTimes(1);
+    expect(revoke).toHaveBeenCalledWith('blob:history');
+    expect(registry.result.current.alertEvents[0].clipUrl).toBe('blob:trigger');
+    expect(registry.result.current.events[0].clipUrl).toBe('blob:replacement');
+
+    act(() => registry.result.current.clearEvents());
+    expect(revoke.mock.calls.map(call => call[0])).toEqual(['blob:history', 'blob:replacement', 'blob:trigger']);
+    act(() => registry.result.current.updateEvent('event-1', { clipUrl: 'blob:finished-after-clear' }));
+    expect(revoke).toHaveBeenCalledWith('blob:finished-after-clear');
+    expect(registry.result.current.events).toEqual([]);
+    expect(registry.result.current.alertEvents).toEqual([]);
+  });
+
+  it('revokes an updated history clip when bounded history evicts it without changing the active trigger', () => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => {
+      registry.result.current.addEvent(event(1, 'fire'));
+      registry.result.current.updateEvent('event-1', { clipUrl: 'blob:evicted-history' });
+      for (let index = 2; index <= CAMERA_HISTORY_LIMIT + 1; index++) registry.result.current.addEvent(event(index));
+    });
+
+    expect(registry.result.current.alertEvents[0].id).toBe('event-1');
+    expect(registry.result.current.events).toHaveLength(CAMERA_HISTORY_LIMIT);
+    expect(registry.result.current.events.some(item => item.id === 'event-1')).toBe(false);
+    expect(revoke).toHaveBeenCalledWith('blob:evicted-history');
+  });
+
+  it('deduplicates stored alert IDs and preserves completed history copies during migration', () => {
+    localStorage.setItem('msd-detection-events-v1', JSON.stringify([
+      event(1, 'fire', { priorityScenario: false, clipUrl: 'blob:finished' }),
+    ]));
+    localStorage.setItem('msd-camera-alerts-v1', JSON.stringify([
+      event(2, 'fire'), event(2, 'fire', { clipUrl: 'blob:duplicate' }), event(1, 'fire'),
+    ]));
+
+    const history = loadEventHistory();
+
+    expect(history.alertEvents.map(item => item.id)).toEqual(['event-2']);
+    expect(history.events).toHaveLength(1);
+    expect(history.events[0]).toMatchObject({ id: 'event-1', clipUrl: 'blob:finished', priorityScenario: false });
+    expect(revoke).toHaveBeenCalledWith('blob:duplicate');
+    expect(revoke).not.toHaveBeenCalledWith('blob:finished');
   });
 
   it('synchronizes the active alert and Event History after a storage event', () => {

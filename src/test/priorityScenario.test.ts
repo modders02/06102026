@@ -1,192 +1,89 @@
 import { describe, expect, it } from 'vitest';
 import { classifyPriorityScenario, isPriorityCameraAlert } from '@/lib/priorityScenario';
+import type { DetectionEvent } from '@/types/multicam';
 
-const accepted = (keyword: string, emotion: string, reason = 'accepted') => ({
-  status: 'accepted' as const,
-  reason,
-  keyword,
-  emotion,
+const validation = (keyword: string, emotion: string, status: 'pending' | 'accepted' | 'rejected' = 'accepted') => ({
+  status, reason: 'Fusion result', keyword, emotion,
 });
 
-const rejected = (keyword: string, emotion: string, reason = 'rejected') => ({
-  status: 'rejected' as const,
-  reason,
-  keyword,
-  emotion,
-});
+const fire = {
+  type: 'fire' as const,
+  label: 'Verified fire: visual fire + "fire"',
+  fireConfirmed: true,
+  alertValidation: validation('fire', 'visual fire'),
+};
+const distress = {
+  type: 'multimodal-distress' as const,
+  label: 'Verified distress: Angry + "help"',
+  alertValidation: validation('help', 'Angry'),
+};
 
-describe('priority scenario camera alert policy', () => {
-  it('keeps ordinary detections and facial expressions out of Camera alerts', () => {
-    expect(isPriorityCameraAlert({ type: 'object', label: 'person' })).toBe(false);
-    expect(isPriorityCameraAlert({ type: 'human', label: '1 person(s)' })).toBe(false);
-    expect(isPriorityCameraAlert({ type: 'emotion', label: 'Frightened' })).toBe(false);
-    expect(isPriorityCameraAlert({ type: 'face-distress', label: 'Frightened' })).toBe(false);
+describe('camera alerts require both accepted audio and matching camera evidence', () => {
+  it.each([fire, distress, {
+    ...distress,
+    label: 'Verified distress: Frightened + "help"',
+    alertValidation: validation('help', 'Frightened'),
+  }])('permits a fully accepted $type fusion', event => {
+    expect(isPriorityCameraAlert(event)).toBe(true);
+    expect(classifyPriorityScenario(event, 'critical')).toMatchObject({ priority: true, emergency: true });
+    expect(classifyPriorityScenario(event, 'high')).toMatchObject({ priority: true, emergency: false });
   });
 
-  it('does not promote unvalidated motion or audio attention into Camera alerts', () => {
-    expect(isPriorityCameraAlert({ type: 'motion-anomaly', label: 'Possible person collapse' })).toBe(false);
-    expect(isPriorityCameraAlert({ type: 'attention-alert', label: 'Attention alert: priority object (α=55)' })).toBe(false);
-    expect(isPriorityCameraAlert({ type: 'attention-alert', label: 'Attention alert: loud audio (α=70)' })).toBe(false);
+  it.each(['pending', 'rejected', undefined] as const)('blocks fusion with validation %s', status => {
+    for (const event of [fire, distress]) {
+      const candidate = { ...event, priorityScenario: true,
+        alertValidation: status ? { ...event.alertValidation, status } : undefined };
+      expect(isPriorityCameraAlert(candidate)).toBe(false);
+      expect(classifyPriorityScenario(candidate, 'critical')).toMatchObject({ priority: false, emergency: false });
+    }
   });
 
-  it('accepts only scenarios carrying an ACCEPTED validation outcome', () => {
-    expect(isPriorityCameraAlert({
-      type: 'fire',
-      label: 'Fire detected',
-      fireConfirmed: true,
-      alertValidation: accepted('', 'visual fire'),
-    })).toBe(true);
-
-    expect(isPriorityCameraAlert({
-      type: 'fire',
-      label: 'Fire candidate only',
-      fireConfirmed: false,
-      alertValidation: accepted('', 'visual fire candidate'),
-    })).toBe(false);
-
-    expect(isPriorityCameraAlert({
-      type: 'smoke',
-      label: 'Smoke detected',
-      smokeConfirmed: true,
-      alertValidation: accepted('', 'visual smoke'),
-    })).toBe(true);
-
-    expect(isPriorityCameraAlert({
-      type: 'smoke',
-      label: 'Smoke candidate only',
-      smokeConfirmed: false,
-      alertValidation: accepted('', 'visual smoke candidate'),
-    })).toBe(false);
-
-    expect(isPriorityCameraAlert({
-      type: 'multimodal-distress',
-      label: 'Verified distress: Frightened + "help"',
-      alertValidation: accepted('help', 'Frightened'),
-    })).toBe(true);
-
-    expect(isPriorityCameraAlert({
-      type: 'motion-anomaly',
-      label: 'Possible person collapse',
-      alertValidation: accepted('', 'motion'),
-    })).toBe(true);
-
-    expect(isPriorityCameraAlert({
-      type: 'attention-alert',
-      label: 'Attention alert: priority object (α=55)',
-      alertValidation: accepted('', 'priority object'),
-    })).toBe(true);
+  it.each([
+    { ...fire, alertValidation: validation('', 'visual fire') },
+    { ...fire, alertValidation: validation('help', 'visual fire') },
+    { ...fire, alertValidation: validation('fire', 'visual fire candidate') },
+    { ...fire, fireConfirmed: false },
+    { ...fire, fireConfirmed: undefined },
+  ])('blocks incomplete or mismatched fire evidence %#', event => {
+    expect(isPriorityCameraAlert(event)).toBe(false);
+    expect(classifyPriorityScenario({ ...event, priorityScenario: true }, 'critical'))
+      .toMatchObject({ priority: false, emergency: false });
   });
 
-  it('never promotes a REJECTED validation result', () => {
-    expect(isPriorityCameraAlert({
-      type: 'fire',
-      label: 'Fire detected',
-      alertValidation: rejected('', 'visual fire candidate', 'visual verification failed'),
-    })).toBe(false);
-
-    expect(isPriorityCameraAlert({
-      type: 'multimodal-distress',
-      label: 'Verified distress: Angry + "help"',
-      alertValidation: rejected('help', 'Angry', 'keyword rejected'),
-    })).toBe(false);
+  it.each([
+    validation('help', 'Happy'),
+    validation('help', 'Frightened'),
+    validation('fire', 'Angry'),
+    validation('', 'Angry'),
+    validation('emergency', 'Angry'),
+  ])('blocks mismatched distress evidence %#', alertValidation => {
+    expect(isPriorityCameraAlert({ ...distress, priorityScenario: true, alertValidation })).toBe(false);
   });
 
-  it('rejects a camera-alert label that does not match the validated evidence', () => {
-    expect(isPriorityCameraAlert({
-      type: 'multimodal-distress',
-      label: 'Verified distress: Angry + "help"',
-      alertValidation: accepted('help', 'Happy'),
-    })).toBe(false);
-
-    expect(isPriorityCameraAlert({
-      type: 'multimodal-distress',
-      label: 'Verified distress: Angry + "help"',
-      alertValidation: accepted('help', 'Frightened'),
-    })).toBe(false);
-
-    expect(isPriorityCameraAlert({
-      type: 'multimodal-distress',
-      label: 'Verified distress: Angry + "emergency"',
-      alertValidation: accepted('emergency', 'Angry'),
-    })).toBe(false);
+  it('does not manufacture fusion from a label', () => {
+    expect(isPriorityCameraAlert({ ...distress, alertValidation: undefined })).toBe(false);
+    expect(isPriorityCameraAlert({ ...distress, label: 'Verified distress: Angry + "emergency"' })).toBe(false);
   });
 
-  it('opens the emergency popup only for an accepted configured emergency', () => {
-    expect(classifyPriorityScenario({
-      type: 'multimodal-distress',
-      label: 'Verified distress: Angry + "help"',
-      alertValidation: accepted('help', 'Angry'),
-    }, 'critical')).toMatchObject({ priority: true, emergency: true });
-
-    expect(classifyPriorityScenario({
-      type: 'multimodal-distress',
-      label: 'Verified distress: Frightened + "help"',
-      alertValidation: accepted('help', 'Frightened'),
-    }, 'critical')).toMatchObject({ priority: true, emergency: true });
-
-    expect(classifyPriorityScenario({
-      type: 'multimodal-distress',
-      label: 'Verified distress: Frightened + "emergency"',
-      alertValidation: accepted('emergency', 'Frightened'),
-    }, 'critical')).toMatchObject({ priority: false, emergency: false });
-
-    expect(classifyPriorityScenario({
-      type: 'audio-distress',
-      label: 'Wake word: "call 911"',
-    }, 'critical')).toMatchObject({ priority: false, emergency: false });
-
-    expect(classifyPriorityScenario({
-      type: 'fire',
-      label: 'Fire detected',
-      fireConfirmed: true,
-      alertValidation: accepted('', 'visual fire'),
-    }, 'critical')).toMatchObject({ priority: true, emergency: true });
-
-    expect(classifyPriorityScenario({
-      type: 'fire',
-      label: 'Visual fire candidate + smoke',
-      fireConfirmed: false,
-      alertValidation: accepted('', 'visual fire candidate'),
-    }, 'critical')).toMatchObject({ priority: false, emergency: false });
-
-    expect(classifyPriorityScenario({
-      type: 'smoke',
-      label: 'Smoke detected',
-      smokeConfirmed: true,
-      alertValidation: accepted('', 'visual smoke'),
-    }, 'critical')).toMatchObject({ priority: true, emergency: true });
-
-    expect(classifyPriorityScenario({
-      type: 'smoke',
-      label: 'Smoke candidate only',
-      priorityScenario: true,
-      smokeConfirmed: false,
-      alertValidation: accepted('', 'visual smoke candidate'),
-    }, 'critical')).toMatchObject({ priority: false, emergency: false });
+  it.each([
+    ['object', 'person'],
+    ['human', '1 person(s)'],
+    ['emotion', 'Frightened'],
+    ['face-distress', 'Frightened'],
+    ['audio-distress', 'Safety word: "help"'],
+    ['smoke', 'Smoke detected'],
+    ['motion-anomaly', 'Possible person collapse'],
+    ['attention-alert', 'Attention alert: priority object + loud audio'],
+  ] as [DetectionEvent['type'], string][])('keeps %s observations in Event history even with a promotion flag', (type, label) => {
+    const event = { type, label, priorityScenario: true, smokeConfirmed: true,
+      alertValidation: validation('help', 'Frightened') };
+    expect(isPriorityCameraAlert(event)).toBe(false);
+    expect(classifyPriorityScenario(event, 'critical')).toMatchObject({ priority: false, emergency: false });
   });
 
-  it('does not let priorityScenario bypass detector-confirmed fire', () => {
-    expect(classifyPriorityScenario({
-      type: 'fire',
-      label: 'Fire candidate only',
-      priorityScenario: true,
-      fireConfirmed: false,
-      alertValidation: accepted('', 'visual fire candidate'),
-    }, 'critical')).toMatchObject({ priority: false, emergency: false });
-  });
-
-  it('does not let priorityScenario bypass the validation result', () => {
-    expect(classifyPriorityScenario({
-      type: 'fire',
-      label: 'diagnostic fire candidate',
-      priorityScenario: true,
-      alertValidation: rejected('', 'fire candidate'),
-    }, 'critical')).toMatchObject({ priority: false, emergency: false });
-
-    expect(classifyPriorityScenario({
-      type: 'audio-distress',
-      label: 'validated custom emergency scenario',
-      priorityScenario: true,
-    }, 'critical')).toMatchObject({ priority: false, emergency: false });
+  it('keeps archived accepted fusion in Event history', () => {
+    for (const event of [fire, distress]) {
+      expect(isPriorityCameraAlert({ ...event, priorityScenario: false })).toBe(false);
+    }
   });
 });

@@ -16,8 +16,12 @@ import { createMotionAnomalyState, detectMotionAnomaly } from '@/lib/motionAnoma
 import { createFireState, detectFire } from '@/lib/fireDetection';
 import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/multiCamServer';
 import { useFaceDistress } from '@/hooks/useFaceDistress';
+import type { FinalSpeechResult } from '@/hooks/useSpeechRecognition';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
+import { isPriorityCameraAlert } from '@/lib/priorityScenario';
 import {
+  FIRE_FUSION_WINDOW_MS,
+  fuseFireWithSpeech,
   makeFireVisualSignal,
   makeFireSpeechSignal,
   type FireVisualSignal,
@@ -128,6 +132,8 @@ interface Options {
   playbackEnabled?: boolean;
   /** Local webcam tracks use still capture outside the live page. */
   sourceStream?: MediaStream | null;
+  /** Finalized local microphone speech; interim recognition is display-only. */
+  localSpeech?: FinalSpeechResult | null;
 }
 
 /**
@@ -135,7 +141,7 @@ interface Options {
  * its own realtime player, frame queue, fire/saliency state, face session,
  * custom-KWS audio polling, validation state, statistics and fault-tolerant reconnect.
  */
-export function useCameraPipeline({ camera, settings, onEvent, managedVideo = false, playbackEnabled = true, sourceStream = null }: Options) {
+export function useCameraPipeline({ camera, settings, onEvent, managedVideo = false, playbackEnabled = true, sourceStream = null, localSpeech = null }: Options) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const homeRef = useRef<HTMLElement | null>(null);
   const onEventRef = useRef(onEvent);
@@ -146,15 +152,22 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const prevFrameRef = useRef<ImageData | null>(null);
   const motionStateRef = useRef(createMotionAnomalyState());
   const busyRef = useRef(false);
+  const frameSequenceRef = useRef(0);
+  const fireSpeechAfterFrameRef = useRef(0);
   const analysisRevisionRef = useRef(0);
   const faceAnalysisRevisionRef = useRef<number | null>(null);
   const analysisActiveRef = useRef(camera.enabled && camera.aiEnabled);
   analysisActiveRef.current = camera.enabled && camera.aiEnabled;
   const lastAudioRef = useRef<string | undefined>(undefined);
+  const localSpeechRef = useRef(localSpeech);
+  localSpeechRef.current = localSpeech;
+  const lastLocalSpeechIdRef = useRef<number | null>(null);
+  const localSpeechPollRef = useRef<(() => Promise<void>) | null>(null);
   const lastShownRef = useRef<string>('');
   const clearTimerRef = useRef<number | undefined>(undefined);
   const audioDistressTimerRef = useRef<number | undefined>(undefined);
   const distressValidationTimerRef = useRef<number | undefined>(undefined);
+  const fireValidationTimerRef = useRef<number | undefined>(undefined);
   const snapshotAnalysisKickRef = useRef<(() => void) | null>(null);
   const recentDistressFaceRef = useRef<DistressFaceSignal | null>(null);
   const recentDistressSpeechRef = useRef<DistressSpeechSignal | null>(null);
@@ -219,6 +232,26 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     setRuntime(runtimeRef.current);
   }, []);
 
+  useEffect(() => {
+    const pending = recentFireSpeechRef.current;
+    recentFireSpeechRef.current = null;
+    recentFireVisualRef.current = null;
+    visualFireAlertActiveRef.current = false;
+    visualSmokeAlertActiveRef.current = false;
+    if (fireValidationTimerRef.current) {
+      window.clearTimeout(fireValidationTimerRef.current);
+      fireValidationTimerRef.current = undefined;
+    }
+    if (pending && runtimeRef.current.alertValidation?.keyword === 'fire') {
+      patch({ alertValidation: {
+        status: 'rejected', keyword: 'fire', confidence: pending.confidence,
+        emotion: '', emotionConfidence: 0,
+        reason: 'Accepted "fire", but the camera source changed before visual validation completed.',
+        evaluatedAt: new Date().toISOString(), sourceDecision: 'accepted',
+      } });
+    }
+  }, [camera.id, camera.path, camera.rtspUrl, camera.streamUrl, camera.webrtcUrl, sourceStream, patch]);
+
   // Work already awaiting a detector must not publish after its camera, AI
   // switch, source, or thresholds change. Audio retains its separate lifecycle.
   useEffect(() => {
@@ -230,10 +263,15 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       motionStateRef.current = createMotionAnomalyState();
       recentDistressFaceRef.current = null;
       const pendingSpeech = recentDistressSpeechRef.current;
+      const pendingFireSpeech = recentFireSpeechRef.current;
       recentDistressSpeechRef.current = null;
       if (distressValidationTimerRef.current) {
         window.clearTimeout(distressValidationTimerRef.current);
         distressValidationTimerRef.current = undefined;
+      }
+      if (fireValidationTimerRef.current) {
+        window.clearTimeout(fireValidationTimerRef.current);
+        fireValidationTimerRef.current = undefined;
       }
       recentFireVisualRef.current = null;
       recentFireSpeechRef.current = null;
@@ -247,17 +285,19 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         fire: { detected: false, candidate: false, confidence: 0 },
         smoke: { detected: false, confidence: 0 },
         faceDistress: { detected: false, label: '', confidence: 0 },
-        ...(pendingSpeech || (currentValidation?.status === 'pending' && currentValidation.keyword === 'help')
+        ...(pendingSpeech || pendingFireSpeech || (currentValidation?.status === 'pending' && ['help', 'fire'].includes(currentValidation.keyword))
           ? {
               alertValidation: {
                 status: 'rejected' as const,
-                keyword: pendingSpeech?.keyword || currentValidation?.keyword || 'help',
-                confidence: pendingSpeech?.confidence ?? currentValidation?.confidence ?? 0,
+                keyword: pendingSpeech?.keyword || (pendingFireSpeech ? 'fire' : currentValidation?.keyword) || 'help',
+                confidence: pendingSpeech?.confidence ?? pendingFireSpeech?.confidence ?? currentValidation?.confidence ?? 0,
                 emotion: currentValidation?.emotion || '',
                 emotionConfidence: currentValidation?.emotionConfidence ?? 0,
-                reason: !camera.enabled
-                  ? 'Accepted "help", but the camera is unavailable for facial validation.'
-                  : 'Accepted "help", but camera AI was disabled before facial validation completed.',
+                reason: pendingFireSpeech || currentValidation?.keyword === 'fire'
+                  ? 'Accepted "fire", but camera analysis became unavailable before visual validation completed.'
+                  : !camera.enabled
+                    ? 'Accepted "help", but the camera is unavailable for facial validation.'
+                    : 'Accepted "help", but camera AI was disabled before facial validation completed.',
                 evaluatedAt: new Date().toISOString(),
                 sourceDecision: 'accepted',
               },
@@ -331,8 +371,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       const cooldownMs = edgeDeduped ? 0 : (settings.alertCooldownMs ?? 3000);
       if (cooldownMs > 0 && cooldownRef.current[key] && now - cooldownRef.current[key] < cooldownMs) return;
       if (cooldownMs > 0) cooldownRef.current[key] = now;
-      runtimeRef.current.alerts += 1;
-      onEventRef.current?.({
+      const event: Omit<DetectionEvent, 'id'> = {
         cameraId: camera.id,
         cameraName: camera.name,
         location: camera.location,
@@ -344,9 +383,11 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         smokeConfirmed: type === 'smoke' ? smokeConfirmed : undefined,
         timestamp: new Date().toISOString(),
         snapshot: snapshot(),
-      });
+      };
+      if (isPriorityCameraAlert(event)) patch({ alerts: runtimeRef.current.alerts + 1 });
+      onEventRef.current?.(event);
     },
-    [camera.id, camera.name, camera.location, snapshot, settings.alertCooldownMs],
+    [camera.id, camera.name, camera.location, snapshot, settings.alertCooldownMs, patch],
   );
 
   const maybeEmitVerifiedDistress = useCallback(() => {
@@ -568,6 +609,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     const cancelled = () => isStopped()
       || revision !== analysisRevisionRef.current || !analysisActiveRef.current;
     busyRef.current = true;
+    const frameSequence = ++frameSequenceRef.current;
     const started = performance.now();
     try {
       const drawn = drawWorkFrame(source, width, height);
@@ -633,8 +675,21 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       // invalidate both halves of fire fusion. This prevents an earlier visual
       // candidate or a recently spoken "fire" from verifying screen content.
       if (fire.screenSuppressed) {
+        const suppressedSpeech = recentFireSpeechRef.current;
         recentFireVisualRef.current = null;
         recentFireSpeechRef.current = null;
+        if (fireValidationTimerRef.current) {
+          window.clearTimeout(fireValidationTimerRef.current);
+          fireValidationTimerRef.current = undefined;
+        }
+        if (suppressedSpeech && runtimeRef.current.alertValidation?.keyword === 'fire') patch({
+          alertValidation: {
+            status: 'rejected', keyword: 'fire', confidence: suppressedSpeech.confidence,
+            emotion: '', emotionConfidence: 0,
+            reason: 'Accepted "fire", but the apparent flames were identified as screen content.',
+            evaluatedAt: new Date().toISOString(), sourceDecision: 'accepted',
+          },
+        });
       }
 
       const fireVisual = makeFireVisualSignal(
@@ -674,36 +729,24 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         }
       }
 
-      // A candidate, smoke, low visibility, night-vision hotspot, or spoken
-      // "fire" is supporting evidence only. Emergency fire detection is
-      // authorized exclusively by the detector's confirmed fireDetected flag
-      // at the configured confidence threshold.
+      // A Camera Alert requires both accepted safety speech and the current
+      // detector-confirmed fire above the configured confidence threshold.
+      // Visual-only hazards continue to update Event History.
       if (fireVisual) recentFireVisualRef.current = fireVisual;
       const thresholdFireDetected =
-        fire.fireDetected === true && fire.confidence >= settings.fireThreshold;
+        !fire.screenSuppressed && fire.fireDetected === true && fire.confidence >= settings.fireThreshold;
       const thresholdSmokeDetected =
         !fire.screenSuppressed && fire.smokeEmergency === true;
       if (!thresholdFireDetected) visualFireAlertActiveRef.current = false;
       if (!thresholdSmokeDetected || thresholdFireDetected) visualSmokeAlertActiveRef.current = false;
 
       const pendingFireSpeech = recentFireSpeechRef.current;
-      if (!thresholdFireDetected && pendingFireSpeech) {
-        recentFireSpeechRef.current = null;
-        patch({
-          alertValidation: {
-            status: 'rejected',
-            keyword: 'fire',
-            confidence: pendingFireSpeech.confidence,
-            emotion: fire.fireCandidate ? 'visual fire candidate' : '',
-            emotionConfidence: fire.confidence,
-            reason: fire.fireCandidate
-              ? 'Accepted "fire", but the visual detector did not confirm an actual fire.'
-              : 'Accepted "fire", but no visual fire was detected.',
-            evaluatedAt: new Date().toISOString(),
-            sourceDecision: 'accepted',
-          },
-        });
-      }
+      const verifiedFire = thresholdFireDetected && frameSequence > fireSpeechAfterFrameRef.current
+        ? fuseFireWithSpeech(
+            makeFireVisualSignal(true, fire.confidence, fire.firePixelRatio, fire.smokeRatio, fire.visibility, fireObservedAt),
+            pendingFireSpeech,
+          )
+        : null;
 
       const previousFire = runtimeRef.current.fire;
       patch({
@@ -739,51 +782,50 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       for (const object of historyObjects) emit('object', object.label, object.confidence);
       if (humanCount > 0) emit('human', `${humanCount} person(s)`, 0.9);
       if (thresholdFireDetected) {
-        const supportingSpeech = recentFireSpeechRef.current;
-        recentFireSpeechRef.current = null;
-        recentFireVisualRef.current = null;
-        const validationReason = fire.nightVisionMode
-          ? 'Night-vision fire detector confirmed an actual fire above the configured threshold.'
-          : 'Fire detector confirmed an actual fire above the configured threshold.';
-        patch({
-          alertValidation: {
-            status: 'accepted',
-            keyword: supportingSpeech ? 'fire' : '',
-            confidence: fire.confidence,
-            emotion: 'visual fire',
-            emotionConfidence: fire.confidence,
-            reason: validationReason,
-            evaluatedAt: new Date().toISOString(),
-            sourceDecision: 'accepted',
-          },
-        });
-        if (!visualFireAlertActiveRef.current) {
-          visualFireAlertActiveRef.current = true;
-          emit('fire', fire.nightVisionMode ? 'Fire detected (night vision)' : 'Fire detected', fire.confidence, {
-            status: 'accepted',
-            reason: validationReason,
-            keyword: supportingSpeech ? 'fire' : '',
-            emotion: 'visual fire',
+        if (verifiedFire) {
+          recentFireSpeechRef.current = null;
+          recentFireVisualRef.current = null;
+          if (fireValidationTimerRef.current) {
+            window.clearTimeout(fireValidationTimerRef.current);
+            fireValidationTimerRef.current = undefined;
+          }
+          const validationReason = 'Accepted "fire" matched current detector-confirmed visual fire within the fusion window.';
+          patch({
+            alertValidation: {
+              status: 'accepted', keyword: 'fire', confidence: verifiedFire.speech.confidence,
+              emotion: 'visual fire', emotionConfidence: fire.confidence,
+              reason: validationReason, evaluatedAt: new Date(verifiedFire.at).toISOString(),
+              sourceDecision: 'accepted',
+            },
+          });
+          // Consume the keyword independently of the visual history edge. A
+          // second separately accepted word can validate the continuing fire.
+          emit('fire', 'Verified fire: visual fire + "fire"', verifiedFire.confidence, {
+            status: 'accepted', reason: validationReason, keyword: 'fire', emotion: 'visual fire',
           }, true);
+          visualFireAlertActiveRef.current = true;
+        } else if (!visualFireAlertActiveRef.current) {
+          visualFireAlertActiveRef.current = true;
+          const waitingReason = 'Visual fire confirmed; waiting for an accepted "fire" safety keyword.';
+          emit('fire', fire.nightVisionMode ? 'Fire detected (night vision)' : 'Fire detected', fire.confidence, {
+            status: 'pending', reason: waitingReason, keyword: '', emotion: 'visual fire',
+          }, true);
+          const currentValidation = runtimeRef.current.alertValidation;
+          if (!currentValidation || currentValidation.status === 'waiting'
+              || (currentValidation.status === 'pending' && !currentValidation.keyword)) {
+            patch({ alertValidation: {
+              status: 'pending', keyword: '', confidence: fire.confidence,
+              emotion: 'visual fire', emotionConfidence: fire.confidence,
+              reason: waitingReason, evaluatedAt: new Date().toISOString(),
+            } });
+          }
         }
       } else if (thresholdSmokeDetected) {
-        const smokeReason = 'Smoke detector confirmed sustained smoke with degrading visibility.';
-        patch({
-          alertValidation: {
-            status: 'accepted',
-            keyword: '',
-            confidence: fire.confidence,
-            emotion: 'visual smoke',
-            emotionConfidence: fire.confidence,
-            reason: smokeReason,
-            evaluatedAt: new Date().toISOString(),
-            sourceDecision: 'accepted',
-          },
-        });
+        const smokeReason = 'Visual smoke confirmed, but no matching accepted safety-keyword fusion is configured.';
         if (!visualSmokeAlertActiveRef.current) {
           visualSmokeAlertActiveRef.current = true;
           emit('smoke', 'Smoke detected', fire.confidence, {
-            status: 'accepted',
+            status: 'rejected',
             reason: smokeReason,
             keyword: '',
             emotion: 'visual smoke',
@@ -798,9 +840,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         motionAlertKeyRef.current = null;
       } else if (motionAlertKeyRef.current !== motionKey) {
         motionAlertKeyRef.current = motionKey;
-        const motionReason = `Visual motion validation accepted: ${motionAnomaly.label}.`;
+        const motionReason = `Visual motion observed: ${motionAnomaly.label}; no matching accepted safety keyword.`;
         emit('motion-anomaly', motionAnomaly.label, motionAnomaly.confidence, {
-          status: 'accepted',
+          status: 'pending',
           reason: motionReason,
           keyword: '',
           emotion: 'motion',
@@ -832,13 +874,13 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
           const alertKey = reason;
           if (attentionAlertKeyRef.current !== alertKey) {
             attentionAlertKeyRef.current = alertKey;
-            const attentionReason = `Attention validation accepted: ${reason}; score α=${attentionScore} exceeded the configured threshold.`;
+            const attentionReason = `Attention observed: ${reason}; score α=${attentionScore} exceeded the threshold without a matching accepted safety keyword.`;
             emit(
               'attention-alert',
               `Attention alert: ${reason} (α=${attentionScore})`,
               attentionScore / 100,
               {
-                status: 'accepted',
+                status: 'pending',
                 reason: attentionReason,
                 keyword: '',
                 emotion: reason,
@@ -856,7 +898,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     } finally {
       busyRef.current = false;
     }
-  }, [camera.enabled, camera.aiEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.saliencyMode, settings.attentionThreshold, settings.alertCooldownMs, settings.priorityObjects, analyzeFace, drawWorkFrame, patch, emit, maybeEmitVerifiedDistress]);
+  }, [camera.enabled, camera.aiEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.saliencyMode, settings.attentionThreshold, settings.priorityObjects, analyzeFace, drawWorkFrame, patch, emit, maybeEmitVerifiedDistress]);
   const analyzeFrameRef = useRef(analyzeFrame);
   analyzeFrameRef.current = analyzeFrame;
 
@@ -1049,10 +1091,6 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   // The browser never opens a microphone. Listening runs whenever the camera is
   // connected, independently of the AI detection switch.
   useEffect(() => {
-    if (sourceStream) {
-      patch({ audioListening: false, audioMessage: 'Local microphone listening is managed on the dashboard.', audioTone: 'wait' });
-      return;
-    }
     if (!camera.enabled) {
       recentDistressSpeechRef.current = null;
       recentFireSpeechRef.current = null;
@@ -1100,7 +1138,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     const poll = async () => {
       if (inFlight) return;
       const now = Date.now();
-      if (!playbackEnabledRef.current
+      if (!sourceStream && !playbackEnabledRef.current
           && lastAudioPollStartedAtRef.current
           && now - lastAudioPollStartedAtRef.current < AUDIO_POLL_BACKGROUND_MIN_MS) {
         return;
@@ -1108,11 +1146,24 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       lastAudioPollStartedAtRef.current = now;
       inFlight = true;
       try {
-        const { events, status } = await getAudioEvents(
-          settings.pythonServer, camera.id, lastAudioRef.current,
-        );
+        const localEvents: { keyword: string; transcript: string; confidence: number; timestamp: string }[] = [];
+        if (sourceStream) {
+          const result = localSpeechRef.current;
+          if (result && result.id !== lastLocalSpeechIdRef.current) {
+            lastLocalSpeechIdRef.current = result.id;
+            const text = result.transcript.trim();
+            const { timestamp, confidence } = result;
+            if (makeDistressSpeechSignal(text)) localEvents.push({ keyword: 'help', transcript: text, confidence, timestamp });
+            if (makeFireSpeechSignal(text)) localEvents.push({ keyword: 'fire', transcript: text, confidence, timestamp });
+          }
+        }
+        const { events, status } = sourceStream
+          ? { events: localEvents, status: null }
+          : await getAudioEvents(settings.pythonServer, camera.id, lastAudioRef.current);
         if (stopped) return;
-        const described = describeAudioStatus(status, true);
+        const described = sourceStream
+          ? { message: 'Local microphone listening is managed on the dashboard.', tone: 'wait' as const }
+          : describeAudioStatus(status, true);
         patch({
           audio: status,
           audioBackendReachable: true,
@@ -1218,6 +1269,24 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
               // Store the accepted speech before requesting a fresh frame so a
               // fast snapshot cannot finish before the evidence is visible.
               recentFireSpeechRef.current = fireSpeech;
+              fireSpeechAfterFrameRef.current = frameSequenceRef.current;
+              if (fireValidationTimerRef.current) {
+                window.clearTimeout(fireValidationTimerRef.current);
+                fireValidationTimerRef.current = undefined;
+              }
+              const remainingMs = fireSpeech.at + FIRE_FUSION_WINDOW_MS - Date.now();
+              if (!cameraAiEnabledRef.current || remainingMs <= 0) {
+                recentFireSpeechRef.current = null;
+                patch({ alertValidation: {
+                  status: 'rejected', keyword: 'fire', confidence: fireSpeech.confidence,
+                  emotion: '', emotionConfidence: 0,
+                  reason: !cameraAiEnabledRef.current
+                    ? 'Accepted "fire", but camera AI is disabled so visual validation is unavailable.'
+                    : 'Accepted "fire" was too old to match current visual evidence.',
+                  evaluatedAt: e.timestamp, sourceDecision: 'accepted',
+                } });
+                continue;
+              }
               patch({
                 alertValidation: {
                   status: 'pending',
@@ -1230,6 +1299,20 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                   sourceDecision: 'accepted',
                 },
               });
+              const trackedSpeech = fireSpeech;
+              fireValidationTimerRef.current = window.setTimeout(() => {
+                fireValidationTimerRef.current = undefined;
+                if (recentFireSpeechRef.current !== trackedSpeech) return;
+                recentFireSpeechRef.current = null;
+                if (runtimeRef.current.alertValidation?.keyword !== 'fire') return;
+                patch({ alertValidation: {
+                  status: 'rejected', keyword: 'fire', confidence: trackedSpeech.confidence,
+                  emotion: runtimeRef.current.fire.candidate ? 'visual fire candidate' : '',
+                  emotionConfidence: runtimeRef.current.fire.confidence,
+                  reason: 'Accepted "fire", but no current detector-confirmed visual fire matched within the fusion window.',
+                  evaluatedAt: new Date().toISOString(), sourceDecision: 'accepted',
+                } });
+              }, Math.min(FIRE_FUSION_WINDOW_MS, remainingMs));
               snapshotAnalysisKickRef.current?.();
             }
 
@@ -1345,11 +1428,13 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       }
     };
 
-    const id = window.setInterval(poll, AUDIO_POLL_TICK_MS);
+    const id = sourceStream ? undefined : window.setInterval(poll, AUDIO_POLL_TICK_MS);
+    if (sourceStream) localSpeechPollRef.current = poll;
     void poll();
     return () => {
       stopped = true;
-      window.clearInterval(id);
+      if (id !== undefined) window.clearInterval(id);
+      if (localSpeechPollRef.current === poll) localSpeechPollRef.current = null;
       if (audioDistressTimerRef.current) {
         window.clearTimeout(audioDistressTimerRef.current);
         audioDistressTimerRef.current = undefined;
@@ -1358,9 +1443,27 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         window.clearTimeout(distressValidationTimerRef.current);
         distressValidationTimerRef.current = undefined;
       }
+      const pendingFire = recentFireSpeechRef.current;
+      recentFireSpeechRef.current = null;
+      if (fireValidationTimerRef.current) {
+        window.clearTimeout(fireValidationTimerRef.current);
+        fireValidationTimerRef.current = undefined;
+      }
+      if (pendingFire && runtimeRef.current.alertValidation?.keyword === 'fire') {
+        patch({ alertValidation: {
+          status: 'rejected', keyword: 'fire', confidence: pendingFire.confidence,
+          emotion: '', emotionConfidence: 0,
+          reason: 'Accepted "fire", but the audio session changed before visual validation completed.',
+          evaluatedAt: new Date().toISOString(), sourceDecision: 'accepted',
+        } });
+      }
       patch({ audioListening: false, audioDistress: { detected: false, keyword: '', confidence: 0, transcript: '' } });
     };
   }, [camera.enabled, camera.id, sourceStream, settings.pythonServer, settings.audioThreshold, patch, emit, maybeEmitVerifiedDistress, showTranscript]);
+
+  useEffect(() => {
+    if (sourceStream && localSpeech) void localSpeechPollRef.current?.();
+  }, [sourceStream, localSpeech]);
 
 
   const reconnect = useCallback(() => {

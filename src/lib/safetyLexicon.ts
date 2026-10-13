@@ -40,7 +40,7 @@ export interface SafetyPhrase {
 
 const P = (
   phrase: string,
-  lang: 'en' | 'tl',
+  lang: SafetyPhrase['lang'],
   category: SafetyCategory,
   severity: SafetySeverity,
   confidence: number,

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Monitoring from '@/pages/Monitoring';
@@ -269,8 +269,8 @@ describe('camera alerts and event history', () => {
         fireConfirmed: true,
         alertValidation: {
           status: 'accepted',
-          reason: 'Fire detector confidence satisfied the configured fire threshold.',
-          keyword: '',
+          reason: 'Accepted fire keyword matched confirmed visual fire.',
+          keyword: 'fire',
           emotion: 'visual fire',
         },
       },
@@ -345,31 +345,39 @@ describe('camera alerts and event history', () => {
       .toHaveTextContent('1');
   });
 
-  it('removes the active Camera Alert when a newer live validation is REJECTED', async () => {
-    publishCameraSession('slot-2', {
-      runtime: {
-        ...onlineRuntime,
-        cameraId: 'slot-2',
-        alertValidation: {
-          status: 'rejected',
-          keyword: 'help',
-          confidence: 0.61,
-          emotion: 'Happy',
-          emotionConfidence: 0.95,
-          reason: 'Current camera expression is Happy.',
-          evaluatedAt: '2026-10-02T02:42:00Z',
-          sourceDecision: 'below_threshold',
+  it.each(['rejected', 'pending'] as const)('keeps the accepted trigger unchanged while newer %s validation updates Event history', status => {
+    render(<MemoryRouter initialEntries={['/cameras?camera=slot-2']}><Monitoring /></MemoryRouter>);
+    const alerts = screen.getByRole('region', { name: 'Camera alerts' });
+    const acceptedTrigger = alerts.innerHTML;
+
+    act(() => {
+      publishCameraSession('slot-2', {
+        runtime: {
+          ...onlineRuntime,
+          cameraId: 'slot-2',
+          alertValidation: {
+            status,
+            keyword: 'help',
+            confidence: 0.61,
+            emotion: 'Happy',
+            emotionConfidence: 0.95,
+            reason: 'Current camera expression is Happy.',
+            evaluatedAt: '2026-10-02T02:42:00Z',
+            sourceDecision: 'below_threshold',
+          },
         },
-      },
+      });
     });
 
-    render(<MemoryRouter initialEntries={['/cameras?camera=slot-2']}><Monitoring /></MemoryRouter>);
-
-    expect(screen.queryByText(/Kitchen fire/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'View snapshot: Kitchen fire from Camera 2' }))
-      .not.toBeInTheDocument();
-    expect(screen.getByText('No camera alerts yet.')).toBeInTheDocument();
-    await waitFor(() => expect(mocks.archiveActiveAlert).toHaveBeenCalledWith('second'));
+    expect(alerts.innerHTML).toBe(acceptedTrigger);
+    expect(within(alerts).getByRole('img', { name: 'Kitchen fire snapshot from Camera 2' }))
+      .toHaveAttribute('src', 'data:image/jpeg;base64,test');
+    expect(alerts).toHaveTextContent(new Date('2026-10-02T02:41:23Z').toLocaleString());
+    const history = screen.getByRole('region', { name: 'Event history' });
+    const validation = within(history).getByRole('region', { name: 'Validation layer' });
+    expect(validation).toHaveTextContent(status.toUpperCase());
+    expect(validation).toHaveTextContent('Current camera expression is Happy.');
+    expect(mocks.archiveActiveAlert).not.toHaveBeenCalled();
   });
 
   it('does not let an older stale REJECTED result erase a newer accepted Camera Alert', () => {
@@ -416,6 +424,30 @@ describe('camera alerts and event history', () => {
     expect(screen.getByText('No camera alerts yet.')).toBeInTheDocument();
   });
 
+  it.each([
+    { evidence: 'visual fire only', type: 'fire', keyword: '', emotion: 'visual fire', label: 'Kitchen fire' },
+    { evidence: 'audio only', type: 'multimodal-distress', keyword: 'help', emotion: '', label: 'Verified distress: Angry + "help"' },
+    { evidence: 'facial expression only', type: 'multimodal-distress', keyword: '', emotion: 'Angry', label: 'Verified distress: Angry + "help"' },
+  ] as const)('keeps $evidence in Event history without a Camera alert', ({ type, keyword, emotion, label }) => {
+    const candidate: DetectionEvent = {
+      ...mocks.alertEvents[0],
+      id: 'incomplete-evidence',
+      type,
+      label,
+      alertValidation: { status: 'accepted', reason: 'Legacy incomplete validation.', keyword, emotion },
+    };
+    mocks.alertEvents = [candidate];
+    mocks.events = [candidate];
+
+    render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
+
+    const alerts = screen.getByRole('region', { name: 'Camera alerts' });
+    expect(within(alerts).getByText('No camera alerts yet.')).toBeInTheDocument();
+    expect(within(alerts).queryByText(label)).not.toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Event history' })).getByText(label))
+      .toBeInTheDocument();
+  });
+
   it('keeps an alert snapshot available after the event leaves general history', () => {
     mocks.events = [mocks.events[0]];
     render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
@@ -424,6 +456,26 @@ describe('camera alerts and event history', () => {
     expect(screen.getByText(/Kitchen fire/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'View snapshot: Kitchen fire from Camera 2' }));
     expect(within(screen.getByRole('dialog')).getByRole('img')).toHaveAttribute('src', 'data:image/jpeg;base64,test');
+  });
+
+  it('keeps the accepted snapshot preview separate from updates to the same history event', async () => {
+    mocks.events = [{
+      ...mocks.alertEvents[0],
+      label: 'Updated fire history',
+      clipUrl: undefined,
+      snapshot: 'data:image/jpeg;base64,updated-history',
+    }];
+    render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'View snapshot: Kitchen fire from Camera 2' }));
+    expect(within(screen.getByRole('dialog')).getByRole('img'))
+      .toHaveAttribute('src', 'data:image/jpeg;base64,test');
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'View snapshot: Updated fire history from Camera 2' }));
+    expect(within(screen.getByRole('dialog')).getByRole('img'))
+      .toHaveAttribute('src', 'data:image/jpeg;base64,updated-history');
   });
 
   it('closes a snapshot preview when its alert is cleared or evicted', () => {
@@ -437,14 +489,55 @@ describe('camera alerts and event history', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('shows the missing folder and save failure without a Downloads fallback', async () => {
+  it('shows recording errors in Event history and leaves the accepted Camera alert unchanged', async () => {
     mocks.alertEvents[0] = { ...mocks.alertEvents[0], clipError: 'No folder selected.' };
+    mocks.events = [{ ...mocks.alertEvents[0] }];
     render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
-    expect(screen.getAllByText('No folder selected.')).toHaveLength(1);
+    expect(within(screen.getByRole('region', { name: 'Event history' })).getByText('No folder selected.'))
+      .toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Camera alerts' })).queryByText('No folder selected.'))
+      .not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Recording settings' }));
     await waitFor(() => expect(screen.getAllByText('No folder selected.')).toHaveLength(2));
     expect(screen.queryByText(/Downloads/)).not.toBeInTheDocument();
+  });
+
+  it('shows live validation inside Event history for its filter and uses the focused camera for all history', () => {
+    publishCameraSession('slot-1', {
+      runtime: {
+        ...onlineRuntime,
+        cameraId: 'slot-1',
+        alertValidation: {
+          status: 'rejected', keyword: 'help', confidence: 0.6, reason: 'Camera one rejected.',
+          emotion: 'Happy', emotionConfidence: 0.9, evaluatedAt: '2026-10-02T02:42:00Z',
+        },
+      },
+    });
+    publishCameraSession('slot-2', {
+      runtime: {
+        ...onlineRuntime,
+        cameraId: 'slot-2',
+        alertValidation: {
+          status: 'pending', keyword: 'fire', confidence: 0.9, reason: 'Camera two waiting.',
+          emotion: '', emotionConfidence: 0, evaluatedAt: '2026-10-02T02:42:00Z',
+        },
+      },
+    });
+    render(<MemoryRouter initialEntries={['/cameras?camera=slot-1&events=slot-2']}><Monitoring /></MemoryRouter>);
+
+    const history = screen.getByRole('region', { name: 'Event history' });
+    const validation = within(history).getByRole('region', { name: 'Validation layer' });
+    expect(validation).toHaveTextContent('Camera 2');
+    expect(validation).toHaveTextContent('Camera two waiting.');
+    expect(validation).not.toHaveTextContent('Camera one rejected.');
+    expect(within(screen.getByRole('region', { name: 'Camera alerts' })).queryByRole('region', { name: 'Validation layer' }))
+      .not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Filter events by camera' }), { target: { value: 'all' } });
+    expect(validation).toHaveTextContent('Camera 1');
+    expect(validation).toHaveTextContent('Camera one rejected.');
+    expect(validation).not.toHaveTextContent('Camera two waiting.');
   });
 
   it('confirms folder selection without displaying the destination name', async () => {

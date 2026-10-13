@@ -5,6 +5,8 @@ import { makeSlot } from '@/hooks/useCameraSlots';
 import { getCameraSession, publishCameraSession } from '@/lib/cameraSessions';
 import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import { DEFAULT_SETTINGS } from '@/types/multicam';
+import { FIRE_FUSION_WINDOW_MS } from '@/lib/fireFusion';
+import type { FaceDistress } from '@/hooks/useFaceDistress';
 
 interface MockPlayer {
   video: HTMLVideoElement | null;
@@ -17,7 +19,7 @@ interface MockRtc {
 }
 const mocked = vi.hoisted(() => ({
   players: [] as MockPlayer[], getAudioEvents: vi.fn(), getCameraSnapshot: vi.fn(),
-  analyzeFace: vi.fn(async () => {}), loadDetector: vi.fn(async () => {}), detectObjects: vi.fn(),
+  analyzeFace: vi.fn<() => Promise<FaceDistress | null | void>>(async () => undefined), loadDetector: vi.fn(async () => {}), detectObjects: vi.fn(),
   computeSaliency: vi.fn(), detectFire: vi.fn(),
   openCameraWebRtc: vi.fn(), rtc: [] as MockRtc[],
   distress: { hasFace: false, expression: null as string | null, probability: 0, distressScore: 0, distressLevel: 'none' as 'none' | 'mild' | 'severe' },
@@ -94,6 +96,10 @@ const helpSafetyEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'help m
 const standaloneSafetyEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'call police', keyword: 'police', confidence: 0.99 };
 const screamAudioEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: '', keyword: 'scream', confidence: 0.93 };
 const fireAudioEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'fire', keyword: 'fire', confidence: 0.98 };
+const confirmedFire = {
+  fireCandidate: true, fireDetected: true, smokeEmergency: false,
+  confidence: 0.9, firePixelRatio: 0.03, smokeRatio: 0, visibility: 100,
+};
 
 describe('camera snapshots and page-scoped playback', () => {
   it.each([1, 2])('uses stills for camera %s on Dashboard while visual and audio triggers continue', async index => {
@@ -310,6 +316,66 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('validates finalized local help when matching facial evidence arrives later without polling the backend', async () => {
+    const stream = { getVideoTracks: () => [{ readyState: 'live' }] } as unknown as MediaStream;
+    vi.stubGlobal('ImageCapture', class { grabFrame = async () => ({ width: 1920, height: 1080, close: closeBitmap }); });
+    const slot = makeSlot(1);
+    const localSpeech = { id: 1, transcript: 'help me', confidence: 0.97, timestamp: new Date().toISOString() };
+    const onEvent = vi.fn();
+    const { rerender } = render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} localStream={stream} localSpeech={localSpeech} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({ status: 'pending', keyword: 'help' });
+    mocked.analyzeFace.mockResolvedValue({ hasFace: true, expression: 'angry', probability: 0.95, distressScore: 90, distressLevel: 'severe' });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({ status: 'accepted', keyword: 'help', emotion: 'Angry' });
+    const distressEvents = () => onEvent.mock.calls.map(([event]) => event).filter(event => event.type === 'multimodal-distress');
+    expect(distressEvents()).toHaveLength(1);
+    rerender(<CameraMonitor slot={slot} monitoring playbackEnabled={false} localStream={stream} localSpeech={{ ...localSpeech }} onEvent={onEvent} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(distressEvents()).toHaveLength(1);
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(1);
+    expect(mocked.getAudioEvents).not.toHaveBeenCalled();
+    expect(mocked.getCameraSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('validates each finalized local fire segment once against current confirmed visual fire', async () => {
+    const stream = { getVideoTracks: () => [{ readyState: 'live' }] } as unknown as MediaStream;
+    vi.stubGlobal('ImageCapture', class { grabFrame = async () => ({ width: 1920, height: 1080, close: closeBitmap }); });
+    mocked.detectFire.mockReturnValue(confirmedFire);
+    const slot = makeSlot(1);
+    const firstSpeech = { id: 1, transcript: 'fire', confidence: 0.97, timestamp: new Date().toISOString() };
+    const onEvent = vi.fn();
+    const { rerender } = render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} localStream={stream} localSpeech={firstSpeech} onEvent={onEvent} />);
+    await act(async () => {});
+    const acceptedFire = () => onEvent.mock.calls.map(([event]) => event)
+      .filter(event => event.type === 'fire' && event.alertValidation?.status === 'accepted');
+    expect(acceptedFire()).toHaveLength(1);
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({ status: 'accepted', keyword: 'fire', emotion: 'visual fire' });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    rerender(<CameraMonitor slot={slot} monitoring playbackEnabled={false} localStream={stream} localSpeech={{ id: 2, transcript: 'ordinary speech', confidence: 0.97, timestamp: new Date().toISOString() }} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(acceptedFire()).toHaveLength(1);
+    rerender(<CameraMonitor slot={slot} monitoring playbackEnabled={false} localStream={stream} localSpeech={{ ...firstSpeech, id: 3, timestamp: new Date().toISOString() }} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(acceptedFire()).toHaveLength(2);
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(2);
+    expect(mocked.getAudioEvents).not.toHaveBeenCalled();
+  });
+
+  it('requires accepted local speech confidence before matching current fire', async () => {
+    const stream = { getVideoTracks: () => [{ readyState: 'live' }] } as unknown as MediaStream;
+    vi.stubGlobal('ImageCapture', class { grabFrame = async () => ({ width: 1920, height: 1080, close: closeBitmap }); });
+    mocked.detectFire.mockReturnValue(confirmedFire);
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={makeSlot(1)} monitoring playbackEnabled={false} localStream={stream}
+      localSpeech={{ id: 1, transcript: 'fire', confidence: 0.4, timestamp: new Date().toISOString() }} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire', alertValidation: expect.objectContaining({ status: 'accepted' }) }));
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({ status: 'rejected', keyword: 'fire' });
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(0);
+    expect(mocked.getAudioEvents).not.toHaveBeenCalled();
+  });
+
   it('revokes a pending fallback image URL immediately when the monitor unmounts', async () => {
     vi.stubGlobal('createImageBitmap', undefined);
     const revoke = vi.fn();
@@ -384,7 +450,7 @@ describe('camera snapshots and page-scoped playback', () => {
 
   it('ignores facial distress from work started before AI was disabled and re-enabled', async () => {
     let finishFace: () => void;
-    mocked.analyzeFace.mockImplementationOnce(() => new Promise(resolve => { finishFace = resolve; }));
+    mocked.analyzeFace.mockImplementationOnce(() => new Promise<void>(resolve => { finishFace = resolve; }));
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     const onEvent = vi.fn();
     const { rerender } = render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
@@ -824,7 +890,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
   });
 
-  it('does not alert on spoken fire plus an unconfirmed visual candidate', async () => {
+  it('waits for confirmed fire and rejects unmatched accepted speech when its fusion window expires', async () => {
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
     mocked.detectFire.mockReturnValue({
       fireCandidate: true,
@@ -843,9 +909,148 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
     expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
-      status: 'rejected',
+      status: 'pending',
       keyword: 'fire',
     });
+    await act(async () => { await vi.advanceTimersByTimeAsync(FIRE_FUSION_WINDOW_MS); });
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({ status: 'rejected', keyword: 'fire' });
+  });
+
+  it('accepts current confirmed fire and an accepted fire keyword once across repeated frames', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
+    mocked.detectFire.mockReturnValue(confirmedFire);
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+
+    const acceptedFire = () => onEvent.mock.calls.map(([event]) => event)
+      .filter(event => event.type === 'fire' && event.alertValidation?.status === 'accepted');
+    expect(acceptedFire()).toHaveLength(1);
+    expect(acceptedFire()[0]).toMatchObject({
+      label: 'Verified fire: visual fire + "fire"', fireConfirmed: true,
+      alertValidation: { keyword: 'fire', emotion: 'visual fire' },
+      snapshot: 'data:image/jpeg;base64,preview',
+    });
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(4500); });
+    expect(acceptedFire()).toHaveLength(1);
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({ status: 'accepted', keyword: 'fire' });
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(1);
+  });
+
+  it('accepts a late fire keyword and each newly accepted word while the same fire continues', async () => {
+    mocked.detectFire.mockReturnValue(confirmedFire);
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(0);
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'fire', alertValidation: expect.objectContaining({ status: 'pending' }) }));
+
+    const acceptedFire = () => onEvent.mock.calls.map(([event]) => event)
+      .filter(event => event.type === 'fire' && event.alertValidation?.status === 'accepted');
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [{ ...fireAudioEvent, timestamp: new Date().toISOString() }], status: null });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(acceptedFire()).toHaveLength(1);
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [{ ...fireAudioEvent, timestamp: new Date().toISOString() }], status: null });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(acceptedFire()).toHaveLength(2);
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(2);
+  });
+
+  it('holds accepted fire speech for a later confirming frame within the fusion window', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({ status: 'pending', keyword: 'fire' });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    mocked.detectFire.mockReturnValue(confirmedFire);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'fire', fireConfirmed: true,
+      alertValidation: expect.objectContaining({ status: 'accepted', keyword: 'fire' }),
+    }));
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(1);
+  });
+
+  it('waits for a newly captured frame when accepted fire arrives during older frame inference', async () => {
+    let finishOldFrame!: () => void;
+    mocked.detectObjects.mockImplementationOnce(() => new Promise<never[]>(resolve => { finishOldFrame = () => resolve([]); }));
+    mocked.detectFire.mockReturnValue(confirmedFire);
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [{ ...fireAudioEvent, timestamp: new Date().toISOString() }], status: null });
+    await act(async () => { await vi.advanceTimersByTimeAsync(700); });
+    await act(async () => { finishOldFrame(); });
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire', alertValidation: expect.objectContaining({ status: 'accepted' }) }));
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(0);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'fire', alertValidation: expect.objectContaining({ status: 'accepted', keyword: 'fire' }) }));
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(1);
+  });
+
+  it('rejects screen content even when an inconsistent detector result also sets confirmed fire', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
+    mocked.detectFire.mockReturnValue({ ...confirmedFire, screenSuppressed: true });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
+    expect(getCameraSession('slot-1').runtime?.fire.detected).toBe(false);
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(0);
+  });
+
+  it('does not retain an accepted fire keyword after camera AI is disabled and restarted', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    const { rerender } = render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    rerender(<CameraMonitor slot={slot} monitoring={false} playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({ status: 'rejected', keyword: 'fire' });
+    mocked.detectFire.mockReturnValue(confirmedFire);
+    rerender(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire', alertValidation: expect.objectContaining({ status: 'accepted' }) }));
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(0);
+  });
+
+  it('does not combine expired fire speech with later confirmed visual fire', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(FIRE_FUSION_WINDOW_MS + 1500); });
+    mocked.detectFire.mockReturnValue(confirmedFire);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'fire', alertValidation: expect.objectContaining({ status: 'accepted' }),
+    }));
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(0);
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('rejected');
+  });
+
+  it('does not let visual-only fire overwrite accepted help and face fusion', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
+    mocked.detectFire.mockReturnValue(confirmedFire);
+    mocked.analyzeFace.mockResolvedValue({ hasFace: true, expression: 'angry', probability: 0.95, distressScore: 90, distressLevel: 'severe' });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({ status: 'accepted', keyword: 'help', emotion: 'Angry' });
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(1);
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'fire', alertValidation: expect.objectContaining({ status: 'pending' }) }));
   });
 
   it('does not let a stale fire candidate plus fire verify fire once a device screen is recognized', async () => {
@@ -917,7 +1122,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(getCameraSession('slot-1').runtime?.fire.detected).toBe(false);
   });
 
-  it('captures one Camera Alert snapshot for one continuous fire trigger, then allows a new trigger after clear', async () => {
+  it('records continuous visual-only fire in Event History without accepting a Camera Alert', async () => {
     const activeFire = {
       fireCandidate: true,
       fireDetected: true,
@@ -944,9 +1149,11 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(fireCalls()[0]).toMatchObject({
       type: 'fire',
       fireConfirmed: true,
-      alertValidation: { status: 'accepted' },
+      alertValidation: { status: 'pending', keyword: '' },
       snapshot: 'data:image/jpeg;base64,preview',
     });
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('pending');
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(0);
 
     // The detector remains positive across several background frames. This is
     // one continuous trigger, so no additional Camera Alert snapshot is made.
@@ -1011,7 +1218,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(getCameraSession('slot-1').runtime?.fire.detected).toBe(false);
   });
 
-  it('alerts on detector-confirmed standalone smoke without fabricating fire', async () => {
+  it('records detector-confirmed smoke in Event History without accepting a Camera Alert', async () => {
     mocked.detectFire.mockReturnValueOnce({
       fireCandidate: false,
       fireDetected: false,
@@ -1033,16 +1240,18 @@ describe('camera snapshots and page-scoped playback', () => {
       type: 'smoke',
       label: 'Smoke detected',
       smokeConfirmed: true,
-      alertValidation: expect.objectContaining({ status: 'accepted' }),
+      alertValidation: expect.objectContaining({ status: 'rejected' }),
       snapshot: 'data:image/jpeg;base64,preview',
     }));
     expect(getCameraSession('slot-1').runtime?.smoke).toMatchObject({
       detected: true,
       confidence: 0.72,
     });
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.status).not.toBe('accepted');
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(0);
   });
 
-  it('emits one smoke alert for one continuous smoke condition and retriggers after clear', async () => {
+  it('emits one smoke history observation per continuous condition and retriggers after clear', async () => {
     const smoke = {
       fireCandidate: false,
       fireDetected: false,

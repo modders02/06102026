@@ -74,9 +74,9 @@ export interface DetectionEvent {
   fireConfirmed?: boolean;
   /** Smoke alerts require this detector-originated confirmation bit. */
   smokeConfirmed?: boolean;
-  /** Validation outcome captured at the exact time this event was emitted. */
+  /** Fusion outcome captured at emission; acceptance requires audio and camera evidence. */
   alertValidation?: {
-    status: 'accepted' | 'rejected';
+    status: 'pending' | 'accepted' | 'rejected';
     reason: string;
     keyword: string;
     emotion: string;
