@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
@@ -21,6 +21,7 @@ from .config import AUDIO_ENGINE, HLS_PORT, RTSP_PORT
 from .manager import (CAMERAS, mediamtx_running, snapshot, start_mediamtx,
                       stop_all_cameras, sync_cameras)
 from .kws_engine import KWS_ENGINE
+from .household_kws import HOUSEHOLD_KWS
 
 app = FastAPI(title="MSDSystem multi-camera bridge")
 app.add_middleware(
@@ -167,7 +168,7 @@ def status():
         "hls_port": HLS_PORT,
         "lan_ip": host,
         "audio_engine": AUDIO_ENGINE,
-        "custom_kws": KWS_ENGINE.status(),
+        "custom_kws": HOUSEHOLD_KWS.status(),
         "whisper": False,
         "whisper_state": "disabled",
         "whisper_model": "",
@@ -267,8 +268,69 @@ def audio_events(camera_id: str, since: Optional[str] = None):
 
 @app.get("/kws/status")
 def kws_status():
-    """Status of the custom MSDS keyword engine and enrolled templates."""
-    return {"success": True, **KWS_ENGINE.status()}
+    """Status of the active English keyword profile and enrolled templates."""
+    return {"success": True, **HOUSEHOLD_KWS.status()}
+
+
+def _require_local_training(request: Request):
+    # Profile switching and training change live audio decisions: never expose
+    # them to other computers through the bridge's 0.0.0.0 listening socket.
+    if not request.client or request.client.host not in ("127.0.0.1", "::1", "testclient"):
+        raise HTTPException(status_code=403, detail="Training is available only on the local MSDS machine.")
+
+
+@app.post("/kws/household/activate")
+async def activate_household_kws(request: Request):
+    _require_local_training(request)
+    body = await request.json()
+    if not isinstance(body, dict) or not isinstance(body.get("words"), list) or len(body["words"]) > 64:
+        raise HTTPException(status_code=400, detail="Invalid household keyword manifest.")
+    try:
+        result = HOUSEHOLD_KWS.activate(body["household_id"], body["words"])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    # A phrase from a previous household must never be replayed as a new match.
+    for cam in snapshot():
+        cam.kws_last_keyword = ""
+        cam.kws_last_decision = ""
+        cam.last_transcript = ""
+        with cam.lock:
+            cam.events.clear()
+    return {"success": True, **result}
+
+
+@app.post("/kws/household/deactivate")
+def deactivate_household_kws(request: Request):
+    _require_local_training(request)
+    result = HOUSEHOLD_KWS.deactivate()
+    for cam in snapshot():
+        cam.kws_last_keyword = ""
+        cam.kws_last_decision = ""
+        cam.last_transcript = ""
+        with cam.lock:
+            cam.events.clear()
+    return {"success": True, **result}
+
+
+@app.post("/kws/household/enroll")
+async def enroll_household_kws(
+    request: Request, household_id: str = Form(...),
+    word_id: str = Form(...), sample_id: str = Form(...),
+    audio: UploadFile = File(...),
+):
+    _require_local_training(request)
+    data = await audio.read(256001)
+    if len(data) > 256000:
+        raise HTTPException(status_code=413, detail="Enrollment WAV is too large.")
+    try:
+        pcm = KWS_ENGINE._read_wav_as_pcm16k_mono(data)
+        seconds = len(pcm) / 32000.0
+        if not 0.30 <= seconds <= 2.50:
+            raise ValueError("A spoken training sample must be between 0.3 and 2.5 seconds.")
+        result = HOUSEHOLD_KWS.enroll(household_id, word_id, sample_id, pcm)
+    except (ValueError, KeyError, TypeError, EOFError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"success": True, **result, **{"active_household_id": HOUSEHOLD_KWS.household_id}}
 
 
 @app.get("/kws/evaluate")
