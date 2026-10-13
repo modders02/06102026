@@ -285,6 +285,23 @@ def kws_evaluate():
     return KWS_ENGINE.evaluate_templates()
 
 
+@app.post("/kws/reload-local")
+def kws_reload_local(request: Request):
+    """Reload computer-microphone feature templates without restarting cameras.
+
+    This endpoint cannot train or upload speech. Only the local, non-browser
+    enrollment CLI may request a disk reload, preventing remote web origins
+    from causing a costly live-reload while a safety detector is operating.
+    """
+    source = request.client.host if request.client else ""
+    if source not in ("127.0.0.1", "::1") or request.headers.get("origin"):
+        raise HTTPException(status_code=403, detail="Local CLI only.")
+    with KWS_ENGINE.lock:
+        KWS_ENGINE.load()
+        status = KWS_ENGINE.status()
+    return {"success": True, **status}
+
+
 @app.post("/kws/auto-train")
 async def kws_auto_train(request: Request):
     """Prevent unsafe in-place retraining that overwrites the active templates.
