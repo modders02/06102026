@@ -1310,6 +1310,8 @@ class Camera:
                 "verification_enabled": kws_verifier.enabled(),
                 "verification_model": kws_verifier.model_name() if kws_verifier.enabled() else None,
                 "short_help_asr_enabled": kws_verifier.short_help_review_enabled(),
+                "verification_timeout_seconds": kws_verifier.verification_timeout_seconds(),
+                "verification_in_flight": kws_verifier.verification_in_flight(),
                 "verification_state": self.kws_verification_state or None,
                 "verification_target": self.kws_verification_target or None,
                 "help_rescue_source": self.kws_help_rescue_source or None,
