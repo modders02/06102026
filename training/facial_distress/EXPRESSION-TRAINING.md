@@ -118,6 +118,15 @@ artifacts/expressions/expression_candidate.onnx
 artifacts/expressions/expression_metrics.json
 ```
 
+Preview a candidate on a *consented local picture* after training:
+
+```powershell
+& ".\\.venv\\Scripts\\python.exe" predict_expressions.py --image "D:\\Photos\\test_happy.jpg"
+```
+
+This prints seven candidate scores; it does not add any alarms, identify
+a person or upload any image. The input must show exactly one face.
+
 **Important:** These artifacts are experimental and **not automatically
 installed into MSDS**. The live UI still runs pretrained face-api.
 The previous `train.py` for normal/mild/severe remains intact and
