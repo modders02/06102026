@@ -44,6 +44,38 @@ def enabled() -> bool:
     )
 
 
+HELP_FAST_ACCEPT_THRESHOLD = 0.90
+
+
+def help_fast_accept_enabled() -> bool:
+    """Explicit opt-in for KWS-only HELP recognition at 90% (not dispatch)."""
+    return os.environ.get(
+        "MSDS_KWS_HELP_90_FAST_ACCEPT", "0"
+    ).strip().lower() in ("1", "true", "yes", "on")
+
+
+def eligible_help_fast_accept(decision) -> bool:
+    """HELP-only recognition shortcut; never trust 90% similarity alone.
+
+    Permit top-ranked HELP with >=90% template similarity without waiting for
+    Whisper, even if the normal 3% UNKNOWN or calibrated class gap is too
+    narrow. Preserve training readiness, credible duration, and require HELP
+    to *beat* UNKNOWN (not merely score above 90%).
+    Emergency alerts still need separate multimodal validation.
+    """
+    if not help_fast_accept_enabled() or not decision:
+        return False
+    if decision.keyword != "help" or decision.confidence < HELP_FAST_ACCEPT_THRESHOLD:
+        return False
+    if decision.reason not in ("accepted", "too_close_to_unknown", "insufficient_margin"):
+        return False
+    if not (0.60 <= decision.duration_ratio <= 1.55):
+        return False
+    if decision.negative_confidence >= decision.confidence:
+        return False
+    return True
+
+
 def short_help_review_enabled() -> bool:
     """Opt-in: inspect short HELP speech that Whisper marks as silence."""
     return help_rescue_enabled() and os.environ.get(
