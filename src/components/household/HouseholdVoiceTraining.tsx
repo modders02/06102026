@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2, Mic, MicOff, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Loader2, Mic, MicOff, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { SpeechCaptureGate, type CaptureState } from '@/lib/speechCapture';
 import {
   decodeRecordedWakeWord, getHouseholdVoiceStatus, POSITIVE_MINIMUM,
   synchronizeHouseholdVoice, UNKNOWN_MINIMUM, uploadHouseholdSample,
+  deleteHouseholdVoiceSample, replaceHouseholdVoiceSample,
   validVoiceWords, voiceKey, type HouseholdVoiceStatus, type HouseholdVoiceWord,
 } from '@/lib/householdVoiceTraining';
 
