@@ -46,11 +46,76 @@ class HelpRescueTests(unittest.TestCase):
                 {"reason": "below_threshold"}, {"reason": "negative_not_ready"},
                 {"reason": "duration_mismatch"}, {"confidence": 0.87},
                 {"negative_confidence": 0.925}, {"class_margin": 0.005},
-                {"class_margin": 0.06}, {"duration_ratio": 0.60},
+                {"duration_ratio": 0.60},
                 {"duration_ratio": 1.50}, {"accepted": True},
             ):
                 with self.subTest(change=change):
                     self.assertFalse(kws_verifier.eligible_help_rescue(candidate(**change)))
+
+    @staticmethod
+    def ambulance_confused(**overrides):
+        """Observed stored-sample failure: true HELP ranks behind AMBULANCE."""
+        fields = dict(
+            keyword="ambulance", confidence=0.916,
+            runner_up_keyword="help", runner_up_confidence=0.911,
+            keyword_scores={"ambulance": 0.916, "help": 0.911},
+            keyword_duration_ratios={"ambulance": 0.524, "help": 0.921},
+            class_margin=0.005, required_margin=0.060,
+            negative_confidence=0.921, negative_second_confidence=0.88,
+            negative_mean2_confidence=0.9, negative_top_confidences=[0.921, 0.88],
+            duration_ratio=0.524, duration_ms=376, accepted=False,
+            reason="duration_mismatch",
+        )
+        fields.update(overrides)
+        return SimpleNamespace(**fields)
+
+    def test_ambiguous_ambulance_runner_up_help_eligibility(self):
+        with patch.dict(os.environ, {"MSDS_KWS_VERIFY_ASR": "1",
+                                     "MSDS_KWS_HELP_RESCUE": "1"}):
+            result = kws_verifier.help_rescue_target(self.ambulance_confused())
+            self.assertIsNotNone(result)
+            self.assertEqual(result.keyword, "help")
+            self.assertEqual(result.source, "runner_up")
+            self.assertAlmostEqual(result.confidence, 0.911)
+
+            for updates in (
+                {"accepted": True, "reason": "accepted"},
+                {"runner_up_keyword": "fire"},
+                {"keyword": "fire"},
+                {"reason": "below_threshold"},
+                {"confidence": 0.950},
+                {"negative_confidence": 0.940},
+                {"keyword_scores": {"ambulance": 0.916, "help": 0.870}},
+                {"keyword_duration_ratios": {"ambulance": 0.524, "help": 0.52}},
+            ):
+                with self.subTest(updates=updates):
+                    self.assertIsNone(kws_verifier.help_rescue_target(
+                        self.ambulance_confused(**updates)
+                    ))
+
+    def test_runner_up_help_only_publishes_if_whisper_hears_exact_help(self):
+        cases = (
+            (kws_verifier.Verification(True, "verified", "help"), 1, "verified_help_rescue"),
+            (kws_verifier.Verification(False, "verification_mismatch", "ambulance"), 0, "duration_mismatch"),
+            (kws_verifier.Verification(True, "verified", "help me"), 0, "duration_mismatch"),
+            (kws_verifier.Verification(False, "verification_unavailable", error="model missing"), 0, "duration_mismatch"),
+        )
+        for response, events, reason in cases:
+            with self.subTest(response=response):
+                cam, asr = self.process(self.ambulance_confused(), response)
+                asr.assert_called_once_with(bytes([1, 0]) * 7000, "help")
+                self.assertEqual(cam.kws_last_candidate, "ambulance")
+                self.assertEqual(cam.kws_original_decision, "duration_mismatch")
+                self.assertEqual(cam.kws_last_decision, reason)
+                self.assertEqual(cam.kws_verification_target, "help")
+                self.assertEqual(cam.kws_help_rescue_source, "runner_up")
+                self.assertEqual(len(cam.events), events)
+                if events:
+                    self.assertEqual(cam.kws_last_keyword, "help")
+                    self.assertEqual(cam.events[0]["keyword"], "help")
+                    self.assertAlmostEqual(cam.events[0]["confidence"], 0.911)
+                else:
+                    self.assertEqual(cam.kws_last_keyword, "")
 
     def test_rescue_requires_isolated_word(self):
         self.assertTrue(kws_verifier.isolated_help("Help!"))
