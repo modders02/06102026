@@ -119,6 +119,46 @@ class HouseholdKeywordProfiles:
             self.validate_sample(wav_pcm)
             return self.engine.enroll(key, wav_pcm, sample_id=sample_id)
 
+    def sample_key(self, household_id: str, word_id: str) -> str:
+        household_id = _uuid(household_id)
+        if household_id != self.household_id or self.engine is None:
+            raise ValueError("The requested household is not active.")
+        if word_id == NEGATIVE_CLASS:
+            return NEGATIVE_CLASS
+        try:
+            return self.words[_uuid(word_id)]["key"]
+        except (KeyError, ValueError, TypeError):
+            raise ValueError("Wake word is not registered for this household.") from None
+
+    def delete_sample(self, household_id: str, word_id: str, sample_id: str) -> dict:
+        with self._lock:
+            key = self.sample_key(household_id, word_id)
+            return self.engine.delete_sample(key, sample_id)
+
+    def reconcile_samples(self, household_id: str, words: dict[str, list[str]]) -> dict:
+        """Mirror the private household bucket after it was fully listed by the client."""
+        with self._lock:
+            if _uuid(household_id) != self.household_id or self.engine is None:
+                raise ValueError("The requested household is not active.")
+            expected = set(self.words) | {NEGATIVE_CLASS}
+            if set(words) != expected:
+                raise ValueError("Provide a complete sample list for every registered wake word.")
+            # Validate all IDs and target keys before changing anything.
+            targets = []
+            for word_id, ids in words.items():
+                if not isinstance(ids, list) or len(ids) > 100:
+                    raise ValueError("Invalid household sample manifest.")
+                key = self.sample_key(household_id, word_id)
+                if not all(isinstance(sid, str) and re.fullmatch(r"[0-9a-f]{32}", sid) for sid in ids):
+                    raise ValueError("Invalid household sample identifier.")
+                targets.append((key, set(ids)))
+            removed = {}
+            for key, ids in targets:
+                result = self.engine.reconcile_samples(key, ids)
+                if result["removed"]:
+                    removed[key] = result["removed"]
+            return {"removed": removed, **self.status()}
+
     def status(self) -> dict:
         with self._lock:
             engine = self.current_engine()
