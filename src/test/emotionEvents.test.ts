@@ -1,19 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
+import { makeDistressFaceSignal } from '@/lib/multimodalDistress';
 
 describe('emotion display mapping', () => {
-  it.each(['surprised', 'surprise', 'shock', 'shocked', 'fearful', 'fear', 'frightened'] as const)(
-    'shows %s as Frightened',
+  it.each(['surprised', 'surprise', 'shock', 'shocked'] as const)(
+    'shows %s as Surprised rather than Frightened',
+    expression => {
+      expect(historyEmotionMeta(expression)).toMatchObject({
+        emotion: 'surprised',
+        label: 'Surprised',
+      });
+      expect(makeDistressFaceSignal(expression, 0.99)).toBeNull();
+    },
+  );
+
+  it.each(['fearful', 'fear', 'frightened'] as const)(
+    'reserves %s for frightened facial evidence',
     expression => {
       expect(historyEmotionMeta(expression)).toMatchObject({
         emotion: 'frightened',
         label: 'Frightened',
       });
+      expect(makeDistressFaceSignal(expression, 0.90)).toMatchObject({
+        label: 'Frightened',
+        confidence: 0.90,
+      });
     },
   );
 
-  it('keeps configured informational emotions unchanged', () => {
-    expect(historyEmotionMeta('angry')?.label).toBe('Angry');
+  it('preserves angry validation and keeps informational classes unchanged', () => {
+    expect(makeDistressFaceSignal('angry', 0.90)?.label).toBe('Angry');
     expect(historyEmotionMeta('anger')?.label).toBe('Angry');
     expect(historyEmotionMeta('sad')?.label).toBe('Sad');
     expect(historyEmotionMeta('happy')?.label).toBe('Happy');
