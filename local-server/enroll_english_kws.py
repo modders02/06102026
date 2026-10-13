@@ -2,8 +2,14 @@
 
 Run while the MSDS camera bridge and a connected CCTV microphone are active:
 
-    python local-server/enroll_english_kws.py --camera slot-1 --keyword help --samples 5
-    python local-server/enroll_english_kws.py --camera slot-1 --keyword unknown --samples 10
+    python local-server/enroll_english_kws.py --keyword help --samples 5
+    python local-server/enroll_english_kws.py --camera all --keyword help --samples 5
+    python local-server/enroll_english_kws.py --camera slot-3 --keyword unknown --samples 10
+
+The default --camera auto selects a connected CCTV microphone; --camera all
+cycles through the available cameras, one at a time, for the specified TOTAL
+number of templates (not samples per camera). All connected cameras use the
+same global keyword model, regardless of where training was recorded.
 
 Press Enter before *each* utterance. The script arms exactly one enrollment,
 waits for the CCTV VAD to capture the phrase, confirms the saved template
@@ -73,6 +79,36 @@ class EnrollmentClient:
         self.camera = camera
         self.base = f"http://127.0.0.1:{port}"
 
+    def ready_camera_ids(self) -> list[str]:
+        """List every registered CCTV currently streaming usable PCM audio.
+
+        Model templates are shared across cameras. These IDs identify speech
+        *sources* for the interactive capture, not independent KWS models.
+        """
+        status = request_json(f"{self.base}/status")
+        if not status.get("mediamtx"):
+            detail = status.get("mediamtx_error") or "MediaMTX is not running"
+            raise EnrollmentError(f"MediaMTX is unavailable: {detail}")
+        ready = []
+        registered = []
+        for cam in status.get("cameras", []):
+            camera_id = cam.get("id")
+            if not isinstance(camera_id, str) or not camera_id:
+                continue
+            registered.append(camera_id)
+            audio = cam.get("audio") or {}
+            if (cam.get("enabled") and cam.get("ffmpeg")
+                    and audio.get("has_audio_track") is not False
+                    and audio.get("thread_running") and audio.get("connected")):
+                ready.append(camera_id)
+        if not ready:
+            raise EnrollmentError(
+                f"No connected CCTV microphone is ready. Registered camera IDs: {registered!r}. "
+                "Connect the desired cameras in MSDS and verify /status shows "
+                "audio.thread_running=True and audio.connected=True."
+            )
+        return ready
+
     def camera_status(self) -> dict:
         status = request_json(f"{self.base}/status")
         cam = next((camera for camera in status.get("cameras", [])
@@ -81,10 +117,8 @@ class EnrollmentClient:
             ids = [camera.get("id") for camera in status.get("cameras", [])]
             raise EnrollmentError(f"Camera {self.camera!r} not found; connected IDs: {ids!r}")
         if not status.get("mediamtx"):
-            raise EnrollmentError(
-                "MediaMTX is not running. Install it into local-server/bin "
-                "using fetch_binaries.py, then restart the camera bridge."
-            )
+            detail = status.get("mediamtx_error") or "MediaMTX is not running"
+            raise EnrollmentError(f"MediaMTX is unavailable: {detail}")
         if not cam.get("enabled") or not cam.get("ffmpeg"):
             raise EnrollmentError("This CCTV is not connected. Start it in MSDS first.")
         audio = cam.get("audio") or {}
@@ -147,9 +181,28 @@ def wait_for_capture(client: EnrollmentClient, keyword: str, previous: int,
 
 
 def do_enrollment(client: EnrollmentClient, keyword: str, samples: int,
-                  input_fn=input, out=print) -> int:
-    """Interactive Enter -> speech -> auto-save loop; no implicit sample deletion."""
-    status = client.camera_status()
+                  input_fn=input, out=print,
+                  camera_ids: list[str] | None = None) -> int:
+    """Record a shared model from any or all ready cameras, sequentially.
+
+    samples is a TOTAL budget. All cameras write the same KWS template pool,
+    so the maximum is still 10 positive or 40 unknown, not per camera.
+    """
+    selected = list(camera_ids if camera_ids is not None else [client.camera])
+    if not selected or len(selected) != len(set(selected)):
+        raise EnrollmentError("Specify at least one unique registered camera ID.")
+    if samples < len(selected):
+        raise EnrollmentError(
+            f"{len(selected)} cameras were selected, but only {samples} total samples "
+            "were requested. Increase --samples to at least the camera count "
+            "(within the shared model limit), or use --camera auto/specific ID. "
+            "Recognition already runs on all connected cameras after training."
+        )
+    # Check each microphone BEFORE creating a backup or arming a capture.
+    for camera_id in selected:
+        client.camera = camera_id
+        client.camera_status()
+    client.camera = selected[0]
     kws = client.kws_status()
     active_dir = kws.get("data_dir")
     if not active_dir or not Path(active_dir).is_absolute():
@@ -173,15 +226,20 @@ def do_enrollment(client: EnrollmentClient, keyword: str, samples: int,
             f"Request at most {maximum - saved} or inspect the trained samples."
         )
     out("MSDS original terminal enrollment (CCTV microphone)")
-    out(f"Camera: {client.camera} | label: {keyword.upper()} | requested: {samples}")
+    out(f"Cameras: {', '.join(selected)} | label: {keyword.upper()} | total recordings: {samples}")
+    out("One shared KWS model is used for detection on ALL connected CCTV cameras.")
+    if len(selected) > 1:
+        out("For each take, speak toward the specific camera named in the prompt.")
     out(f"Existing templates: {saved}/{maximum}")
     out("Every successful recording immediately becomes a model template.")
     out("No audio playback or word verification is available in the original mode.")
     out("Disable external emergency notifications and use consenting speakers only.")
     done = 0
     while done < samples:
+        client.camera = selected[done % len(selected)]
         answer = input_fn(
-            f"\n[{done + 1}/{samples}] Press ENTER to enroll '{keyword}', or q to finish: "
+            f"\n[{done + 1}/{samples}] CCTV {client.camera}: press ENTER to enroll "
+            f"'{keyword}', or q to finish: "
         ).strip().lower()
         if answer in ("q", "quit"):
             out("Finished early; previously captured templates remain saved.")
@@ -196,7 +254,8 @@ def do_enrollment(client: EnrollmentClient, keyword: str, samples: int,
             result = client.start(keyword)
             if result.get("state") != "waiting":
                 raise EnrollmentError("MSDS did not arm the camera enrollment.")
-            out(f"LISTENING — say '{keyword}' ONCE toward CCTV, then remain silent...")
+            out(f"LISTENING on {client.camera} — say '{keyword}' ONCE "
+                "toward this camera, then remain silent...")
             saved = wait_for_capture(client, keyword, previous)
         except BaseException:
             try:
@@ -205,7 +264,7 @@ def do_enrollment(client: EnrollmentClient, keyword: str, samples: int,
                 pass
             raise
         done += 1
-        out(f"SAVED: {keyword.upper()} sample {saved}/{maximum}; "
+        out(f"SAVED from {client.camera}: {keyword.upper()} sample {saved}/{maximum}; "
             f"completed {done}/{samples} this session.")
         out("Stay quiet until you press Enter for the next recording.")
     out(f"Session complete: {done} new enrollment(s).")
@@ -216,7 +275,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Old-style Enter -> speak -> repeat interactive CCTV enrollment."
     )
-    parser.add_argument("--camera", default="slot-1", help="CCTV ID in local /status")
+    parser.add_argument(
+        "--camera", default="auto",
+        help="Registered camera ID, 'auto' for the first ready CCTV (default), "
+             "or 'all' to rotate captures across every ready CCTV",
+    )
     parser.add_argument("--keyword", required=True, choices=KEYWORDS)
     parser.add_argument("--samples", "--count", dest="samples", type=int, default=5,
                         help="Number of new enrolled takes (default: 5)")
@@ -229,7 +292,12 @@ def main() -> int:
         parser.error("--port must be a valid local TCP port")
     client = EnrollmentClient(args.camera, args.port)
     try:
-        do_enrollment(client, args.keyword, args.samples)
+        if args.camera in ("auto", "all"):
+            ready = client.ready_camera_ids()
+            selected = ready[:1] if args.camera == "auto" else ready
+        else:
+            selected = [args.camera]
+        do_enrollment(client, args.keyword, args.samples, camera_ids=selected)
     except KeyboardInterrupt:
         try:
             client.cancel()
