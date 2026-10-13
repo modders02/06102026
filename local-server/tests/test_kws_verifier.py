@@ -59,7 +59,7 @@ class VerificationTests(unittest.TestCase):
             negative_confidence=0.70, negative_second_confidence=0.60,
             negative_mean2_confidence=0.65,
             negative_top_confidences=[0.70, 0.60], duration_ratio=1.0,
-            accepted=True, reason="accepted",
+            duration_ms=750, accepted=True, reason="accepted",
         )
         with patch.dict(os.environ, {"MSDS_KWS_VERIFY_ASR": "1"}), \
              patch.object(KWS_ENGINE, "has_ready_templates", return_value=True), \
@@ -84,7 +84,7 @@ class VerificationTests(unittest.TestCase):
             negative_confidence=0.3, negative_second_confidence=0.2,
             negative_mean2_confidence=0.25,
             negative_top_confidences=[0.3, 0.2], duration_ratio=1.0,
-            accepted=True, reason="accepted",
+            duration_ms=750, accepted=True, reason="accepted",
         )
         with patch.dict(os.environ, {"MSDS_KWS_VERIFY_ASR": "1"}), \
              patch.object(KWS_ENGINE, "has_ready_templates", return_value=True), \
