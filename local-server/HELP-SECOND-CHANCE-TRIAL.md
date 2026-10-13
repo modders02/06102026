@@ -50,7 +50,7 @@ $env:MSDS_KWS_VERIFY_ASR = "1"
 $env:MSDS_KWS_HELP_RESCUE = "1"
 $env:MSDS_KWS_VERIFY_MODEL = "tiny.en"
 
-& ".\\local-server\\.venv\\Scripts\\python.exe" ".\\local-server\\camera_server.py"
+& ".\local-server\.venv\Scripts\python.exe" ".\local-server\camera_server.py"
 ```
 
 When saying HELP into Camera 1, check the new fields in another terminal:
@@ -58,16 +58,6 @@ When saying HELP into Camera 1, check the new fields in another terminal:
 ```powershell
 $k = ((Invoke-RestMethod "http://127.0.0.1:5000/status").cameras |
        Where-Object id -eq "slot-1").audio.custom_kws
-$k | Select-Object last_segment_at,last_candidate,last_candidate_confidence,\
-    last_runner_up_keyword,last_runner_up_confidence,original_kws_decision,\
-    help_rescue_source,verification_target,verification_transcript,\
-    verification_state,last_decision,last_keyword | Format-List
-```
-
-PowerShell line-continuation uses a backtick, not a backslash; the
-portable one-line alternative is:
-
-```powershell
 $k | Format-List last_segment_at,last_candidate,last_candidate_confidence,last_runner_up_keyword,last_runner_up_confidence,original_kws_decision,help_rescue_source,verification_target,verification_transcript,verification_state,last_decision,last_keyword
 ```
 
@@ -95,8 +85,8 @@ previous result. Do not retrain templates during the trial.
 ## Tests and rollback
 
 ```powershell
-& ".\\local-server\\.venv\\Scripts\\python.exe" -m unittest discover -s local-server/tests -p "test_kws_help_rescue.py" -v
-& ".\\local-server\\.venv\\Scripts\\python.exe" -m unittest discover -s local-server/tests -p "test_camera_kws.py" -v
+& ".\local-server\.venv\Scripts\python.exe" -m unittest discover -s local-server/tests -p "test_kws_help_rescue.py" -v
+& ".\local-server\.venv\Scripts\python.exe" -m unittest discover -s local-server/tests -p "test_camera_kws.py" -v
 ```
 
 Disable the new HELP reviewer by restarting with
