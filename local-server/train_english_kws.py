@@ -151,7 +151,7 @@ def install_candidate(candidate: Path, active: Path) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Safely train the eight original MSDS English emergency keywords.")
+    parser = argparse.ArgumentParser(description="Safely train the seven active MSDS English emergency keywords.")
     parser.add_argument("--dataset", type=Path, default=HERE / "kws-training-english")
     parser.add_argument("--holdout", type=Path, default=HERE / "kws-holdout-english")
     parser.add_argument("--backup-only", action="store_true",
