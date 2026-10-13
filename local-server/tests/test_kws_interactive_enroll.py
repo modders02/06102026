@@ -118,6 +118,102 @@ class InteractiveEnrollmentTests(unittest.TestCase):
         client = enrollment.EnrollmentClient("slot-1", port=5000)
         self.assertEqual(client.base, "http://127.0.0.1:5000")
 
+    def test_all_cameras_rotate_sequentially_into_one_shared_model(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "templates").mkdir()
+            client = FakeEnrollmentClient(root / "templates")
+            camera_used = []
+            old_start = client.start
+
+            def record_source(keyword):
+                camera_used.append(client.camera)
+                return old_start(keyword)
+
+            client.start = record_source
+            output = []
+            with patch.object(enrollment, "HERE", root):
+                captured = enrollment.do_enrollment(
+                    client, "help", 5,
+                    input_fn=lambda _: "",
+                    out=output.append,
+                    camera_ids=["slot-2", "cam5", "hallway"],
+                )
+            self.assertEqual(captured, 5)
+            self.assertEqual(camera_used, ["slot-2", "cam5", "hallway",
+                                           "slot-2", "cam5"])
+            self.assertEqual(client.count, 5)  # shared template pool
+            self.assertEqual(len(list((root / "kws-backups").glob("*.zip"))), 1)
+            self.assertTrue(any("hallway" in msg for msg in output))
+            self.assertTrue(any("ALL connected CCTV" in msg for msg in output))
+
+    def test_all_cameras_must_receive_at_least_one_prompt(self):
+        with tempfile.TemporaryDirectory() as folder:
+            client = FakeEnrollmentClient(Path(folder))
+            with self.assertRaisesRegex(enrollment.EnrollmentError, "3 cameras"):
+                enrollment.do_enrollment(
+                    client, "help", 2, camera_ids=["a", "b", "c"],
+                    out=lambda _: None,
+                )
+            self.assertEqual(client.started, 0)
+
+    def test_all_cameras_obey_shared_capacity(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "templates").mkdir()
+            client = FakeEnrollmentClient(root / "templates",
+                                          count=enrollment.MAX_TEMPLATES - 1)
+            with patch.object(enrollment, "HERE", root):
+                with self.assertRaisesRegex(enrollment.EnrollmentError,
+                                            "Request at most 1"):
+                    enrollment.do_enrollment(
+                        client, "help", 2,
+                        camera_ids=["slot-2", "slot-3"],
+                        out=lambda _: None,
+                    )
+            self.assertEqual(client.started, 0)
+
+    def test_ready_cameras_include_any_registered_id_and_skip_unready(self):
+        client = enrollment.EnrollmentClient("auto")
+        payload = {
+            "mediamtx": True,
+            "cameras": [
+                {"id": "slot-2", "enabled": True, "ffmpeg": True,
+                 "audio": {"has_audio_track": True,
+                           "connected": True, "thread_running": True}},
+                {"id": "slot-1", "enabled": False, "ffmpeg": False, "audio": {}},
+                {"id": "warehouse", "enabled": True, "ffmpeg": True,
+                 "audio": {"has_audio_track": None,
+                           "connected": True, "thread_running": True}},
+                {"id": "slot-4", "enabled": True, "ffmpeg": True,
+                 "audio": {"has_audio_track": False,
+                           "connected": False, "thread_running": True}},
+            ],
+        }
+        with patch.object(enrollment, "request_json", return_value=payload):
+            self.assertEqual(client.ready_camera_ids(), ["slot-2", "warehouse"])
+
+    def test_ready_cameras_show_media_error_instead_of_waiting(self):
+        client = enrollment.EnrollmentClient("all")
+        with patch.object(enrollment, "request_json", return_value={
+            "mediamtx": False,
+            "mediamtx_error": "port 8554 already in use",
+            "cameras": [],
+        }):
+            with self.assertRaisesRegex(enrollment.EnrollmentError, "8554"):
+                client.ready_camera_ids()
+
+    def test_ready_cameras_show_registered_ids_if_none_have_audio(self):
+        client = enrollment.EnrollmentClient("all")
+        with patch.object(enrollment, "request_json", return_value={
+            "mediamtx": True,
+            "cameras": [{"id": "slot-3", "enabled": True, "ffmpeg": True,
+                         "audio": {"connected": False, "thread_running": True}}],
+        }):
+            with self.assertRaisesRegex(enrollment.EnrollmentError, "slot-3"):
+                client.ready_camera_ids()
+
+
 
 if __name__ == "__main__":
     unittest.main()

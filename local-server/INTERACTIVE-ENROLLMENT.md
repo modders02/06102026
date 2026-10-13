@@ -14,7 +14,7 @@ use the offline WAV collector, the household speech trainer or the laptop mic.
 
 Start MSDS with MediaMTX and an audio-enabled CCTV camera. The local bridge
 should be running at `127.0.0.1:5000`, and `/status` should show the camera
-ID (`slot-1` by default) with `ffmpeg=true`,
+ID (any registered ID, not necessarily `slot-1`) with `ffmpeg=true`,
 `audio.thread_running=true` and `audio.connected=true`.
 
 If MediaMTX is missing, stop the old camera-server terminal, then from the
@@ -67,10 +67,13 @@ From your local `06102026-kws` checkout of
 cd "D:\Users\nazar\Documents\ongoin\06102026-kws"
 git pull --ff-only origin feature/msds-next-updates-20261013
 $py = "D:\Users\nazar\Documents\ongoin\remix-of-sentry-vision-main\local-server\.venv\Scripts\python.exe"
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword help --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword help --samples 5
 ```
 
-At the **first** Enter, the tool arms the original CCTV KWS enrolment. When
+With no `--camera`, the tool automatically picks the first registered camera that
+has a working video stream and CCTV microphone. It does not depend on
+`slot-1` being present. At the **first** Enter, the tool arms the original
+CCTV KWS enrolment. When
 it says `LISTENING`, say **Help** once and pause. It polls the backend until
 it says `SAVED: HELP sample 1/10` (or reports an error). Press Enter a
 second time only when ready to record a second real utterance. A `q`
@@ -83,17 +86,62 @@ present in that local runtime directory. The script refuses to enroll above
 the model limits (10 positive / 40 unknown) to avoid the original engine's
 oldest-template replacement behavior.
 
+## All CCTV cameras (any registered slot or ID)
+
+**The KWS classifier and stored keyword templates are global to the local
+MSDS service.** Once you train a keyword using one microphone, every
+connected camera with an active audio worker can detect it independently.
+You do **not** need to record separate duplicate templates for each camera.
+
+To record on a specific camera, pass its registered ID (for example,
+`slot-2`, `slot-16`, or `warehouse`):
+
+```powershell
+$st = Invoke-RestMethod "http://127.0.0.1:5000/status"
+$st.cameras | Select-Object id, name, enabled, ffmpeg
+& $py ".\local-server\enroll_english_kws.py" --camera slot-2 --keyword help --samples 5
+```
+
+To collect shared model templates from **all currently ready microphones**,
+use:
+
+```powershell
+& $py ".\local-server\enroll_english_kws.py" --camera all --keyword help --samples 5
+```
+
+This enrolls **five total takes**, not five per camera. It rotates one
+capture at a time through the eligible registered camera IDs, explicitly
+telling you which CCTV to speak into; it never arms every microphone at
+once. Every selected camera receives at least one take, so `--samples`
+must be at least the number of selected cameras. The *shared model* allows
+a maximum of 10 positive templates per keyword and 40 UNKNOWN templates.
+If there are more than 10 cameras, you cannot collect one positive template
+from each in the original in-place model: use `--camera auto` or a
+representative subset instead. The model still detects on **all** connected
+cameras when its templates and negative class are ready.
+
+The direct enrollment API also accepts **any** registered camera ID.
+For example:
+
+```powershell
+Invoke-RestMethod -Method Post "http://127.0.0.1:5000/cameras/slot-2/kws-enroll/help"
+```
+
+A camera must be registered by the MSDS Connect action, MediaMTX must be
+running, and its audio worker must be connected. Rejected/unready cameras
+are not armed, and a failed preflight never writes a template.
+
 Record other words in a separate terminal session:
 
 ```powershell
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword fire --samples 5
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword emergency --samples 5
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword danger --samples 5
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword intruder --samples 5
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword police --samples 5
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword ambulance --samples 5
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword stop --samples 5
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword unknown --samples 10
+& $py ".\local-server\enroll_english_kws.py" --keyword fire --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword emergency --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword danger --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword intruder --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword police --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword ambulance --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword stop --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword unknown --samples 10
 ```
 
 For `unknown`, speak genuinely different *non-emergency* words/phrases.
