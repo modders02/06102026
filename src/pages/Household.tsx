@@ -9,6 +9,8 @@ import { HelpCircle } from 'lucide-react';
 import TutorialOverlay, { type TutorialStep } from '@/components/dashboard/TutorialOverlay';
 import householdBg from '@/assets/household-bg.jpg';
 import NotificationSettings from '@/components/household/NotificationSettings';
+import HouseholdVoiceTraining from '@/components/household/HouseholdVoiceTraining';
+import { deleteHouseholdVoiceSamples } from '@/lib/householdVoiceTraining';
 
 
 interface Household {
@@ -185,8 +187,15 @@ export default function HouseholdPage() {
   };
 
   const handleDeleteWakeWord = async (id: string) => {
-    await supabase.from('wake_words').delete().eq('id', id);
-    fetchHousehold();
+    if (!household) return;
+    try {
+      await deleteHouseholdVoiceSamples(household.id, id);
+      const { error } = await supabase.from('wake_words').delete().eq('id', id);
+      if (error) throw error;
+      await fetchHousehold();
+    } catch (exc) {
+      setFormError(exc instanceof Error ? exc.message : 'Could not delete the household wake word.');
+    }
   };
 
   const handleAcceptJoinRequest = async (req: JoinRequest) => {
@@ -489,7 +498,7 @@ export default function HouseholdPage() {
               </div>
 
               <p className="text-xs text-muted-foreground">
-                Each phrase triggers a specific action when detected in real-time audio transcription.
+                Train a phrase with voice recordings to recognize it through CCTV keyword matching. A wake word alone never confirms an emergency alert.
               </p>
 
               {/* Wake Word List */}
@@ -526,6 +535,8 @@ export default function HouseholdPage() {
                   <p className="text-xs text-muted-foreground text-center py-4">No wake words configured. Add one to get started.</p>
                 )}
               </div>
+              {household && <HouseholdVoiceTraining householdId={household.id} words={wakeWords} />}
+              {formError && <p role="alert" className="text-xs text-destructive">{formError}</p>}
 
               {/* Add Phrase Form */}
               {showAddPhrase && (
