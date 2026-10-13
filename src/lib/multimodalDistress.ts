@@ -30,11 +30,11 @@ export function normalizeDistressFaceLabel(
 ): DistressFaceLabel | null {
   const normalized = (expression ?? '').trim().toLowerCase();
   if (normalized === 'angry' || normalized === 'anger') return 'Angry';
-  if (
-    normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
-    || normalized === 'surprised' || normalized === 'surprise'
-    || normalized === 'shock' || normalized === 'shocked'
-  ) return 'Frightened';
+  // Surprise/startle is not equivalent to fear. A surprised face alone must
+  // never verify an emergency when someone happens to say HELP.
+  if (normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened') {
+    return 'Frightened';
+  }
   return null;
 }
 
