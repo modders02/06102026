@@ -37,7 +37,7 @@ _HALLUCINATION_RE = [re.compile(p, re.IGNORECASE) for p in HALLUCINATION_PATTERN
 
 # Short distress words must never be filtered out as "too short / noise".
 KEEP_ALWAYS = {
-    "help", "fire", "stop", "police", "tulong", "saklolo", "sunog", "aray",
+    "help", "fire", "police", "tulong", "saklolo", "sunog", "aray",
     "pulis", "ambulansya", "masakit", "huwag", "wag",
 }
 
