@@ -5,6 +5,7 @@ loaded when MSDS_KWS_VERIFY_ASR=1 and an eligible KWS candidate arrives.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 import tempfile
@@ -17,6 +18,13 @@ from pathlib import Path
 _MODEL = None
 _MODEL_NAME = None
 _MODEL_LOCK = threading.RLock()
+
+# Keep at most one decode/model download in flight across all CCTV cameras.
+# A timed-out worker is deliberately NOT killed: force-killing threads during
+# CTranslate2/Hugging Face downloads is unsafe. Instead, its late result is
+# ignored and new calls fail closed until it returns.
+_VERIFICATION_STATE_LOCK = threading.Lock()
+_VERIFICATION_WORKER: threading.Thread | None = None
 
 
 @dataclass(frozen=True)
@@ -193,7 +201,7 @@ def _word_match(transcript: str, keyword: str) -> bool:
     )
 
 
-def verify_kws_segment(pcm: bytes, keyword: str) -> Verification:
+def _verify_kws_segment_direct(pcm: bytes, keyword: str) -> Verification:
     """Verify an already-accepted KWS result using the SAME speech segment.
 
     Missing model, uncertain ASR, mismatch or decode error all reject the
@@ -286,3 +294,88 @@ def verify_kws_segment(pcm: bytes, keyword: str) -> Verification:
             False, "verification_mismatch", transcript=transcript, **diagnostic
         )
     return Verification(True, "verified", transcript=transcript, **diagnostic)
+
+
+def verification_timeout_seconds() -> float:
+    """Bound first-use model downloads / CPU inference without hanging CCTV."""
+    configured = os.environ.get("MSDS_KWS_VERIFY_TIMEOUT_SECONDS", "12")
+    try:
+        seconds = float(configured)
+        if not math.isfinite(seconds):
+            raise ValueError("nonfinite timeout")
+    except ValueError:
+        seconds = 12.0
+    return max(2.0, min(60.0, seconds))
+
+
+def verification_in_flight() -> bool:
+    """Expose verifier occupancy for stalled-model diagnostics."""
+    with _VERIFICATION_STATE_LOCK:
+        return _VERIFICATION_WORKER is not None and _VERIFICATION_WORKER.is_alive()
+
+
+def verify_kws_segment(pcm: bytes, keyword: str) -> Verification:
+    """Time-bound, fail-closed verification.
+
+    KWS calls this synchronously, so never leave the audio pipeline stuck on
+    verification_pending when a model download or CPU decoder stalls. Only
+    one daemon worker is allowed: a timed-out download cannot spawn an
+    unbounded collection of threads or later publish a stale emergency event.
+    """
+    global _VERIFICATION_WORKER
+
+    # Reject obviously bad audio without spawning work or acquiring model locks.
+    if len(pcm) < 6400 or len(pcm) % 2:
+        return Verification(False, "verification_invalid_audio")
+
+    done = threading.Event()
+    result: list[Verification] = []
+
+    def worker() -> None:
+        global _VERIFICATION_WORKER
+        try:
+            result.append(_verify_kws_segment_direct(pcm, keyword))
+        except Exception as exc:
+            result.append(
+                Verification(False, "verification_unavailable", error=str(exc)[:250])
+            )
+        finally:
+            # Clearing ownership before signaling completion allows the next
+            # eligible word to use the now-idle ASR model immediately.
+            with _VERIFICATION_STATE_LOCK:
+                if _VERIFICATION_WORKER is threading.current_thread():
+                    _VERIFICATION_WORKER = None
+            done.set()
+
+    with _VERIFICATION_STATE_LOCK:
+        if _VERIFICATION_WORKER is not None and _VERIFICATION_WORKER.is_alive():
+            return Verification(
+                False, "verification_busy",
+                error="Previous Whisper decode/model load is still running; no event published."
+            )
+        thread = threading.Thread(
+            target=worker, name="msds-kws-asr-verifier", daemon=True
+        )
+        _VERIFICATION_WORKER = thread
+        try:
+            thread.start()
+        except RuntimeError as exc:
+            _VERIFICATION_WORKER = None
+            return Verification(
+                False, "verification_unavailable", error=str(exc)[:250]
+            )
+
+    timeout = verification_timeout_seconds()
+    if not done.wait(timeout):
+        return Verification(
+            False, "verification_timeout",
+            error=(
+                f"Whisper did not return within {timeout:g}s. "
+                "Model download or CPU inference may still be running; "
+                "this keyword was rejected."
+            ),
+        )
+    return result[0] if result else Verification(
+        False, "verification_unavailable",
+        error="Whisper verifier ended without a result."
+    )
