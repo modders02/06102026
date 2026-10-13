@@ -634,6 +634,45 @@ class CustomKeywordEngine:
             "already_enrolled": existed,
         }
 
+    def delete_sample(self, keyword: str, sample_id: str) -> dict:
+        """Remove exactly one stored sample, never a whole keyword profile."""
+        key = self._require_active_keyword(keyword)
+        if not re.fullmatch(r"[0-9a-f]{32}", sample_id):
+            raise ValueError("Invalid enrollment sample ID.")
+        with self.lock:
+            path = self.data_dir / key / f"{sample_id}.npy"
+            removed = path.is_file()
+            if removed:
+                path.unlink()
+                self.load()
+            return {
+                "keyword": key,
+                "sample_id": sample_id,
+                "deleted": removed,
+                "templates": len(self.templates.get(key, [])),
+            }
+
+    def reconcile_samples(self, keyword: str, retained_ids: set[str]) -> dict:
+        """Prune only household-recorded template IDs absent from cloud storage.
+
+        Do not remove legacy thesis templates, which have non-UUID filenames,
+        or any other keyword's templates.
+        """
+        key = self._require_active_keyword(keyword)
+        if not all(re.fullmatch(r"[0-9a-f]{32}", sid) for sid in retained_ids):
+            raise ValueError("Invalid enrollment sample ID.")
+        removed = []
+        with self.lock:
+            folder = self.data_dir / key
+            if folder.exists():
+                for path in folder.glob("*.npy"):
+                    if re.fullmatch(r"[0-9a-f]{32}", path.stem) and path.stem not in retained_ids:
+                        path.unlink()
+                        removed.append(path.stem)
+            if removed:
+                self.load()
+        return {"keyword": key, "removed": sorted(removed)}
+
     def clear(self, keyword: str) -> dict:
         key = self._require_active_keyword(keyword)
         with self.lock:
