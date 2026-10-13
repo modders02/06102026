@@ -41,7 +41,13 @@ describe('household voice-trained wake words', () => {
     } as unknown as AudioBuffer;
     const wav = pcmWavFromAudio(buffer);
     expect(wav.type).toBe('audio/wav');
-    const bytes = new DataView(await wav.arrayBuffer());
+    const binary = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(wav);
+    });
+    const bytes = new DataView(binary);
     expect(bytes.getUint32(24, true)).toBe(16000);
     expect(bytes.getUint16(22, true)).toBe(1);
     expect(bytes.getUint16(34, true)).toBe(16);
