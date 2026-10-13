@@ -279,16 +279,18 @@ def kws_evaluate():
 
 @app.post("/kws/auto-train")
 async def kws_auto_train(request: Request):
-    """Build English-only KWS templates from the labelled local WAV dataset."""
-    body = await request.json() if request.headers.get("content-length") not in (None, "0") else {}
-    default_dir = Path(__file__).resolve().parents[1] / "kws-training-english"
-    dataset_dir = Path(os.environ.get("MSD_KWS_TRAINING_DIR", str(default_dir)))
-    requested = body.get("dataset_dir") if isinstance(body, dict) else None
-    if requested:
-        requested_path = Path(str(requested)).expanduser()
-        dataset_dir = requested_path if requested_path.is_absolute() else default_dir.parent / requested_path
-    reset = bool(body.get("reset", True)) if isinstance(body, dict) else True
-    return KWS_ENGINE.train_from_wav_dataset(dataset_dir, reset=reset)
+    """Prevent unsafe in-place retraining that overwrites the active templates.
+
+    Use train_english_kws.py (preview/backup/apply) with separate held-out
+    recordings instead; a remote HTTP request must not reset a safety model.
+    """
+    raise HTTPException(
+        status_code=409,
+        detail=("Direct in-place KWS training is disabled to protect the existing "
+                "templates. Run local-server/train_english_kws.py --backup-only, "
+                "collect real training and held-out WAV samples, preview with "
+                "train_english_kws.py, then explicitly --apply after validation."),
+    )
 
 
 @app.post("/cameras/{camera_id}/kws-enroll/{keyword}")
