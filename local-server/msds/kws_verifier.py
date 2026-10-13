@@ -25,12 +25,22 @@ class Verification:
     state: str
     transcript: str = ""
     error: str = ""
+    raw_transcript: str = ""
+    no_speech_prob: float | None = None
+    avg_logprob: float | None = None
 
 
 def enabled() -> bool:
     return os.environ.get("MSDS_KWS_VERIFY_ASR", "0").strip().lower() in (
         "1", "true", "yes", "on",
     )
+
+
+def short_help_review_enabled() -> bool:
+    """Opt-in: inspect short HELP speech that Whisper marks as silence."""
+    return help_rescue_enabled() and os.environ.get(
+        "MSDS_KWS_SHORT_HELP_ASR", "0"
+    ).strip().lower() in ("1", "true", "yes", "on")
 
 
 def model_name() -> str:
@@ -193,6 +203,19 @@ def verify_kws_segment(pcm: bytes, keyword: str) -> Verification:
     if len(pcm) < 6400 or len(pcm) % 2 != 0:
         return Verification(False, "verification_invalid_audio")
 
+    # The original verifier discards every segment with
+    # no_speech_prob > 0.6 even if the decoded word has strong log probability.
+    # This is particularly problematic for short, VAD-trimmed one-word HELP.
+    # Opt-in review disables the decoder's early no-speech suppression ONLY
+    # for short HELP, then applies a strict post-decode quality check.
+    short_help = (
+        keyword == "help" and short_help_review_enabled()
+        and len(pcm) <= int(0.80 * 16000 * 2)
+    )
+    raw_words: list[str] = []
+    accepted_words: list[str] = []
+    max_no_speech: float | None = None
+    min_logprob: float | None = None
     try:
         with tempfile.TemporaryDirectory(prefix="msds-kws-verify-") as directory:
             wav_path = Path(directory) / "segment.wav"
@@ -204,8 +227,6 @@ def verify_kws_segment(pcm: bytes, keyword: str) -> Verification:
 
             with _MODEL_LOCK:
                 model = _get_model()
-                # Segmenter already did VAD. Another VAD pass may erase short
-                # emergency utterances, so pass the whole segment to ASR.
                 segments, _ = model.transcribe(
                     str(wav_path),
                     language="en",
@@ -214,22 +235,54 @@ def verify_kws_segment(pcm: bytes, keyword: str) -> Verification:
                     condition_on_previous_text=False,
                     beam_size=5,
                     temperature=0.0,
-                    no_speech_threshold=0.6,
+                    # VAD has already found speech. Avoid discarding a
+                    # confident short HELP token before we can inspect it.
+                    no_speech_threshold=None if short_help else 0.6,
                     log_prob_threshold=-1.0,
                 )
-                words = []
+                # Consume the generator while the lock and temp WAV exist.
                 for segment in segments:
-                    if getattr(segment, "no_speech_prob", 0.0) > 0.6:
+                    raw_text = (getattr(segment, "text", "") or "").strip()
+                    probability = float(getattr(segment, "no_speech_prob", 0.0))
+                    logprob = float(getattr(segment, "avg_logprob", 0.0))
+                    max_no_speech = (
+                        probability if max_no_speech is None
+                        else max(probability, max_no_speech)
+                    )
+                    min_logprob = (
+                        logprob if min_logprob is None
+                        else min(logprob, min_logprob)
+                    )
+                    if raw_text:
+                        raw_words.append(raw_text)
+                    if not raw_text:
                         continue
-                    if getattr(segment, "avg_logprob", 0.0) < -1.0:
+                    if logprob < -1.0:
                         continue
-                    words.append((segment.text or "").strip())
-                transcript = " ".join(words).strip()
+                    if probability > 0.6:
+                        # Strong decoding confidence is needed to override
+                        # a high no-speech probability. Never accept weak
+                        # hallucinations from silence.
+                        if not short_help or logprob < -0.45:
+                            continue
+                    accepted_words.append(raw_text)
     except Exception as exc:
-        return Verification(False, "verification_unavailable", error=str(exc)[:250])
+        return Verification(
+            False, "verification_unavailable", error=str(exc)[:250],
+            raw_transcript=" ".join(raw_words).strip(),
+            no_speech_prob=max_no_speech, avg_logprob=min_logprob,
+        )
 
+    transcript = " ".join(accepted_words).strip()
+    diagnostic = dict(
+        raw_transcript=" ".join(raw_words).strip(),
+        no_speech_prob=max_no_speech,
+        avg_logprob=min_logprob,
+    )
     if not transcript:
-        return Verification(False, "verification_no_speech")
+        return Verification(False, "verification_no_speech", **diagnostic)
     if not _word_match(transcript, keyword):
-        return Verification(False, "verification_mismatch", transcript=transcript)
-    return Verification(True, "verified", transcript=transcript)
+        return Verification(
+            False, "verification_mismatch", transcript=transcript, **diagnostic
+        )
+    return Verification(True, "verified", transcript=transcript, **diagnostic)
