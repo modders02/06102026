@@ -317,6 +317,34 @@ def deactivate_household_kws(request: Request):
     return {"success": True, **result}
 
 
+@app.post("/kws/household/sample/delete")
+async def delete_household_kws_sample(request: Request):
+    """Remove one cached training template after the private WAV was deleted."""
+    _require_local_training(request)
+    body = await request.json()
+    try:
+        result = HOUSEHOLD_KWS.delete_sample(
+            body["household_id"], body["word_id"], body["sample_id"]
+        )
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"success": True, **result}
+
+
+@app.post("/kws/household/reconcile")
+async def reconcile_household_kws(request: Request):
+    """Prune deleted local templates using the authenticated household bucket list."""
+    _require_local_training(request)
+    body = await request.json()
+    try:
+        result = HOUSEHOLD_KWS.reconcile_samples(
+            body["household_id"], body["samples"]
+        )
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"success": True, **result}
+
+
 @app.post("/kws/household/validate")
 async def validate_household_kws(
     request: Request, household_id: str = Form(...),
