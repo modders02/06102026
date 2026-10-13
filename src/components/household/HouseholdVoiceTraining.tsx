@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Mic, MicOff, RefreshCw, ShieldCheck } from 'lucide-react';
+import { SpeechCaptureGate, type CaptureState } from '@/lib/speechCapture';
 import {
   decodeRecordedWakeWord, getHouseholdVoiceStatus, POSITIVE_MINIMUM,
   synchronizeHouseholdVoice, UNKNOWN_MINIMUM, uploadHouseholdSample,
@@ -15,10 +16,10 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
   const [status, setStatus] = useState<HouseholdVoiceStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState<string | null>(null);
+  const [capturePhase, setCapturePhase] = useState<CaptureState>('waiting');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const recorder = useRef<MediaRecorder | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelCapture = useRef<(() => void) | null>(null);
   const active = useRef(true);
   const manifest = words.map(w => `${w.id}:${w.phrase}`).sort().join('|');
   const eligible = validVoiceWords(words);
@@ -43,43 +44,72 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
     void refresh();
     return () => {
       active.current = false;
-      if (timer.current) clearTimeout(timer.current);
-      if (recorder.current?.state === 'recording') recorder.current.stop();
-      recorder.current?.stream.getTracks().forEach(track => track.stop());
+      cancelCapture.current?.();
     };
   }, [refresh]);
 
-  const stop = () => {
-    if (timer.current) clearTimeout(timer.current);
-    if (recorder.current?.state === 'recording') recorder.current.stop();
-  };
+  const stop = () => cancelCapture.current?.();
 
   const start = async (wordId: string, phrase: string) => {
     if (busy || recording || !hasSavedPhrase || (wordId !== 'unknown' && !eligible.some(word => word.id === wordId))) return;
     setError('');
     setMessage('');
+    setCapturePhase('waiting');
     let stream: MediaStream | undefined;
+    let context: AudioContext | undefined;
+    let interval: ReturnType<typeof setInterval> | null = null;
+    let media: MediaRecorder | undefined;
+    let released = false;
+    let saveCapture = false;
+
+    const release = () => {
+      if (released) return;
+      released = true;
+      if (interval !== null) clearInterval(interval);
+      interval = null;
+      if (context) void context.close().catch(() => {});
+      stream?.getTracks().forEach(track => track.stop());
+      cancelCapture.current = null;
+      if (active.current) setRecording(null);
+    };
+    const finish = (save: boolean) => {
+      saveCapture = save;
+      if (media?.state === 'recording') media.stop();
+      release(); // The microphone is disabled immediately, before file processing.
+    };
+
     try {
-      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-        throw new Error('Microphone recording is unavailable. Use the MSDS desktop app or a supported browser.');
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined'
+          || typeof AudioContext === 'undefined') {
+        throw new Error('Automatic microphone recording requires the MSDS desktop app or a supported browser.');
       }
       stream = await navigator.mediaDevices.getUserMedia({ audio: {
         echoCancellation: false, noiseSuppression: false, autoGainControl: false,
       } });
+      if (!active.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      context = new AudioContext();
+      const source = context.createMediaStreamSource(stream);
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 2048;
+      source.connect(analyser);
+      const pcm = new Float32Array(analyser.fftSize);
+      const gate = new SpeechCaptureGate();
+      const startedAt = performance.now();
       const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
         .find(type => MediaRecorder.isTypeSupported(type));
-      const media = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      media = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
       const parts: Blob[] = [];
       media.ondataavailable = event => { if (event.data.size) parts.push(event.data); };
       media.onstop = async () => {
-        stream?.getTracks().forEach(track => track.stop());
-        recorder.current = null;
-        if (!active.current) return;
-        setRecording(null);
+        release();
+        if (!saveCapture || !active.current) return;
         setBusy(true);
         try {
-          if (!parts.length) throw new Error('No audio was recorded.');
-          const wav = await decodeRecordedWakeWord(new Blob(parts, { type: media.mimeType }));
+          if (!parts.length) throw new Error('No speech was recorded.');
+          const wav = await decodeRecordedWakeWord(new Blob(parts, { type: media!.mimeType }));
           await uploadHouseholdSample(householdId, wordId, wav);
           const next = await getHouseholdVoiceStatus();
           if (active.current) {
@@ -92,14 +122,35 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
           if (active.current) setBusy(false);
         }
       };
-      recorder.current = media;
+      cancelCapture.current = () => finish(false);
       setRecording(wordId);
       media.start();
-      timer.current = setTimeout(stop, 4000);
+      interval = setInterval(() => {
+        if (released) return;
+        analyser.getFloatTimeDomainData(pcm);
+        let power = 0;
+        for (const sample of pcm) power += sample * sample;
+        const rms = Math.sqrt(power / pcm.length);
+        const result = gate.update(rms, performance.now() - startedAt);
+        if (result === 'speaking') setCapturePhase('speaking');
+        if (result === 'captured') {
+          finish(true);
+        } else if (result === 'timeout' || result === 'too_short' || result === 'too_long') {
+          setError(result === 'timeout'
+            ? 'No speech detected. Try recording again.'
+            : result === 'too_short'
+              ? 'The word was too short or unclear. Please repeat it.'
+              : 'The recording was too long. Say one short word or phrase.');
+          finish(false); // Never enroll a timed-out or incomplete sample.
+        }
+      }, 40);
     } catch (e) {
-      stream?.getTracks().forEach(track => track.stop());
-      setError(e instanceof Error ? e.message : String(e));
-      setRecording(null);
+      if (media?.state === 'recording') media.stop();
+      release();
+      if (active.current) {
+        setError(e instanceof Error ? e.message : String(e));
+        setRecording(null);
+      }
     }
   };
 
@@ -136,7 +187,7 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
               {recording === word.id ? (
                 <button type="button" onClick={stop}
                   className="flex items-center gap-1.5 rounded-lg bg-destructive px-3 py-2 text-xs font-semibold text-destructive-foreground">
-                  <MicOff className="h-4 w-4" /> Stop
+                  <MicOff className="h-4 w-4" /> Cancel
                 </button>
               ) : (
                 <button type="button" disabled={busy || !!recording}
@@ -155,7 +206,9 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
           and start with a letter. "911" and duplicate pronunciations are excluded.
         </p>
       )}
-      {recording && <p role="status" className="text-xs text-primary animate-pulse">Listening… say the selected phrase once, then press Stop.</p>}
+      {recording && <p role="status" className="text-xs text-primary animate-pulse">
+        {capturePhase === 'speaking' ? 'Speech detected — release will be automatic.' : 'Listening… say the selected phrase once.'}
+      </p>}
       {busy && <p className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Processing household voice samples…</p>}
       {message && <p role="status" className="text-xs text-success">{message}</p>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
