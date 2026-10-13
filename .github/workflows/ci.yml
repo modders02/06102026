@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feature/strict-help-facial-alert, feature/kws-asr-verification-trial-20261013, feature/msds-safe-service-autorecovery-20261014, feature/kws-help-second-chance-20261014, feature/kws-help-fire-disagreement-20261014, feature/kws-short-help-asr-diagnostics-20261014, feature/kws-asr-pending-timeout-20261014, feature/kws-help-90-fast-accept-20261014, feature/kws-help-90-green-accepted-20261014]
+    branches: [main, feature/strict-help-facial-alert, feature/kws-asr-verification-trial-20261013, feature/msds-safe-service-autorecovery-20261014, feature/kws-help-second-chance-20261014, feature/kws-help-fire-disagreement-20261014, feature/kws-short-help-asr-diagnostics-20261014, feature/kws-asr-pending-timeout-20261014, feature/kws-help-90-fast-accept-20261014, feature/kws-help-90-green-accepted-20261014, feature/emotion-expression-training-20261014]
   pull_request:
 
 jobs:
@@ -44,6 +44,20 @@ jobs:
       - working-directory: local-service
         run: npm run typecheck
 
+
+  emotion-dataset:
+    name: Licensed emotion importer tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install "Pillow>=10.4"
+      - name: Verify conversion and split isolation
+        run: python -m unittest discover -s training/facial_distress/tests -p "test_*.py"
+      - name: Check optional training script syntax without heavy torch downloads
+        run: python -m py_compile training/facial_distress/import_fer2013.py training/facial_distress/import_own_photos.py training/facial_distress/train_expressions.py
 
   # Regression coverage for the Python camera bridge and custom keyword spotter.
   local-camera-server:
