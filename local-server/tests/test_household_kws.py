@@ -75,6 +75,43 @@ class HouseholdVoiceTests(unittest.TestCase):
         self.assertEqual(self.profiles.status()["keywords"]["help_me"], 3)
         self.assertEqual(first_engine.data_dir, self.profiles.current_engine().data_dir)
 
+    def test_deleting_one_sample_removes_only_that_template(self):
+        self.profiles.activate(A, [{"id": WORD_A, "phrase": "help me"}])
+        one, two, three = (f"{n:032x}" for n in (1, 2, 3))
+        for index, sid in enumerate((one, two, three)):
+            self.profiles.enroll(A, WORD_A, sid, sample(310 + index * 12))
+        folder = Path(self.folder.name) / A / "help_me"
+        self.assertTrue((folder / f"{two}.npy").is_file())
+        result = self.profiles.delete_sample(A, WORD_A, two)
+        self.assertTrue(result["deleted"])
+        self.assertFalse((folder / f"{two}.npy").exists())
+        self.assertEqual(self.profiles.status()["sample_ids"]["help_me"], [one, three])
+        self.assertEqual(self.profiles.status()["keywords"]["help_me"], 2)
+        self.assertFalse(self.profiles.delete_sample(A, WORD_A, two)["deleted"])
+        with self.assertRaises(ValueError):
+            self.profiles.delete_sample(B, WORD_A, one)
+        with self.assertRaises(ValueError):
+            self.profiles.delete_sample(A, WORD_A, "../bad")
+
+    def test_cloud_reconciliation_removes_stale_templates_and_keeps_other_samples(self):
+        self.profiles.activate(A, [{"id": WORD_A, "phrase": "help me"}])
+        one, two, neg = (f"{n:032x}" for n in (21, 22, 23))
+        self.profiles.enroll(A, WORD_A, one, sample(330))
+        self.profiles.enroll(A, WORD_A, two, sample(400))
+        self.profiles.enroll(A, "unknown", neg, sample(760))
+        with self.assertRaisesRegex(ValueError, "complete sample list"):
+            self.profiles.reconcile_samples(A, {WORD_A: [one]})
+        self.assertIn(two, self.profiles.status()["sample_ids"]["help_me"])
+        removed = self.profiles.reconcile_samples(A, {WORD_A: [one], "unknown": []})
+        self.assertEqual(removed["removed"]["help_me"], [two])
+        self.assertEqual(removed["removed"]["unknown"], [neg])
+        self.assertEqual(self.profiles.status()["sample_ids"]["help_me"], [one])
+        self.assertEqual(self.profiles.status()["sample_ids"]["unknown"], [])
+        self.profiles.enroll(A, WORD_A, two, sample(410))
+        self.assertEqual(self.profiles.status()["sample_ids"]["help_me"], [one, two])
+        with self.assertRaises(ValueError):
+            self.profiles.reconcile_samples(B, {WORD_A: [], "unknown": []})
+
     def test_negative_examples_required_for_new_profile(self):
         self.profiles.activate(A, [{"id": WORD_A, "phrase": "call ambulance"}])
         engine = self.profiles.current_engine()
