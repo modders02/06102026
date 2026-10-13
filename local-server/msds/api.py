@@ -317,6 +317,28 @@ def deactivate_household_kws(request: Request):
     return {"success": True, **result}
 
 
+@app.post("/kws/household/validate")
+async def validate_household_kws(
+    request: Request, household_id: str = Form(...),
+    audio: UploadFile = File(...),
+):
+    """Preflight microphone quality before any private-cloud upload occurs."""
+    _require_local_training(request)
+    if household_id != HOUSEHOLD_KWS.household_id:
+        raise HTTPException(status_code=409, detail="The requested household is not active.")
+    data = await audio.read(256001)
+    if len(data) > 256000:
+        raise HTTPException(status_code=413, detail="Enrollment WAV is too large.")
+    try:
+        pcm = KWS_ENGINE._read_wav_as_pcm16k_mono(data)
+        quality = HOUSEHOLD_KWS.validate_sample(pcm)
+        if len(HOUSEHOLD_KWS.current_engine().extract_features(pcm)) < 12:
+            raise ValueError("The speech was too brief or unclear. Record the phrase again.")
+    except (ValueError, EOFError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"success": True, **quality}
+
+
 @app.post("/kws/household/enroll")
 async def enroll_household_kws(
     request: Request, household_id: str = Form(...),
