@@ -529,6 +529,13 @@ class Camera:
                 rescue = kws_verifier.eligible_help_rescue(decision)
                 if decision.accepted or rescue:
                     if kws_verifier.enabled():
+                        # The decoder can take seconds on CPU. Expose an
+                        # in-progress state so polling/UI cannot mistake a
+                        # provisional KWS rejection for the final verdict.
+                        self.kws_last_decision = "verification_pending"
+                        self.kws_verification_state = "verifying"
+                        self.kws_verification_transcript = ""
+                        self.kws_verification_error = ""
                         verification = kws_verifier.verify_kws_segment(segment, decision.keyword)
                         self.kws_verification_state = verification.state
                         self.kws_verification_transcript = verification.transcript
