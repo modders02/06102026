@@ -40,7 +40,7 @@ def _read_mediamtx_failure() -> str:
             useful = [line.strip() for line in lines if line.strip()][-6:]
             text = " | ".join(useful)
             # Strip RTSP URL userinfo, which could contain camera passwords.
-            text = re.sub(r"(rtsps?://)[^\\s/@]+@", r"\\1[redacted]@", text)
+            text = re.sub(r"(rtsps?://)[^\s/@]+@", r"\1[redacted]@", text)
             if text:
                 return text[-1200:]
     except OSError:
