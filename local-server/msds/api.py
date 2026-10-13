@@ -289,13 +289,14 @@ async def activate_household_kws(request: Request):
         result = HOUSEHOLD_KWS.activate(body["household_id"], body["words"])
     except (ValueError, KeyError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    # A phrase from a previous household must never be replayed as a new match.
-    for cam in snapshot():
-        cam.kws_last_keyword = ""
-        cam.kws_last_decision = ""
-        cam.last_transcript = ""
-        with cam.lock:
-            cam.events.clear()
+    # Reset stale accepted speech only when the household profile actually changes.
+    if result["changed"]:
+        for cam in snapshot():
+            cam.kws_last_keyword = ""
+            cam.kws_last_decision = ""
+            cam.last_transcript = ""
+            with cam.lock:
+                cam.events.clear()
     return {"success": True, **result}
 
 
