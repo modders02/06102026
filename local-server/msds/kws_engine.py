@@ -194,6 +194,7 @@ class CustomKeywordEngine:
         self.data_dir = Path(data_dir or os.environ.get("MSD_KWS_DATA_DIR", str(default_dir)))
         # A household engine receives its own explicit whitelist; the default
         # thesis engine retains its original eight English keywords.
+        self.is_household_profile = allowed_keywords is not None
         self.allowed_keywords = frozenset(allowed_keywords) if allowed_keywords is not None else ACTIVE_TEMPLATE_KEYS
         if NEGATIVE_CLASS not in self.allowed_keywords:
             raise ValueError("The unknown negative class is required.")
@@ -442,8 +443,11 @@ class CustomKeywordEngine:
     def _require_active_keyword(self, keyword: str) -> str:
         key = self.normalize_keyword(keyword)
         if key not in self.allowed_keywords:
+            if self.is_household_profile:
+                raise ValueError(f"Keyword '{key}' is not registered in the active English keyword profile.")
             raise ValueError(
-                f"Keyword '{key}' is not registered in the active English keyword profile."
+                f"Keyword '{key}' is outside the English-only thesis scope. "
+                f"Allowed: {', '.join((*DEFAULT_KEYWORDS, NEGATIVE_CLASS))}."
             )
         return key
 
@@ -1055,7 +1059,7 @@ class CustomKeywordEngine:
         return {
             "engine": "msds-logmel-dtw-v3",
             "language_scope": LANGUAGE_SCOPE,
-            "active_keywords": sorted(self.allowed_keywords - {NEGATIVE_CLASS}),
+            "active_keywords": (sorted(self.allowed_keywords - {NEGATIVE_CLASS}) if self.is_household_profile else list(DEFAULT_KEYWORDS)),
             "ignored_template_folders": ignored_template_folders,
             "feature_version": FEATURE_VERSION,
             "sample_rate": SAMPLE_RATE,
@@ -1091,7 +1095,7 @@ class CustomKeywordEngine:
                 key for key, count in counts.items()
                 if key != NEGATIVE_CLASS and count >= MIN_TEMPLATES
             ],
-            "suggested_keywords": sorted(self.allowed_keywords - {NEGATIVE_CLASS}),
+            "suggested_keywords": (sorted(self.allowed_keywords - {NEGATIVE_CLASS}) if self.is_household_profile else list(DEFAULT_KEYWORDS)),
             "data_dir": str(self.data_dir),
             "error": self.last_error,
         }
