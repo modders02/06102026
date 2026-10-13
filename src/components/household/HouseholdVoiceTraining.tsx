@@ -51,7 +51,26 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
 
   const stop = () => cancelCapture.current?.();
 
-  const start = async (wordId: string, phrase: string) => {
+  const deleteSample = async (wordId: string, phrase: string, sampleId: string) => {
+    if (busy || recording) return;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      await deleteHouseholdVoiceSample(householdId, wordId, sampleId);
+      const synced = await synchronizeHouseholdVoice(householdId, words);
+      if (active.current) {
+        setStatus(synced);
+        setMessage('Sample removed for "' + phrase + '".');
+      }
+    } catch (e) {
+      if (active.current) setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (active.current) setBusy(false);
+    }
+  };
+
+  const start = async (wordId: string, phrase: string, replaceSampleId?: string) => {
     if (busy || recording || !hasSavedPhrase || (wordId !== 'unknown' && !eligible.some(word => word.id === wordId))) return;
     setError('');
     setMessage('');
@@ -112,11 +131,15 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
         try {
           if (!parts.length) throw new Error('No speech was recorded.');
           const wav = await decodeRecordedWakeWord(new Blob(parts, { type: media!.mimeType }));
-          await uploadHouseholdSample(householdId, wordId, wav);
+          if (replaceSampleId) {
+            await replaceHouseholdVoiceSample(householdId, wordId, replaceSampleId, wav);
+          } else {
+            await uploadHouseholdSample(householdId, wordId, wav);
+          }
           const next = await getHouseholdVoiceStatus();
           if (active.current) {
             setStatus(next);
-            setMessage(`Sample saved for "${phrase}".`);
+            setMessage(`Sample ${replaceSampleId ? "replaced" : "saved"} for "${phrase}".`);
           }
         } catch (e) {
           if (active.current) setError(e instanceof Error ? e.message : String(e));
@@ -175,7 +198,8 @@ export default function HouseholdVoiceTraining({ householdId, words }: Props) {
       </div>
       <div className="space-y-2">
         {trainingRows.map(word => {
-          const count = status?.keywords[word.key] ?? 0;
+          const sampleIds = status?.sample_ids?.[word.key] ?? [];
+          const count = sampleIds.length;
           const ready = count >= word.required;
           return (
             <div key={word.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2">
