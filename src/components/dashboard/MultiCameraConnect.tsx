@@ -440,22 +440,26 @@ function SlotCard({
             disabled={live || busy !== ''}
           />
           <button
-            onClick={() => handleConnect(live)}
+            type="button"
+            onClick={() => { if (live) void handleDisconnect(); else void handleConnect(); }}
             disabled={busy !== ''}
             className="w-full flex items-center justify-center gap-2 text-[15px] font-bold px-3 py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/80 disabled:opacity-50"
           >
-            {busy === 'start' || busy === 'restart'
+            {busy === 'start' || busy === 'stop'
               ? <Loader2 className="w-4 h-4 animate-spin" />
-              : live ? <RefreshCw className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-            {busy === 'restart' ? 'Reconnecting…' : busy === 'start' ? 'Connecting…' : live ? 'Reconnect' : 'Connect'}
+              : live ? <Square className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            {busy === 'stop' ? 'Disconnecting…' : busy === 'start' ? 'Connecting…' : live ? 'Disconnect' : 'Connect'}
           </button>
         </div>
         <button
-          onClick={handleDisconnect}
+          type="button"
+          onClick={() => { void handleConnect(true); }}
           disabled={busy !== '' || !live}
-          className="flex items-center gap-2 text-[15px] font-semibold px-3 py-2.5 rounded-lg border border-border hover:bg-muted disabled:opacity-50"
+          aria-label={`Reconnect ${slot.name}`}
+          title={`Reconnect ${slot.name}`}
+          className="shrink-0 flex h-10 w-10 items-center justify-center rounded-lg border border-border hover:bg-muted disabled:opacity-50"
         >
-          <Square className="w-4 h-4" /> Disconnect
+          {busy === 'restart' ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
         </button>
         <button
           onClick={() => check(false)}
