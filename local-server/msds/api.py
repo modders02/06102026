@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
@@ -21,7 +21,6 @@ from .config import AUDIO_ENGINE, HLS_PORT, RTSP_PORT
 from .manager import (CAMERAS, mediamtx_running, snapshot, start_mediamtx,
                       stop_all_cameras, sync_cameras)
 from .kws_engine import KWS_ENGINE
-from .household_kws import HOUSEHOLD_KWS
 
 app = FastAPI(title="MSDSystem multi-camera bridge")
 app.add_middleware(
@@ -168,7 +167,7 @@ def status():
         "hls_port": HLS_PORT,
         "lan_ip": host,
         "audio_engine": AUDIO_ENGINE,
-        "custom_kws": HOUSEHOLD_KWS.current_engine().status(),
+        "custom_kws": KWS_ENGINE.status(),
         "whisper": False,
         "whisper_state": "disabled",
         "whisper_model": "",
@@ -267,125 +266,9 @@ def audio_events(camera_id: str, since: Optional[str] = None):
 
 
 @app.get("/kws/status")
-def kws_status(request: Request):
-    """Local-only profile manifest and enrolled-template diagnostic."""
-    _require_local_training(request)
-    return {"success": True, **HOUSEHOLD_KWS.status()}
-
-
-def _require_local_training(request: Request):
-    # Profile switching and training change live audio decisions: never expose
-    # them to other computers through the bridge's 0.0.0.0 listening socket.
-    if not request.client or request.client.host not in ("127.0.0.1", "::1", "testclient"):
-        raise HTTPException(status_code=403, detail="Training is available only on the local MSDS machine.")
-    origin = request.headers.get("origin", "")
-    if origin and origin not in ("http://localhost:8080", "http://127.0.0.1:8080", "msds://app"):
-        raise HTTPException(status_code=403, detail="Untrusted origin for household voice training.")
-
-
-@app.post("/kws/household/activate")
-async def activate_household_kws(request: Request):
-    _require_local_training(request)
-    body = await request.json()
-    if not isinstance(body, dict) or not isinstance(body.get("words"), list) or len(body["words"]) > 64:
-        raise HTTPException(status_code=400, detail="Invalid household keyword manifest.")
-    try:
-        result = HOUSEHOLD_KWS.activate(body["household_id"], body["words"])
-    except (ValueError, KeyError, TypeError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    # Reset stale accepted speech only when the household profile actually changes.
-    if result["changed"]:
-        for cam in snapshot():
-            cam.kws_last_keyword = ""
-            cam.kws_last_decision = ""
-            cam.last_transcript = ""
-            with cam.lock:
-                cam.events.clear()
-    return {"success": True, **result}
-
-
-@app.post("/kws/household/deactivate")
-def deactivate_household_kws(request: Request):
-    _require_local_training(request)
-    result = HOUSEHOLD_KWS.deactivate()
-    for cam in snapshot():
-        cam.kws_last_keyword = ""
-        cam.kws_last_decision = ""
-        cam.last_transcript = ""
-        with cam.lock:
-            cam.events.clear()
-    return {"success": True, **result}
-
-
-@app.post("/kws/household/sample/delete")
-async def delete_household_kws_sample(request: Request):
-    """Remove one cached training template after the private WAV was deleted."""
-    _require_local_training(request)
-    body = await request.json()
-    try:
-        result = HOUSEHOLD_KWS.delete_sample(
-            body["household_id"], body["word_id"], body["sample_id"]
-        )
-    except (ValueError, KeyError, TypeError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    return {"success": True, **result}
-
-
-@app.post("/kws/household/reconcile")
-async def reconcile_household_kws(request: Request):
-    """Prune deleted local templates using the authenticated household bucket list."""
-    _require_local_training(request)
-    body = await request.json()
-    try:
-        result = HOUSEHOLD_KWS.reconcile_samples(
-            body["household_id"], body["samples"]
-        )
-    except (ValueError, KeyError, TypeError, AttributeError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    return {"success": True, **result}
-
-
-@app.post("/kws/household/validate")
-async def validate_household_kws(
-    request: Request, household_id: str = Form(...),
-    audio: UploadFile = File(...),
-):
-    """Preflight microphone quality before any private-cloud upload occurs."""
-    _require_local_training(request)
-    if household_id != HOUSEHOLD_KWS.household_id:
-        raise HTTPException(status_code=409, detail="The requested household is not active.")
-    data = await audio.read(256001)
-    if len(data) > 256000:
-        raise HTTPException(status_code=413, detail="Enrollment WAV is too large.")
-    try:
-        pcm = KWS_ENGINE._read_wav_as_pcm16k_mono(data)
-        quality = HOUSEHOLD_KWS.validate_sample(pcm)
-        if len(HOUSEHOLD_KWS.current_engine().extract_features(pcm)) < 12:
-            raise ValueError("The speech was too brief or unclear. Record the phrase again.")
-    except (ValueError, EOFError, TypeError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    return {"success": True, **quality}
-
-
-@app.post("/kws/household/enroll")
-async def enroll_household_kws(
-    request: Request, household_id: str = Form(...),
-    word_id: str = Form(...), sample_id: str = Form(...),
-    audio: UploadFile = File(...),
-):
-    _require_local_training(request)
-    data = await audio.read(256001)
-    if len(data) > 256000:
-        raise HTTPException(status_code=413, detail="Enrollment WAV is too large.")
-    try:
-        pcm = KWS_ENGINE._read_wav_as_pcm16k_mono(data)
-        seconds = len(pcm) / 32000.0
-        if not 0.30 <= seconds <= 2.50:
-            raise ValueError("A spoken training sample must be between 0.3 and 2.5 seconds.")
-        result = HOUSEHOLD_KWS.enroll(household_id, word_id, sample_id, pcm)
-    except (ValueError, KeyError, TypeError, EOFError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    return {"success": True, **result, **{"active_household_id": HOUSEHOLD_KWS.household_id}}
+def kws_status():
+    """Status of the custom MSDS keyword engine and enrolled templates."""
+    return {"success": True, **KWS_ENGINE.status()}
 
 
 @app.get("/kws/evaluate")

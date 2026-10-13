@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { deactivateHouseholdVoice } from '@/lib/householdVoiceTraining';
 import type { User, Session } from '@supabase/supabase-js';
 
 export function useAuth() {
@@ -39,7 +38,6 @@ export function useAuth() {
   }, []);
 
   const signOut = useCallback(async () => {
-    await deactivateHouseholdVoice().catch(() => {});
     await supabase.auth.signOut();
   }, []);
 

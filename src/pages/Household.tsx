@@ -9,8 +9,6 @@ import { HelpCircle } from 'lucide-react';
 import TutorialOverlay, { type TutorialStep } from '@/components/dashboard/TutorialOverlay';
 import householdBg from '@/assets/household-bg.jpg';
 import NotificationSettings from '@/components/household/NotificationSettings';
-import HouseholdVoiceTraining from '@/components/household/HouseholdVoiceTraining';
-import { deleteHouseholdVoiceSamples, validVoiceWords } from '@/lib/householdVoiceTraining';
 
 
 interface Household {
@@ -178,32 +176,17 @@ export default function HouseholdPage() {
   const handleAddWakeWord = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!household || !newPhrase.trim()) return;
-    setFormError('');
-    const { error } = await supabase.from('wake_words').insert({
-      household_id: household.id, phrase: newPhrase.trim().toLowerCase(),
-      is_emergency: isEmergency, created_by: user?.id, action_type: actionType,
-    });
-    if (error) {
-      setFormError(error.message);
-      return;
-    }
+    await supabase.from('wake_words').insert({ household_id: household.id, phrase: newPhrase.trim().toLowerCase(), is_emergency: isEmergency, created_by: user?.id, action_type: actionType });
     setNewPhrase('');
     setIsEmergency(false);
     setActionType('email');
     setShowAddPhrase(false);
-    await fetchHousehold();
+    fetchHousehold();
   };
 
   const handleDeleteWakeWord = async (id: string) => {
-    if (!household) return;
-    try {
-      await deleteHouseholdVoiceSamples(household.id, id);
-      const { error } = await supabase.from('wake_words').delete().eq('id', id);
-      if (error) throw error;
-      await fetchHousehold();
-    } catch (exc) {
-      setFormError(exc instanceof Error ? exc.message : 'Could not delete the household wake word.');
-    }
+    await supabase.from('wake_words').delete().eq('id', id);
+    fetchHousehold();
   };
 
   const handleAcceptJoinRequest = async (req: JoinRequest) => {
@@ -505,6 +488,45 @@ export default function HouseholdPage() {
                 </div>
               </div>
 
+              <p className="text-xs text-muted-foreground">
+                Each phrase triggers a specific action when detected in real-time audio transcription.
+              </p>
+
+              {/* Wake Word List */}
+              <div className="space-y-2">
+                {wakeWords.map(w => {
+                  const ac = actionConfig[w.action_type as keyof typeof actionConfig] || actionConfig.email;
+                  const ActionIcon = ac.icon;
+                  return (
+                    <div key={w.id} className="bg-secondary/40 rounded-lg px-4 py-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-mono font-semibold text-foreground">"{w.phrase}"</span>
+                          {w.is_emergency && (
+                            <span className="flex items-center gap-1 text-[10px] font-semibold text-destructive bg-destructive/10 px-2 py-0.5 rounded-full">
+                              <AlertTriangle className="w-3 h-3" /> EMERGENCY
+                            </span>
+                          )}
+                        </div>
+                        <button onClick={() => handleDeleteWakeWord(w.id)} className="text-muted-foreground hover:text-destructive transition-colors p-1">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded ${ac.bg} ${ac.color}`}>
+                          <ActionIcon className="w-3 h-3" />
+                          {ac.label}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">{ac.desc}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                {wakeWords.length === 0 && (
+                  <p className="text-xs text-muted-foreground text-center py-4">No wake words configured. Add one to get started.</p>
+                )}
+              </div>
+
               {/* Add Phrase Form */}
               {showAddPhrase && (
                 <form onSubmit={handleAddWakeWord} className="border border-primary/20 rounded-xl p-4 space-y-4 bg-primary/5">
@@ -558,46 +580,6 @@ export default function HouseholdPage() {
                   </button>
                 </form>
               )}
-
-              {/* Wake Word List */}
-              <div className="space-y-2">
-                {wakeWords.map(w => {
-                  const ac = actionConfig[w.action_type as keyof typeof actionConfig] || actionConfig.email;
-                  const ActionIcon = ac.icon;
-                  return (
-                    <div key={w.id} className="bg-secondary/40 rounded-lg px-4 py-3 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-mono font-semibold text-foreground">"{w.phrase}"</span>
-                          {w.is_emergency && (
-                            <span className="flex items-center gap-1 text-[10px] font-semibold text-destructive bg-destructive/10 px-2 py-0.5 rounded-full">
-                              <AlertTriangle className="w-3 h-3" /> EMERGENCY
-                            </span>
-                          )}
-                        </div>
-                        <button onClick={() => handleDeleteWakeWord(w.id)} className="text-muted-foreground hover:text-destructive transition-colors p-1">
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={`flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded ${ac.bg} ${ac.color}`}>
-                          <ActionIcon className="w-3 h-3" />
-                          {ac.label}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">{ac.desc}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-                {wakeWords.length === 0 && (
-                  <p className="text-xs text-muted-foreground text-center py-4">No wake words configured. Add one to get started.</p>
-                )}
-              </div>
-              {household && validVoiceWords(wakeWords).length > 0 && (
-                <HouseholdVoiceTraining householdId={household.id} words={wakeWords} />
-              )}
-              {formError && <p role="alert" className="text-xs text-destructive">{formError}</p>}
-
             </div>
 
             <NotificationSettings householdId={household.id} />

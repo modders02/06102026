@@ -24,7 +24,6 @@ from .config import (AUDIO_CHUNK_SECONDS, AUDIO_ENGINE, HLS_PORT, HLS_PROBE_TTL,
                      RTSP_PORT, VIDEO_FPS, VIDEO_GOP, VIDEO_MAX_WIDTH,
                      VIDEO_THREADS, WEBRTC_PORT, match_distress)
 from .kws_engine import KWS_ENGINE, StreamingSpeechSegmenter
-from .household_kws import HOUSEHOLD_KWS
 
 # Presentation/runtime configuration is custom-only, so importing this module
 # must not import Faster-Whisper or touch its model/download path.
@@ -457,8 +456,7 @@ class Camera:
     def _process_custom_kws_pcm(self, pcm: bytes) -> None:
         if self.stop_flag.is_set():
             return
-        active_engine = HOUSEHOLD_KWS.current_engine()
-        if not self.kws_pending_enrollment and not active_engine.has_ready_templates():
+        if not self.kws_pending_enrollment and not KWS_ENGINE.has_ready_templates():
             return
         for segment in self.kws_segmenter.feed(pcm):
             if self.kws_pending_enrollment:
@@ -489,7 +487,7 @@ class Camera:
                 continue
 
             started = time.perf_counter()
-            decision = active_engine.diagnose(segment)
+            decision = KWS_ENGINE.diagnose(segment)
             processing_ms = (time.perf_counter() - started) * 1000.0
             self.kws_segments_seen += 1
             self.kws_last_segment_at = now_iso()
@@ -938,7 +936,7 @@ class Camera:
                         matches.append(match)
                 best = max(matches, key=lambda item: item.confidence) if matches else None
                 report["custom_kws"] = {
-                    **HOUSEHOLD_KWS.current_engine().status(),
+                    **KWS_ENGINE.status(),
                     "segments": len(segments),
                     "match": ({
                         "keyword": best.keyword,
