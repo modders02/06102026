@@ -552,20 +552,40 @@ class Camera:
                         verified = verification.accepted and (
                             decision.accepted or kws_verifier.isolated_help(verification.transcript)
                         )
+                        # Keep accepted FIRE if ASR corroborates FIRE. When it
+                        # instead hears isolated HELP, give only strong
+                        # HELP-as-runner-up evidence a second chance. Reuse
+                        # this same ASR result: never transcribe the segment
+                        # twice or treat a generic mismatch as proof of HELP.
+                        fire_help_rescue = (
+                            not verified
+                            and verification.state == "verification_mismatch"
+                            and kws_verifier.isolated_help(verification.transcript)
+                            and kws_verifier.eligible_fire_help_disagreement(decision)
+                        )
+                        if fire_help_rescue:
+                            verified = True
+                            self.kws_verification_target = "help"
+                            self.kws_verification_state = "verified"
+                            self.kws_help_rescue_source = "fire_disagreement"
                         if rescue and verification.accepted and not verified:
                             self.kws_verification_state = "help_rescue_nonisolated_transcript"
                         if verified:
                             self.kws_last_decision = (
-                                "verified_help_rescue" if rescue else "verified"
+                                "verified_help_rescue"
+                                if rescue or fire_help_rescue else "verified"
                             )
                             elapsed_ms = (time.perf_counter() - started) * 1000.0
                             publish_decision = (
                                 SimpleNamespace(
-                                    keyword=rescue.keyword,
-                                    confidence=rescue.confidence,
+                                    keyword="help" if fire_help_rescue else rescue.keyword,
+                                    confidence=(
+                                        float(decision.keyword_scores["help"])
+                                        if fire_help_rescue else rescue.confidence
+                                    ),
                                     duration_ms=decision.duration_ms,
                                 )
-                                if rescue else decision
+                                if rescue or fire_help_rescue else decision
                             )
                             self._publish_kws_match(publish_decision, elapsed_ms)
                         else:
