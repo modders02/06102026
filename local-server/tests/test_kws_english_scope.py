@@ -33,6 +33,24 @@ def write_tone(path: Path, frequency: float, sample_rate: int = 8000, channels: 
 
 
 class EnglishKwsScopeTests(unittest.TestCase):
+    def test_removed_stop_keyword_is_inactive_and_legacy_samples_are_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp) / "templates"
+            old_stop = data / "stop"
+            old_stop.mkdir(parents=True)
+            # Simulate a previously enrolled STOP sample on disk.
+            np.save(old_stop / "saved.npy", np.ones((20, 32), dtype=np.float32))
+            engine = CustomKeywordEngine(data_dir=str(data))
+            status = engine.status()
+
+            self.assertNotIn("stop", DEFAULT_KEYWORDS)
+            self.assertNotIn("stop", status["active_keywords"])
+            self.assertNotIn("stop", status["keywords"])
+            self.assertIn("stop", status["ignored_template_folders"])
+            self.assertNotIn("stop", engine.evaluate_templates()["positive_keywords"])
+            with self.assertRaisesRegex(ValueError, "outside the English-only thesis scope"):
+                engine.enroll("stop", b"")
+
     def test_tagalog_keyword_cannot_be_enrolled_on_scope_branch(self):
         with tempfile.TemporaryDirectory() as tmp:
             engine = CustomKeywordEngine(data_dir=str(Path(tmp) / "templates"))
