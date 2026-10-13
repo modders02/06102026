@@ -134,14 +134,14 @@ are not armed, and a failed preflight never writes a template.
 Record other words in a separate terminal session:
 
 ```powershell
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword fire --samples 5
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword emergency --samples 5
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword danger --samples 5
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword intruder --samples 5
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword police --samples 5
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword ambulance --samples 5
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword stop --samples 5
-& $py ".\local-server\enroll_english_kws.py" --camera slot-1 --keyword unknown --samples 10
+& $py ".\local-server\enroll_english_kws.py" --keyword fire --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword emergency --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword danger --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword intruder --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword police --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword ambulance --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword stop --samples 5
+& $py ".\local-server\enroll_english_kws.py" --keyword unknown --samples 10
 ```
 
 For `unknown`, speak genuinely different *non-emergency* words/phrases.
