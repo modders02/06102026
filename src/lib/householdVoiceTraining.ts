@@ -98,7 +98,18 @@ export async function enrollHouseholdSample(
   );
 }
 
+/** Reject unusable utterances before uploading them to shared household storage. */
+export async function validateHouseholdSample(householdId: string, audio: Blob) {
+  const data = new FormData();
+  data.append('household_id', householdId);
+  data.append('audio', audio, 'training.wav');
+  return localRequest<{ success: boolean; duration_ms: number; rms: number }>(
+    '/kws/household/validate', { method: 'POST', body: data },
+  );
+}
+
 export async function uploadHouseholdSample(householdId: string, wordId: string, audio: Blob) {
+  await validateHouseholdSample(householdId, audio);
   const id = crypto.randomUUID().replace(/-/g, '');
   const path = `${householdId}/${wordId}/${id}.wav`;
   const bucket = supabase.storage.from(VOICE_BUCKET);
