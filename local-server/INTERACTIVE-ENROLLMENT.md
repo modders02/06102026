@@ -140,7 +140,6 @@ Record other words in a separate terminal session:
 & $py ".\local-server\enroll_english_kws.py" --keyword intruder --samples 5
 & $py ".\local-server\enroll_english_kws.py" --keyword police --samples 5
 & $py ".\local-server\enroll_english_kws.py" --keyword ambulance --samples 5
-& $py ".\local-server\enroll_english_kws.py" --keyword stop --samples 5
 & $py ".\local-server\enroll_english_kws.py" --keyword unknown --samples 10
 ```
 
