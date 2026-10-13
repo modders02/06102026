@@ -29,6 +29,35 @@ Verify `Test-Path .\local-server\bin\mediamtx.exe` returns `True`
 before restarting the camera bridge. Start the camera, then confirm its
 audio status. Do not run duplicate camera bridges on the same port.
 
+## Diagnose a MediaMTX startup failure
+
+The Python server now checks whether MediaMTX stays alive. If it crashes
+because of an invalid YAML option or a conflicting port, both the console and
+`GET /status` show the actual startup error (with RTSP credentials redacted).
+The repository contains a small compatible `mediamtx.yml` instead of an
+outdated generated vendor config.
+
+In PowerShell, start the local bridge, then in another terminal run:
+
+```powershell
+$st = Invoke-RestMethod "http://127.0.0.1:5000/status"
+$st | Select-Object mediamtx, mediamtx_error, available_camera_ids
+```
+
+If `mediamtx` is `False`, read `mediamtx_error`. A bind error for `:8554`,
+`:8888`, `:8889` or `:8189` generally means another program owns the port;
+stop the conflicting instance instead of launching duplicate camera bridges.
+
+If `available_camera_ids` is empty, open MSDS and press **Connect** on the
+RTSP camera. The camera list lives in the app and is registered with the
+Python server through `POST /cameras/sync` after a bridge restart; simply
+restarting `camera_server.py` does not restore it. Avoid pasting CCTV RTSP
+credentials into shared terminal logs.
+
+Enrollment now refuses to arm if MediaMTX is down, the camera is absent,
+video is offline, or CCTV audio has not delivered PCM frames. Fix the
+reported problem instead of recording silent training templates.
+
 ## One terminal, repeated speech recordings
 
 From your local `06102026-kws` checkout of
