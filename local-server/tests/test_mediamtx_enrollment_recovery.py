@@ -70,6 +70,29 @@ class MediaMtxRecoveryTests(unittest.TestCase):
             self.assertTrue(manager.mediamtx_running())
             self.assertIsNone(manager.mediamtx_last_error())
 
+    def test_foreign_port_blocker_prevents_duplicate_media_process(self):
+        from msds.service_recovery import PortRecovery
+
+        blocker = PortRecovery(blockers=("port 8554 (PID 456)",))
+        with patch.object(manager, "resolve_exe", return_value="/tmp/mediamtx"), \
+                patch.object(manager, "recover_media_ports", return_value=blocker), \
+                patch.object(manager.subprocess, "Popen") as launch:
+            self.assertFalse(manager.start_mediamtx())
+            self.assertIn("port 8554 (PID 456)", manager.mediamtx_last_error())
+            launch.assert_not_called()
+
+    def test_successful_orphan_recovery_launches_once(self):
+        from msds.service_recovery import PortRecovery
+
+        recovery = PortRecovery(reclaimed=(123,))
+        with patch.object(manager, "resolve_exe", return_value="/tmp/mediamtx"), \
+                patch.object(manager, "recover_media_ports", return_value=recovery), \
+                patch.object(manager.subprocess, "Popen", return_value=FakeProcess()) as launch, \
+                patch.object(manager.time, "sleep", return_value=None):
+            self.assertTrue(manager.start_mediamtx())
+            self.assertTrue(manager.start_mediamtx())
+            self.assertEqual(launch.call_count, 1)
+
     def test_missing_binary_is_rechecked_after_install(self):
         with patch.object(manager, "resolve_exe", return_value=None) as resolution:
             self.assertFalse(manager.start_mediamtx())
