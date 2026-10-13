@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useCameraPipeline } from '@/hooks/useCameraPipeline';
+import type { FinalSpeechResult } from '@/hooks/useSpeechRecognition';
 import { slotCamera, slotSettings, type CameraSlot } from '@/hooks/useCameraSlots';
 import { clearCameraSession, getCameraSession, publishCameraSession, saveCameraStill } from '@/lib/cameraSessions';
 import type { CameraRuntime, DetectionEvent, MultiCamSettings } from '@/types/multicam';
@@ -9,13 +10,14 @@ interface CameraMonitorProps {
   monitoring: boolean;
   playbackEnabled: boolean;
   localStream?: MediaStream | null;
+  localSpeech?: FinalSpeechResult | null;
   baseSettings?: MultiCamSettings;
   onEvent?: (evt: Omit<DetectionEvent, 'id'>) => void;
   onMetrics?: (index: number, runtime: CameraRuntime) => void;
 }
 
 /** Persistent camera processing; visible cards only consume its session. */
-export default function CameraMonitor({ slot, monitoring, playbackEnabled, localStream, baseSettings, onEvent, onMetrics }: CameraMonitorProps) {
+export default function CameraMonitor({ slot, monitoring, playbackEnabled, localStream, localSpeech, baseSettings, onEvent, onMetrics }: CameraMonitorProps) {
   const camera = useMemo(() => {
     const configured = slotCamera(slot);
     return {
@@ -33,6 +35,7 @@ export default function CameraMonitor({ slot, monitoring, playbackEnabled, local
     managedVideo: true,
     playbackEnabled,
     sourceStream: localStream,
+    localSpeech,
   });
   const metricsRef = useRef(onMetrics);
   metricsRef.current = onMetrics;

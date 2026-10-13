@@ -8,7 +8,6 @@ import { clipFolderSupported, getClipFolderLabel, getClipSeconds, pickClipFolder
 import { CAMERA_HISTORY_LIMIT } from '@/lib/cameraRegistry';
 import type { DetectionEvent, DetectionType } from '@/types/multicam';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
-import { useCameraSession } from '@/lib/cameraSessions';
 import ValidationLayer from '@/components/dashboard/ValidationLayer';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
 
@@ -27,7 +26,7 @@ export default function DashboardEvents({
   validationCameraId?: string;
   validationCameraName?: string;
 }) {
-  const { events, alertEvents, archiveActiveAlert, clearEvents } = useCameraRegistry();
+  const { events, alertEvents, clearEvents } = useCameraRegistry();
   const { activeSlots } = useCameraSlots();
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedFilter = searchParams.get('events') || initialFilter || 'all';
@@ -36,7 +35,7 @@ export default function DashboardEvents({
   const [folder, setFolder] = useState(getClipFolderLabel);
   const [seconds, setSeconds] = useState(getClipSeconds);
   const [folderError, setFolderError] = useState('');
-  const [viewingId, setViewingId] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<{ id: string; source: 'alert' | 'history' } | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -56,47 +55,24 @@ export default function DashboardEvents({
     return Array.from(names.entries());
   }, [activeSlots, events, alertEvents, filter]);
   const filtered = useMemo(() => filter === 'all' ? events : events.filter(event => event.cameraId === filter), [events, filter]);
-  const newestStoredAlert = useMemo(
-    () => (alertEvents ?? [])
-      .filter(event => isPriorityCameraAlert(event) && event.alertValidation?.status === 'accepted')
-      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0],
-    [alertEvents],
-  );
-  const activeAlertSession = useCameraSession(
-    newestStoredAlert?.cameraId || validationCameraId || 'slot-1',
-  );
-
-  const activeAlertRejected = useMemo(() => {
-    if (!newestStoredAlert) return false;
-    const liveValidation = activeAlertSession.runtime?.alertValidation;
-    if (liveValidation?.status !== 'rejected') return false;
-    const rejectedAt = Date.parse(liveValidation.evaluatedAt || '');
-    const acceptedAt = Date.parse(newestStoredAlert.timestamp);
-    return Number.isFinite(rejectedAt)
-      && Number.isFinite(acceptedAt)
-      && rejectedAt > acceptedAt;
-  }, [newestStoredAlert, activeAlertSession.runtime?.alertValidation]);
-
-  useEffect(() => {
-    if (!newestStoredAlert || !activeAlertRejected) return;
-    archiveActiveAlert(newestStoredAlert.id);
-    if (viewingId === newestStoredAlert.id) setViewingId(null);
-  }, [newestStoredAlert, activeAlertRejected, archiveActiveAlert, viewingId]);
-
   const alerts = useMemo(
-    () => activeAlertRejected
-      ? []
-      : (alertEvents ?? [])
-          .filter(
-            event => isPriorityCameraAlert(event)
-              && event.alertValidation?.status === 'accepted'
-              && (filter === 'all' || event.cameraId === filter),
-          )
-          .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
-          .slice(0, 1),
-    [alertEvents, filter, activeAlertRejected],
+    () => (alertEvents ?? [])
+      .filter(
+        event => isPriorityCameraAlert(event)
+          && event.alertValidation?.status === 'accepted'
+          && (filter === 'all' || event.cameraId === filter),
+      )
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))
+      .slice(0, 1),
+    [alertEvents, filter],
   );
-  const viewingEvent = viewingId ? [...events, ...(alertEvents || [])].find(event => event.id === viewingId) : undefined;
+  const viewingEvent = viewing
+    ? (viewing.source === 'alert' ? alertEvents ?? [] : events).find(event => event.id === viewing.id)
+    : undefined;
+  const historyValidationCameraId = filter === 'all' ? validationCameraId : filter;
+  const historyValidationCameraName = historyValidationCameraId === validationCameraId && validationCameraName
+    ? validationCameraName
+    : cameraOptions.find(([id]) => id === historyValidationCameraId)?.[1];
 
   const selectFilter = (value: string) => {
     setFilter(value);
@@ -115,7 +91,7 @@ export default function DashboardEvents({
   };
 
   const snapshotButton = (event: DetectionEvent) => event.snapshot ? (
-    <button type="button" onClick={() => setViewingId(event.id)} aria-label={`View snapshot: ${event.label} from ${event.cameraName}`} title="View snapshot" className="group relative shrink-0 overflow-hidden rounded-lg border border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+    <button type="button" onClick={() => setViewing({ id: event.id, source: 'history' })} aria-label={`View snapshot: ${event.label} from ${event.cameraName}`} title="View snapshot" className="group relative shrink-0 overflow-hidden rounded-lg border border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
       <img src={event.snapshot} loading="lazy" alt={`${event.label} snapshot from ${event.cameraName}`} className="h-14 w-20 object-cover transition-opacity group-hover:opacity-80" />
       <Maximize2 aria-hidden="true" className="absolute bottom-1 right-1 h-3.5 w-3.5 rounded bg-black/60 p-0.5 text-white" />
     </button>
@@ -151,12 +127,15 @@ export default function DashboardEvents({
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <section aria-label="Camera alerts" className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <Bell className="h-4 w-4 text-destructive" />
           <h3 className="text-sm font-bold">Camera alerts</h3>
           <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{alerts.length}</span>
         </div>
+        <p className="border-b border-border px-4 py-3 text-xs text-muted-foreground">
+          Alerts require accepted audio and matching camera evidence. The accepted trigger stays here; live validation and recording updates appear in Event history.
+        </p>
         <div className="max-h-64 divide-y divide-border overflow-y-auto">
           {alerts.length === 0 && <p className="p-4 text-sm text-muted-foreground">No camera alerts yet.</p>}
           {alerts.map(alert => {
@@ -165,13 +144,14 @@ export default function DashboardEvents({
               ? validation?.emotion?.trim()
               : '';
             const triggerWord = validation?.keyword?.trim();
+            const cameraEvidence = alert.type === 'fire' ? validation?.emotion?.trim() : '';
 
             return (
               <div key={alert.id} className="space-y-3 p-3">
                 {alert.snapshot ? (
                   <button
                     type="button"
-                    onClick={() => setViewingId(alert.id)}
+                    onClick={() => setViewing({ id: alert.id, source: 'alert' })}
                     aria-label={`View snapshot: ${alert.label} from ${alert.cameraName}`}
                     title="View exact trigger snapshot"
                     className="group relative block w-full overflow-hidden rounded-lg border border-border bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
@@ -198,12 +178,18 @@ export default function DashboardEvents({
                 <div className="min-w-0 space-y-2">
                   <p className="break-words text-sm font-semibold">{typeIcon[alert.type]} {alert.label}</p>
 
-                  {(facialExpression || triggerWord) && (
+                  {(facialExpression || cameraEvidence || triggerWord) && (
                     <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 rounded-lg bg-muted/50 px-3 py-2 text-xs">
                       {facialExpression && (
                         <>
                           <span className="text-muted-foreground">Facial expression:</span>
                           <span className="font-semibold text-foreground">{facialExpression}</span>
+                        </>
+                      )}
+                      {cameraEvidence && (
+                        <>
+                          <span className="text-muted-foreground">Camera evidence:</span>
+                          <span className="font-semibold text-foreground">{cameraEvidence}</span>
                         </>
                       )}
                       {triggerWord && (
@@ -222,20 +208,21 @@ export default function DashboardEvents({
                   <p className="text-xs text-muted-foreground">
                     {(alert.confidence * 100).toFixed(0)}% confidence · {new Date(alert.timestamp).toLocaleString()}
                   </p>
-                  {alert.clipError && <p className="text-xs text-destructive">{alert.clipError}</p>}
                 </div>
               </div>
             );
           })}
         </div>
-      </div>
+      </section>
 
-      {validationCameraId && (
-        <ValidationLayer cameraId={validationCameraId} cameraName={validationCameraName} />
-      )}
-
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <section aria-label="Event history" className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border px-4 py-3"><Film className="h-4 w-4 text-primary" /><h3 className="text-sm font-bold">Event history</h3><span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{filtered.length}</span></div>
+        <p className="px-4 py-3 text-xs text-muted-foreground">Live validation and recording updates for the selected camera appear here.</p>
+        {historyValidationCameraId && (
+          <div className="px-3 pb-3">
+            <ValidationLayer cameraId={historyValidationCameraId} cameraName={historyValidationCameraName} />
+          </div>
+        )}
         <div className="max-h-[420px] divide-y divide-border overflow-y-auto">
           {filtered.length === 0 && <p className="p-4 text-sm text-muted-foreground">No events recorded for {filter === 'all' ? 'your cameras' : 'this camera'}.</p>}
           {filtered.slice(0, CAMERA_HISTORY_LIMIT).map(event => {
@@ -262,8 +249,8 @@ export default function DashboardEvents({
             );
           })}
         </div>
-      </div>
-      <Dialog open={!!viewingEvent?.snapshot} onOpenChange={open => { if (!open) setViewingId(null); }}>
+      </section>
+      <Dialog open={!!viewingEvent?.snapshot} onOpenChange={open => { if (!open) setViewing(null); }}>
         <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{viewingEvent?.label}</DialogTitle>

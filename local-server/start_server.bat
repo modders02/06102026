@@ -12,9 +12,10 @@ if not exist "%VENV_PY%" (
 
 if not exist "%VENV_PY%" goto :fail
 
-"%VENV_PY%" -c "import faster_whisper" >nul 2>&1
+rem The English CCTV pipeline uses NumPy KWS, not faster-whisper.
+"%VENV_PY%" -c "import fastapi, uvicorn, multipart, numpy" >nul 2>&1
 if errorlevel 1 (
-  echo faster-whisper missing - installing requirements...
+  echo Local camera/KWS dependencies missing - installing requirements...
   "%VENV_PY%" -m pip install -r requirements.txt
   if errorlevel 1 goto :fail
 )

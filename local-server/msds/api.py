@@ -18,8 +18,8 @@ from fastapi.responses import Response
 from .binaries import (install_hint, lan_ip, no_window_flags, pip_install_command,
                        resolve_exe)
 from .config import AUDIO_ENGINE, HLS_PORT, RTSP_PORT
-from .manager import (CAMERAS, mediamtx_running, snapshot, start_mediamtx,
-                      stop_all_cameras, sync_cameras)
+from .manager import (CAMERAS, mediamtx_last_error, mediamtx_running,
+                      snapshot, start_mediamtx, stop_all_cameras, sync_cameras)
 from .kws_engine import KWS_ENGINE
 
 app = FastAPI(title="MSDSystem multi-camera bridge")
@@ -158,12 +158,18 @@ def status():
     ffmpeg = resolve_exe("ffmpeg", "FFMPEG_EXE")
     ffprobe = resolve_exe("ffprobe", "FFPROBE_EXE")
     problems = []
+    mediamtx_ok = mediamtx_running()
+    media_error = None if mediamtx_ok else mediamtx_last_error()
+    if media_error:
+        problems.append(media_error)
     if not ffmpeg:
         problems.append(install_hint("ffmpeg", "FFMPEG_EXE"))
     if not ffprobe:
         problems.append(install_hint("ffprobe", "FFPROBE_EXE"))
     return {
-        "mediamtx": mediamtx_running(),
+        "mediamtx": mediamtx_ok,
+        "mediamtx_error": media_error,
+        "available_camera_ids": [c["id"] for c in cams],
         "hls_port": HLS_PORT,
         "lan_ip": host,
         "audio_engine": AUDIO_ENGINE,
@@ -193,7 +199,8 @@ def start_one(camera_id: str):
     cam = find_camera(camera_id)
     if not cam:
         return {"success": False, "error": "unknown camera"}
-    start_mediamtx()
+    if not start_mediamtx():
+        return {"success": False, "error": mediamtx_last_error()}
     try:
         cam.enabled = True
         cam.start()
@@ -218,7 +225,8 @@ def stop_one(camera_id: str):
 
 @app.post("/start-all")
 def start_all():
-    start_mediamtx()
+    if not start_mediamtx():
+        return {"success": False, "started": 0, "error": mediamtx_last_error()}
     cams = [c for c in snapshot() if c.enabled]
     for cam in cams:
         try:
@@ -277,18 +285,37 @@ def kws_evaluate():
     return KWS_ENGINE.evaluate_templates()
 
 
+@app.post("/kws/reload-local")
+def kws_reload_local(request: Request):
+    """Reload computer-microphone feature templates without restarting cameras.
+
+    This endpoint cannot train or upload speech. Only the local, non-browser
+    enrollment CLI may request a disk reload, preventing remote web origins
+    from causing a costly live-reload while a safety detector is operating.
+    """
+    source = request.client.host if request.client else ""
+    if source not in ("127.0.0.1", "::1") or request.headers.get("origin"):
+        raise HTTPException(status_code=403, detail="Local CLI only.")
+    with KWS_ENGINE.lock:
+        KWS_ENGINE.load()
+        status = KWS_ENGINE.status()
+    return {"success": True, **status}
+
+
 @app.post("/kws/auto-train")
 async def kws_auto_train(request: Request):
-    """Build English-only KWS templates from the labelled local WAV dataset."""
-    body = await request.json() if request.headers.get("content-length") not in (None, "0") else {}
-    default_dir = Path(__file__).resolve().parents[1] / "kws-training-english"
-    dataset_dir = Path(os.environ.get("MSD_KWS_TRAINING_DIR", str(default_dir)))
-    requested = body.get("dataset_dir") if isinstance(body, dict) else None
-    if requested:
-        requested_path = Path(str(requested)).expanduser()
-        dataset_dir = requested_path if requested_path.is_absolute() else default_dir.parent / requested_path
-    reset = bool(body.get("reset", True)) if isinstance(body, dict) else True
-    return KWS_ENGINE.train_from_wav_dataset(dataset_dir, reset=reset)
+    """Prevent unsafe in-place retraining that overwrites the active templates.
+
+    Use train_english_kws.py (preview/backup/apply) with separate held-out
+    recordings instead; a remote HTTP request must not reset a safety model.
+    """
+    raise HTTPException(
+        status_code=409,
+        detail=("Direct in-place KWS training is disabled to protect the existing "
+                "templates. Run local-server/train_english_kws.py --backup-only, "
+                "collect real training and held-out WAV samples, preview with "
+                "train_english_kws.py, then explicitly --apply after validation."),
+    )
 
 
 @app.post("/cameras/{camera_id}/kws-enroll/{keyword}")
@@ -296,9 +323,26 @@ def kws_enroll(camera_id: str, keyword: str):
     """Arm one camera to use the next spoken segment as a keyword template."""
     cam = find_camera(camera_id)
     if not cam:
-        return {"success": False, "error": "unknown camera"}
-    if not cam.enabled:
-        return {"success": False, "error": "camera is disconnected"}
+        return {
+            "success": False,
+            "error": (
+                f"Camera '{camera_id}' is not registered. Connect the CCTV in "
+                "MSDS first, which calls POST /cameras/sync before enrollment."
+            ),
+            "available_camera_ids": [c.id for c in snapshot()],
+        }
+    if not mediamtx_running():
+        return {"success": False, "error": mediamtx_last_error()}
+    if not cam.enabled or not cam.running():
+        return {"success": False, "error": "Camera video is offline. Connect the CCTV in MSDS first."}
+    if cam.has_audio_track is False:
+        return {"success": False, "error": "CCTV stream has no audio track. Enable its microphone."}
+    if not cam.audio_thread or not cam.audio_thread.is_alive() or not cam.audio_connected:
+        return {
+            "success": False,
+            "error": "CCTV microphone is not receiving PCM audio yet. "
+                     "Wait for audio.thread_running and audio.connected in GET /status.",
+        }
     try:
         status = cam.request_kws_enrollment(keyword)
     except ValueError as exc:
