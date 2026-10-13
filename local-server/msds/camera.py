@@ -532,6 +532,24 @@ class Camera:
                     f"processing={processing_ms:.1f}ms",
                     flush=True,
                 )
+                # Explicit experimental policy: HELP >= 90% is accepted at
+                # KWS recognition stage without blocking on Whisper. Preserve
+                # original diagnosis, never accept if UNKNOWN outranks HELP,
+                # and leave emergency alert authorization to facial/visual
+                # fusion (not a single similarity score).
+                if kws_verifier.eligible_help_fast_accept(decision):
+                    self.kws_last_decision = "accepted_help_90"
+                    self.kws_verification_state = "skipped_help_90"
+                    self.kws_verification_target = ""
+                    self.kws_help_rescue_source = ""
+                    self.kws_verification_transcript = ""
+                    self.kws_verification_raw_transcript = ""
+                    self.kws_verification_no_speech_prob = None
+                    self.kws_verification_avg_logprob = None
+                    self.kws_verification_error = ""
+                    self._publish_kws_match(decision, processing_ms)
+                    continue
+
                 rescue = kws_verifier.help_rescue_target(decision)
                 self.kws_help_rescue_source = rescue.source if rescue else ""
                 if decision.accepted or rescue:
@@ -1307,6 +1325,8 @@ class Camera:
                 "last_decision": self.kws_last_decision or None,
                 "original_kws_decision": self.kws_original_decision or None,
                 "help_rescue_enabled": kws_verifier.help_rescue_enabled(),
+                "help_90_fast_accept_enabled": kws_verifier.help_fast_accept_enabled(),
+                "help_90_fast_accept_threshold": kws_verifier.HELP_FAST_ACCEPT_THRESHOLD,
                 "verification_enabled": kws_verifier.enabled(),
                 "verification_model": kws_verifier.model_name() if kws_verifier.enabled() else None,
                 "short_help_asr_enabled": kws_verifier.short_help_review_enabled(),
