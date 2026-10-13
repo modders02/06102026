@@ -129,6 +129,45 @@ def eligible_help_rescue(decision) -> bool:
     return help_rescue_target(decision) is not None
 
 
+def eligible_fire_help_disagreement(decision) -> bool:
+    """Strict, opt-in cross-keyword review for accepted FIRE with HELP second.
+
+    This does *not* override a verified FIRE: the existing ASR first checks
+    FIRE normally. Only a FIRE/HELP ASR disagreement with an isolated HELP
+    transcript can be reinterpreted, using independent HELP KWS evidence.
+    All values are experimental, based on controlled diagnostics, and require
+    negative-speech and live CCTV validation before dispatch.
+    """
+    if not help_rescue_enabled() or not decision:
+        return False
+    if not decision.accepted or decision.keyword != "fire":
+        return False
+    if decision.reason != "accepted" or decision.runner_up_keyword != "help":
+        return False
+
+    scores = getattr(decision, "keyword_scores", {}) or {}
+    ratios = getattr(decision, "keyword_duration_ratios", {}) or {}
+    if "help" not in scores or "help" not in ratios:
+        return False
+    try:
+        help_score = float(scores["help"])
+        help_ratio = float(ratios["help"])
+        fire_score = float(decision.confidence)
+        unknown_score = float(decision.negative_confidence)
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+    if not (0.80 <= help_score <= fire_score <= 0.90):
+        return False
+    if not (0 <= fire_score - help_score <= 0.060):
+        return False
+    if not (0.75 <= help_ratio <= 1.30):
+        return False
+    if not (-0.015 <= help_score - unknown_score <= 0.10):
+        return False
+    return True
+
+
 def isolated_help(transcript: str) -> bool:
     """Rescue requires ASR to hear only HELP, not incidental mentions in speech."""
     return re.findall(r"[a-z0-9]+", transcript.lower()) == ["help"]
