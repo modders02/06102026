@@ -55,31 +55,78 @@ def help_rescue_enabled() -> bool:
     ).strip().lower() in ("1", "true", "yes", "on")
 
 
-def eligible_help_rescue(decision) -> bool:
-    """Only very strong, narrowly borderline HELP candidates reach independent ASR.
+@dataclass(frozen=True)
+class HelpRescueTarget:
+    """Constrained ASR review target, not a KWS acceptance decision."""
 
-    The normal KWS safety thresholds remain unchanged. Never bypass low-confidence,
-    invalid-duration, untrained-UNKNOWN, or non-HELP rejections. This is a
-    controlled experiment, not an emergency-dispatch guarantee.
+    keyword: str
+    confidence: float
+    source: str
+
+
+def help_rescue_target(decision) -> HelpRescueTarget | None:
+    """Offer a second opinion for strongly evidenced HELP/AMBULANCE confusion.
+
+    Global MATCH_THRESHOLD, OPEN_SET_MARGIN and per-class margins remain
+    untouched. This opt-in path cannot create an event without independent ASR
+    returning the isolated word HELP. The frontend still requires facial
+    distress evidence before treating HELP as a multimodal distress alert.
+
+    KWS may rank AMBULANCE first for actual HELP (measured in template LOO
+    audit), so a strict top-1 HELP requirement misses that case entirely.
+    We allow a very close second-place HELP ONLY when the first-place
+    AMBULANCE candidate was itself rejected by KWS.
     """
     if not help_rescue_enabled() or not decision or decision.accepted:
-        return False
-    if decision.keyword != "help" or decision.reason not in (
-        "too_close_to_unknown", "insufficient_margin"
-    ):
-        return False
-    # Restrict to the observed HELP-versus-AMBULANCE confusion.
-    if decision.runner_up_keyword != "ambulance":
-        return False
-    if decision.confidence < 0.90:
-        return False
-    if not (0.75 <= decision.duration_ratio <= 1.30):
-        return False
-    if not (0.015 <= decision.class_margin < decision.required_margin):
-        return False
-    if decision.confidence - decision.negative_confidence < 0.020:
-        return False
-    return True
+        return None
+
+    reason = decision.reason
+    if decision.keyword == "help":
+        if reason not in ("too_close_to_unknown", "insufficient_margin"):
+            return None
+        if decision.runner_up_keyword != "ambulance":
+            return None
+        if decision.confidence < 0.88:
+            return None
+        if not 0.75 <= decision.duration_ratio <= 1.30:
+            return None
+        # Confirm there is some evidence of HELP over both UNKNOWN and the
+        # next-closest positive class; Whisper is not a substitute for KWS.
+        if decision.class_margin < 0.012:
+            return None
+        if decision.confidence - decision.negative_confidence < 0.015:
+            return None
+        return HelpRescueTarget("help", decision.confidence, "primary")
+
+    if decision.keyword == "ambulance" and decision.runner_up_keyword == "help":
+        if reason not in (
+            "too_close_to_unknown", "insufficient_margin", "duration_mismatch"
+        ):
+            return None
+        scores = getattr(decision, "keyword_scores", {}) or {}
+        ratios = getattr(decision, "keyword_duration_ratios", {}) or {}
+        help_score = float(scores.get("help", decision.runner_up_confidence))
+        help_ratio = float(ratios.get("help", 0.0))
+        if help_score < 0.90:
+            return None
+        # HELP must be almost tied with the leading AMBULANCE class.
+        if decision.confidence - help_score > 0.025:
+            return None
+        # Unlike AMBULANCE, HELP must have a normal target duration.
+        if not 0.75 <= help_ratio <= 1.30:
+            return None
+        # Preserve a tight boundary: UNKNOWN may narrowly win, but a large
+        # UNKNOWN lead is not eligible even if the ASR guesses HELP.
+        if help_score - decision.negative_confidence < -0.015:
+            return None
+        return HelpRescueTarget("help", help_score, "runner_up")
+
+    return None
+
+
+def eligible_help_rescue(decision) -> bool:
+    """Compatibility/diagnostic boolean used by the original HELP tests."""
+    return help_rescue_target(decision) is not None
 
 
 def isolated_help(transcript: str) -> bool:
