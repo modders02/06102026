@@ -4,6 +4,7 @@ Run from the training/facial_distress directory with a prepared .venv:
   python run_fer2013.py --accept-kaggle-terms --train
   python run_fer2013.py --archive PATH --accept-kaggle-terms --train
   python run_fer2013.py --accept-kaggle-terms --upload --train
+  python run_fer2013.py --image-archive D:/Downloads/archive.zip --accept-kaggle-terms --upload --train
 
 The script does not run in the cloud or schedule jobs. It never integrates
 the candidate into live MSDS without independent review.
@@ -27,8 +28,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--accept-kaggle-terms", action="store_true", required=True,
                         help="Review/accept original Kaggle competition rules.")
-    parser.add_argument("--archive", type=Path,
-                        help="Use an already downloaded official fer2013.tar.gz/zip")
+    source_group = parser.add_mutually_exclusive_group()
+    source_group.add_argument("--archive", type=Path,
+                              help="Use the original Kaggle fer2013.tar.gz/ZIP containing a CSV")
+    source_group.add_argument("--image-archive", type=Path,
+                              help="Use an authorized 35,887-image FER2013 train/test folder ZIP")
     parser.add_argument("--upload", action="store_true",
                         help="Upload private compressed FER2013 shards to Supabase using server-side key")
     parser.add_argument("--train", action="store_true",
@@ -40,27 +44,40 @@ def main():
 
     python = sys.executable
     local_csv = ROOT / "data/fer2013.csv"
-    images = ROOT / "data/expressions"
-    if not local_csv.is_file():
-        command = [python, str(ROOT/"download_fer2013.py"),
-                   "--output", str(local_csv), "--accept-kaggle-terms"]
-        if args.archive:
-            command += ["--archive", str(args.archive.resolve())]
-        execute(command)
+    if args.image_archive:
+        archive = args.image_archive.resolve()
+        if not archive.is_file():
+            parser.error(f"FER2013 image archive not found: {archive}")
+        images = ROOT / "data/fer2013_cleaned"
+        cleaned_zip = ROOT / "data/fer2013_cleaned.zip"
+        execute([python, str(ROOT/"import_folder_fer2013.py"),
+                 "--archive", str(archive),
+                 "--output", str(images),
+                 "--cleaned-zip", str(cleaned_zip), "--rights-checked"])
+        if args.upload:
+            execute([python, str(ROOT/"sync_fer2013_image_zip.py"),
+                     "upload", "--zip", str(cleaned_zip),
+                     "--prefix", args.prefix, "--confirm-authorized-images"])
     else:
-        # Prevent an old, partial CSV silently entering a new training run.
-        from download_fer2013 import validate_csv
-        validate_csv(local_csv)
-        print(f"Verified existing local {local_csv}",flush=True)
+        images = ROOT / "data/expressions"
+        if not local_csv.is_file():
+            command = [python, str(ROOT/"download_fer2013.py"),
+                       "--output", str(local_csv), "--accept-kaggle-terms"]
+            if args.archive:
+                command += ["--archive", str(args.archive.resolve())]
+            execute(command)
+        else:
+            # Prevent an old, partial CSV silently entering a new training run.
+            from download_fer2013 import validate_csv
+            validate_csv(local_csv)
+            print(f"Verified existing local {local_csv}", flush=True)
 
-    # Always regenerate the original FER2013 splits from the verified CSV.
-    execute([python,str(ROOT/"import_fer2013.py"), "--csv",str(local_csv),
-             "--output",str(images),"--rights-checked"])
-
-    if args.upload:
-        execute([python,str(ROOT/"sync_fer2013_bundle.py"),"upload",
-                 "--csv",str(local_csv),"--prefix",args.prefix,
-                 "--confirm-kaggle-terms"])
+        execute([python, str(ROOT/"import_fer2013.py"), "--csv", str(local_csv),
+                 "--output", str(images), "--rights-checked"])
+        if args.upload:
+            execute([python, str(ROOT/"sync_fer2013_bundle.py"), "upload",
+                     "--csv", str(local_csv), "--prefix", args.prefix,
+                     "--confirm-kaggle-terms"])
 
     if args.train:
         execute([python,str(ROOT/"train_expressions.py"),
