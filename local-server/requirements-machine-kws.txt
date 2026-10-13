@@ -1,0 +1,3 @@
+# Optional local COMPUTER microphone enrollment only; CCTV camera service does not require this.
+# Windows sounddevice wheels bundle PortAudio; supports 16 kHz mono PCM input.
+sounddevice>=0.5.2
