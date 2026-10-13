@@ -168,7 +168,7 @@ def status():
         "hls_port": HLS_PORT,
         "lan_ip": host,
         "audio_engine": AUDIO_ENGINE,
-        "custom_kws": HOUSEHOLD_KWS.status(),
+        "custom_kws": HOUSEHOLD_KWS.current_engine().status(),
         "whisper": False,
         "whisper_state": "disabled",
         "whisper_model": "",
@@ -267,8 +267,9 @@ def audio_events(camera_id: str, since: Optional[str] = None):
 
 
 @app.get("/kws/status")
-def kws_status():
-    """Status of the active English keyword profile and enrolled templates."""
+def kws_status(request: Request):
+    """Local-only profile manifest and enrolled-template diagnostic."""
+    _require_local_training(request)
     return {"success": True, **HOUSEHOLD_KWS.status()}
 
 
@@ -277,6 +278,9 @@ def _require_local_training(request: Request):
     # them to other computers through the bridge's 0.0.0.0 listening socket.
     if not request.client or request.client.host not in ("127.0.0.1", "::1", "testclient"):
         raise HTTPException(status_code=403, detail="Training is available only on the local MSDS machine.")
+    origin = request.headers.get("origin", "")
+    if origin and origin not in ("http://localhost:8080", "http://127.0.0.1:8080", "msds://app"):
+        raise HTTPException(status_code=403, detail="Untrusted origin for household voice training.")
 
 
 @app.post("/kws/household/activate")
