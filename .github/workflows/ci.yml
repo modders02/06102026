@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feature/strict-help-facial-alert, feature/kws-asr-verification-trial-20261013, feature/msds-safe-service-autorecovery-20261014]
+    branches: [main, feature/strict-help-facial-alert, feature/kws-asr-verification-trial-20261013, feature/msds-safe-service-autorecovery-20261014, feature/kws-help-second-chance-20261014]
   pull_request:
 
 jobs:
