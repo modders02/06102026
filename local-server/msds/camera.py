@@ -938,7 +938,7 @@ class Camera:
                         matches.append(match)
                 best = max(matches, key=lambda item: item.confidence) if matches else None
                 report["custom_kws"] = {
-                    **HOUSEHOLD_KWS.status(),
+                    **HOUSEHOLD_KWS.current_engine().status(),
                     "segments": len(segments),
                     "match": ({
                         "keyword": best.keyword,
