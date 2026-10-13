@@ -1,7 +1,7 @@
 """Optional, fail-closed second-stage ASR verification for CCTV keyword spotting.
 
 This module is lightweight to import. Faster-Whisper and its model are only
-loaded when MSDS_KWS_VERIFY_ASR=1 and an accepted KWS candidate arrives.
+loaded when MSDS_KWS_VERIFY_ASR=1 and an eligible KWS candidate arrives.
 """
 from __future__ import annotations
 
@@ -46,6 +46,45 @@ def _get_model():
         _MODEL = WhisperModel(chosen, device="cpu", compute_type="int8")
         _MODEL_NAME = chosen
     return _MODEL
+
+
+def help_rescue_enabled() -> bool:
+    """Independent opt-in; normal KWS and ASR behavior is unchanged by default."""
+    return enabled() and os.environ.get(
+        "MSDS_KWS_HELP_RESCUE", "0"
+    ).strip().lower() in ("1", "true", "yes", "on")
+
+
+def eligible_help_rescue(decision) -> bool:
+    """Only very strong, narrowly borderline HELP candidates reach independent ASR.
+
+    The normal KWS safety thresholds remain unchanged. Never bypass low-confidence,
+    invalid-duration, untrained-UNKNOWN, or non-HELP rejections. This is a
+    controlled experiment, not an emergency-dispatch guarantee.
+    """
+    if not help_rescue_enabled() or not decision or decision.accepted:
+        return False
+    if decision.keyword != "help" or decision.reason not in (
+        "too_close_to_unknown", "insufficient_margin"
+    ):
+        return False
+    # Restrict to the observed HELP-versus-AMBULANCE confusion.
+    if decision.runner_up_keyword != "ambulance":
+        return False
+    if decision.confidence < 0.90:
+        return False
+    if not (0.75 <= decision.duration_ratio <= 1.30):
+        return False
+    if not (0.015 <= decision.class_margin < decision.required_margin):
+        return False
+    if decision.confidence - decision.negative_confidence < 0.020:
+        return False
+    return True
+
+
+def isolated_help(transcript: str) -> bool:
+    """Rescue requires ASR to hear only HELP, not incidental mentions in speech."""
+    return re.findall(r"[a-z0-9]+", transcript.lower()) == ["help"]
 
 
 def _word_match(transcript: str, keyword: str) -> bool:
