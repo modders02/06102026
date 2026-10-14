@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Camera, Maximize2, Mic, MicOff, RefreshCw, VideoOff, Volume2, VolumeX } from 'lucide-react';
 import { useCctvTalk } from '@/hooks/useCctvTalk';
 import { useCameraSession } from '@/lib/cameraSessions';
+import ValidationLayer from '@/components/dashboard/ValidationLayer';
 import type { CameraConfig, MultiCamSettings } from '@/types/multicam';
 
 interface Props {
@@ -224,6 +225,9 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
           </div>
         </div>
       )}
+      <div className="border-t border-border px-4 py-3">
+        <ValidationLayer cameraId={camera.id} cameraName={camera.name} />
+      </div>
       <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5"><Camera className="h-3.5 w-3.5" />{camera.aiEnabled ? 'AI monitoring on' : 'AI monitoring off'}</span>
         {runtime?.status === 'online' && <span className="font-mono">{runtime.transport === 'webrtc' || runtime.transport === 'local' ? 'Realtime · ' : ''}{runtime.fps} FPS</span>}

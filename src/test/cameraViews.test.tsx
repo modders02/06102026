@@ -181,6 +181,8 @@ describe('shared live camera views', () => {
     expect(within(diagnostics).getByText(/fire \(89\.8%\)/)).toBeInTheDocument();
     expect(within(diagnostics).getByText('0.0354 / 0.0341')).toBeInTheDocument();
     expect(within(diagnostics).getByText('emergency', { selector: 'span.font-mono' })).toBeInTheDocument();
+    const validation = screen.getByRole('region', { name: 'Validation layer' });
+    expect(diagnostics.compareDocumentPosition(validation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('shows accepted_help_90 as a green ACCEPTED voice status without exposing the internal code', () => {
@@ -386,7 +388,7 @@ describe('camera alerts and event history', () => {
       .toHaveTextContent('1');
   });
 
-  it.each(['rejected', 'pending'] as const)('keeps the accepted trigger unchanged while newer %s validation updates Event history', status => {
+  it.each(['rejected', 'pending'] as const)('keeps the accepted trigger unchanged while newer %s validation updates below camera audio', status => {
     render(<MemoryRouter initialEntries={['/cameras?camera=slot-2']}><Monitoring /></MemoryRouter>);
     const alerts = screen.getByRole('region', { name: 'Camera alerts' });
     const acceptedTrigger = alerts.innerHTML;
@@ -414,8 +416,8 @@ describe('camera alerts and event history', () => {
     expect(within(alerts).getByRole('img', { name: 'Kitchen fire snapshot from Camera 2' }))
       .toHaveAttribute('src', 'data:image/jpeg;base64,test');
     expect(alerts).toHaveTextContent(new Date('2026-10-02T02:41:23Z').toLocaleString());
-    const history = screen.getByRole('region', { name: 'Event history' });
-    const validation = within(history).getByRole('region', { name: 'Validation layer' });
+    const validation = within(screen.getByRole('region', { name: 'Live camera feeds' }))
+      .getByRole('region', { name: 'Validation layer' });
     expect(validation).toHaveTextContent(status.toUpperCase());
     expect(validation).toHaveTextContent('Current camera expression is Happy.');
     expect(mocks.archiveActiveAlert).not.toHaveBeenCalled();
@@ -544,7 +546,7 @@ describe('camera alerts and event history', () => {
     expect(screen.queryByText(/Downloads/)).not.toBeInTheDocument();
   });
 
-  it('shows live validation inside Event history for its filter and uses the focused camera for all history', () => {
+  it('keeps live validation with each camera independently of the event history filter', () => {
     publishCameraSession('slot-1', {
       runtime: {
         ...onlineRuntime,
@@ -567,18 +569,26 @@ describe('camera alerts and event history', () => {
     });
     render(<MemoryRouter initialEntries={['/cameras?camera=slot-1&events=slot-2']}><Monitoring /></MemoryRouter>);
 
-    const history = screen.getByRole('region', { name: 'Event history' });
-    const validation = within(history).getByRole('region', { name: 'Validation layer' });
-    expect(validation).toHaveTextContent('Camera 2');
-    expect(validation).toHaveTextContent('Camera two waiting.');
-    expect(validation).not.toHaveTextContent('Camera one rejected.');
-    expect(within(screen.getByRole('region', { name: 'Camera alerts' })).queryByRole('region', { name: 'Validation layer' }))
+    const feeds = screen.getByRole('region', { name: 'Live camera feeds' });
+    const validation = within(feeds).getByRole('region', { name: 'Validation layer' });
+    expect(validation).toHaveTextContent('Camera 1');
+    expect(validation).toHaveTextContent('Camera one rejected.');
+    expect(validation).not.toHaveTextContent('Camera two waiting.');
+    expect(within(screen.getByRole('complementary', { name: 'Camera controls and activity' })).queryByRole('region', { name: 'Validation layer' }))
       .not.toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Filter events by camera' }), { target: { value: 'all' } });
     expect(validation).toHaveTextContent('Camera 1');
     expect(validation).toHaveTextContent('Camera one rejected.');
     expect(validation).not.toHaveTextContent('Camera two waiting.');
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Choose live camera' }), { target: { value: 'slot-2' } });
+    expect(within(feeds).getByRole('region', { name: 'Validation layer' })).toHaveTextContent('Camera two waiting.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'All live cameras' }));
+    const cameraFeeds = within(feeds).getAllByRole('article');
+    expect(within(cameraFeeds[0]).getByRole('region', { name: 'Validation layer' })).toHaveTextContent('Camera one rejected.');
+    expect(within(cameraFeeds[1]).getByRole('region', { name: 'Validation layer' })).toHaveTextContent('Camera two waiting.');
   });
 
   it('confirms folder selection without displaying the destination name', async () => {

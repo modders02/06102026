@@ -8,7 +8,6 @@ import { clipFolderSupported, getClipFolderLabel, getClipSeconds, pickClipFolder
 import { CAMERA_HISTORY_LIMIT } from '@/lib/cameraRegistry';
 import type { DetectionEvent, DetectionType } from '@/types/multicam';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
-import ValidationLayer from '@/components/dashboard/ValidationLayer';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
 
 const typeIcon: Record<DetectionType, string> = {
@@ -17,15 +16,7 @@ const typeIcon: Record<DetectionType, string> = {
 };
 
 /** Camera alerts, past detections, and emergency clips shown beside live feeds. */
-export default function DashboardEvents({
-  initialFilter,
-  validationCameraId,
-  validationCameraName,
-}: {
-  initialFilter?: string;
-  validationCameraId?: string;
-  validationCameraName?: string;
-}) {
+export default function DashboardEvents({ initialFilter }: { initialFilter?: string }) {
   const { events, alertEvents, clearEvents } = useCameraRegistry();
   const { activeSlots } = useCameraSlots();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -69,10 +60,6 @@ export default function DashboardEvents({
   const viewingEvent = viewing
     ? (viewing.source === 'alert' ? alertEvents ?? [] : events).find(event => event.id === viewing.id)
     : undefined;
-  const historyValidationCameraId = filter === 'all' ? validationCameraId : filter;
-  const historyValidationCameraName = historyValidationCameraId === validationCameraId && validationCameraName
-    ? validationCameraName
-    : cameraOptions.find(([id]) => id === historyValidationCameraId)?.[1];
 
   const selectFilter = (value: string) => {
     setFilter(value);
@@ -134,9 +121,9 @@ export default function DashboardEvents({
           <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{alerts.length}</span>
         </div>
         <p className="border-b border-border px-4 py-3 text-xs text-muted-foreground">
-          Alerts require accepted audio and matching camera evidence. The accepted trigger stays here; live validation and recording updates appear in Event history.
+          Alerts require accepted audio and matching camera evidence. The accepted trigger stays here; recording updates appear in Event history.
         </p>
-        <div className="max-h-64 divide-y divide-border overflow-y-auto">
+        <div className="divide-y divide-border">
           {alerts.length === 0 && <p className="p-4 text-sm text-muted-foreground">No camera alerts yet.</p>}
           {alerts.map(alert => {
             const validation = alert.alertValidation;
@@ -217,13 +204,8 @@ export default function DashboardEvents({
 
       <section aria-label="Event history" className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border px-4 py-3"><Film className="h-4 w-4 text-primary" /><h3 className="text-sm font-bold">Event history</h3><span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{filtered.length}</span></div>
-        <p className="px-4 py-3 text-xs text-muted-foreground">Live validation and recording updates for the selected camera appear here.</p>
-        {historyValidationCameraId && (
-          <div className="px-3 pb-3">
-            <ValidationLayer cameraId={historyValidationCameraId} cameraName={historyValidationCameraName} />
-          </div>
-        )}
-        <div className="max-h-[420px] divide-y divide-border overflow-y-auto">
+        <p className="px-4 py-3 text-xs text-muted-foreground">Past detections and recording updates for the selected camera appear here.</p>
+        <div className="divide-y divide-border">
           {filtered.length === 0 && <p className="p-4 text-sm text-muted-foreground">No events recorded for {filter === 'all' ? 'your cameras' : 'this camera'}.</p>}
           {filtered.slice(0, CAMERA_HISTORY_LIMIT).map(event => {
             const emotion = event.type === 'emotion' ? historyEmotionMeta(event.label) : null;
