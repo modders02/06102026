@@ -111,21 +111,44 @@ class KeywordDecision:
 
 
 class StreamingSpeechSegmenter:
-    """Small energy VAD that emits complete speech segments from PCM blocks."""
+    """Adaptive, frame-based VAD for noisy CCTV microphone audio.
+
+    The original per-4096-byte RMS gate treated a steady fan/background track
+    as speech and repeatedly passed 2.5-second segments to KWS. The wake-word
+    templates are typically much shorter, so those segments were rejected as
+    duration mismatches (or could have become false positives if length gates
+    were weakened). Keep the normal trained KWS and UNKNOWN veto unchanged.
+    """
+
+    FRAME_SAMPLES = SAMPLE_RATE // 50  # 20 ms, independent of FFmpeg chunking
+    FRAME_BYTES = FRAME_SAMPLES * SAMPLE_WIDTH
+    START_CONFIRM_FRAMES = 3  # 60 ms of activity before accepting speech onset
+    BASELINE_FRAMES = 10  # calibrate first 200 ms of incoming audio
+    NOISE_HISTORY_FRAMES = 100  # last 2 seconds at 20-ms resolution
 
     def __init__(self) -> None:
+        self.blocks_seen = 0
+        self.max_length_drops = 0
         self.reset()
 
-    def reset(self) -> None:
+    def _reset_utterance(self) -> None:
+        """Clear current word but retain the noise estimate across words."""
         self.active = False
         self.speech = bytearray()
         self.pre_roll = bytearray()
         self.silence_samples = 0
         self.total_samples = 0
-        if not hasattr(self, "blocks_seen"):
-            self.blocks_seen = 0
-        if not hasattr(self, "last_rms"):
-            self.last_rms = 0.0
+        self._start_frames = 0
+
+    def reset(self) -> None:
+        """Called on a camera restart/source switch, not after every word."""
+        self._tail = bytearray()
+        self._rms_history: List[float] = []
+        self.noise_floor_rms = 0.0
+        self.last_rms = 0.0
+        self.last_start_rms = START_RMS
+        self.last_end_rms = CONTINUE_RMS
+        self._reset_utterance()
 
     @staticmethod
     def _rms(pcm: bytes) -> float:
@@ -140,49 +163,76 @@ class StreamingSpeechSegmenter:
     def feed(self, pcm: bytes) -> List[bytes]:
         if not pcm:
             return []
-        usable = pcm[:len(pcm) - (len(pcm) % 2)]
+        usable = pcm[:len(pcm) - (len(pcm) % SAMPLE_WIDTH)]
         if not usable:
             return []
-
-        rms = self._rms(usable)
-        self.last_rms = rms
         self.blocks_seen += 1
-        samples = len(usable) // SAMPLE_WIDTH
+        self._tail.extend(usable)
         emitted: List[bytes] = []
+        preroll_bytes = int(PRE_ROLL_SECONDS * SAMPLE_RATE) * SAMPLE_WIDTH
 
-        if not self.active:
-            max_pre_roll = int(PRE_ROLL_SECONDS * SAMPLE_RATE) * SAMPLE_WIDTH
-            self.pre_roll.extend(usable)
-            if len(self.pre_roll) > max_pre_roll:
-                del self.pre_roll[:-max_pre_roll]
-            if rms >= START_RMS:
-                self.active = True
-                self.speech = bytearray(self.pre_roll)
-                self.pre_roll.clear()
+        while len(self._tail) >= self.FRAME_BYTES:
+            frame = bytes(self._tail[:self.FRAME_BYTES])
+            del self._tail[:self.FRAME_BYTES]
+            rms = self._rms(frame)
+            self.last_rms = rms
+
+            self._rms_history.append(rms)
+            if len(self._rms_history) > self.NOISE_HISTORY_FRAMES:
+                del self._rms_history[0]
+            # The quieter quarter of the recent signal estimates ambient
+            # sound. This adapts even if a sudden steady noise was initially
+            # classified as speech, without learning short wake words as noise.
+            self.noise_floor_rms = float(np.percentile(self._rms_history, 25))
+
+            self.last_start_rms = max(START_RMS, self.noise_floor_rms * 1.55 + 0.004)
+            self.last_end_rms = max(CONTINUE_RMS, self.noise_floor_rms * 1.20 + 0.002)
+
+            if not self.active:
+                self.pre_roll.extend(frame)
+                if len(self.pre_roll) > preroll_bytes:
+                    del self.pre_roll[:-preroll_bytes]
+                if len(self._rms_history) < self.BASELINE_FRAMES:
+                    # At stream start a noisy room should establish an
+                    # ambient level before being mistaken for a keyword.
+                    self._start_frames = 0
+                    continue
+                if rms >= self.last_start_rms:
+                    self._start_frames += 1
+                else:
+                    self._start_frames = 0
+                if self._start_frames >= self.START_CONFIRM_FRAMES:
+                    self.active = True
+                    self.speech = bytearray(self.pre_roll)
+                    self.pre_roll.clear()
+                    self.total_samples = len(self.speech) // SAMPLE_WIDTH
+                    self.silence_samples = 0
+                continue
+
+            self.speech.extend(frame)
+            self.total_samples += self.FRAME_SAMPLES
+            if rms >= self.last_end_rms:
                 self.silence_samples = 0
-                self.total_samples = len(self.speech) // SAMPLE_WIDTH
-            return emitted
+            else:
+                self.silence_samples += self.FRAME_SAMPLES
 
-        self.speech.extend(usable)
-        self.total_samples += samples
-        if rms >= CONTINUE_RMS:
-            self.silence_samples = 0
-        else:
-            self.silence_samples += samples
-
-        enough_speech = self.total_samples >= int(MIN_SPEECH_SECONDS * SAMPLE_RATE)
-        ended = self.silence_samples >= int(END_SILENCE_SECONDS * SAMPLE_RATE)
-        too_long = self.total_samples >= int(MAX_SPEECH_SECONDS * SAMPLE_RATE)
-
-        if enough_speech and (ended or too_long):
-            trailing = self.silence_samples * SAMPLE_WIDTH if ended else 0
-            segment = bytes(self.speech[:-trailing] if trailing and trailing < len(self.speech) else self.speech)
-            if len(segment) >= int(MIN_SPEECH_SECONDS * SAMPLE_RATE) * SAMPLE_WIDTH:
-                emitted.append(segment)
-            self.reset()
+            enough_speech = self.total_samples >= int(MIN_SPEECH_SECONDS * SAMPLE_RATE)
+            ended = self.silence_samples >= int(END_SILENCE_SECONDS * SAMPLE_RATE)
+            too_long = self.total_samples >= int(MAX_SPEECH_SECONDS * SAMPLE_RATE)
+            if too_long and not ended:
+                # Do not classify forced timeouts as wake words. They usually
+                # represent noise, music or a long conversation; preserving the
+                # duration gate is safer than accepting the closest keyword.
+                self.max_length_drops += 1
+                self._reset_utterance()
+            elif enough_speech and ended:
+                trailing = self.silence_samples * SAMPLE_WIDTH
+                segment = bytes(self.speech[:-trailing] if trailing < len(self.speech) else b"")
+                if len(segment) >= int(MIN_SPEECH_SECONDS * SAMPLE_RATE) * SAMPLE_WIDTH:
+                    emitted.append(segment)
+                self._reset_utterance()
 
         return emitted
-
 
 class CustomKeywordEngine:
     """Thread-safe log-Mel + DTW template keyword recognizer."""
