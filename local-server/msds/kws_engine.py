@@ -180,10 +180,12 @@ class StreamingSpeechSegmenter:
             self._rms_history.append(rms)
             if len(self._rms_history) > self.NOISE_HISTORY_FRAMES:
                 del self._rms_history[0]
-            # The quieter quarter of the recent signal estimates ambient
-            # sound. This adapts even if a sudden steady noise was initially
-            # classified as speech, without learning short wake words as noise.
-            self.noise_floor_rms = float(np.percentile(self._rms_history, 25))
+            # Update the background estimate only while idle: a sustained
+            # voiced syllable must not gradually redefine itself as "noise".
+            # If an entire 2.5s window times out, we recalibrate separately
+            # from that stationary window to handle a newly switched-on fan.
+            if not self.active:
+                self.noise_floor_rms = float(np.percentile(self._rms_history, 25))
 
             self.last_start_rms = max(START_RMS, self.noise_floor_rms * 1.55 + 0.004)
             self.last_end_rms = max(CONTINUE_RMS, self.noise_floor_rms * 1.20 + 0.002)
@@ -224,6 +226,7 @@ class StreamingSpeechSegmenter:
                 # represent noise, music or a long conversation; preserving the
                 # duration gate is safer than accepting the closest keyword.
                 self.max_length_drops += 1
+                self.noise_floor_rms = float(np.percentile(self._rms_history, 25))
                 self._reset_utterance()
             elif enough_speech and ended:
                 trailing = self.silence_samples * SAMPLE_WIDTH
