@@ -362,6 +362,10 @@ class Camera:
             "-vn", "-sn", "-dn",
             # `a:0` picks the first audio stream whatever its index is.
             "-map", "0:a:0",
+            # Decoded PCM must advance on its own sample clock, even if the
+            # upstream RTSP/AAC packets have backward or duplicated timestamps.
+            # This does not change the encoded camera publish path.
+            "-af", "asetpts=N/SR/TB",
             "-acodec", "pcm_s16le", "-ac", "1", "-ar", "16000",
             "-f", "s16le", "pipe:1",
         ]
@@ -1304,6 +1308,10 @@ class Camera:
                 "enrollment": self.kws_enrollment_status,
                 "vad_active": self.kws_segmenter.active,
                 "vad_last_rms": round(self.kws_segmenter.last_rms, 5),
+                "vad_noise_floor_rms": round(self.kws_segmenter.noise_floor_rms, 5),
+                "vad_start_rms": round(self.kws_segmenter.last_start_rms, 5),
+                "vad_end_rms": round(self.kws_segmenter.last_end_rms, 5),
+                "vad_max_length_drops": self.kws_segmenter.max_length_drops,
                 "vad_start_threshold": 0.025,
                 "vad_continue_threshold": 0.015,
                 "segments_seen": self.kws_segments_seen,
