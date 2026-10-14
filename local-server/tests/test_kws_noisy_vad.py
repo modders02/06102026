@@ -47,7 +47,7 @@ class NoisyRoomVADTests(unittest.TestCase):
         onset = int(SAMPLE_RATE * 0.8)
         length = int(SAMPLE_RATE * 0.44)
         phrase_t = t[:length]
-        envelope = np.sin(np.linspace(0, np.pi, length, dtype=np.float32)) ** 0.5
+        envelope = np.maximum(0.0, np.sin(np.linspace(0, np.pi, length, dtype=np.float32))) ** 0.5
         audio[onset:onset + length] += (
             0.23 * np.sin(2 * np.pi * 240 * phrase_t) +
             0.10 * np.sin(2 * np.pi * 480 * phrase_t)
@@ -83,7 +83,7 @@ class NoisyRoomVADTests(unittest.TestCase):
     def test_camera_pcm_clock_is_generated_from_sample_count(self):
         camera = Camera(id="slot-1", path="cam1", name="test", rtsp="rtsp://example/live")
         command = camera._audio_pcm_cmd("ffmpeg", {"transport": "tcp", "url": "rtsp://example/live"})
-        self.assertIn("asetpts=N/SR/TB", command)
+        self.assertIn("asetpts=N/SR/TB", command[command.index("-af") + 1])
         self.assertIn("pcm_s16le", command)
 
 
