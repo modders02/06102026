@@ -354,6 +354,15 @@ class Camera:
         timestamp-independent; Python creates deterministic fixed-size WAV
         chunks for Whisper instead.
         """
+        # Denoise is opt-in because aggressive filtering can alter the
+        # characteristics of existing unfiltered KWS training templates.
+        # FFmpeg's FFT denoiser is native and requires no new model download.
+        denoise = os.environ.get("MSDS_KWS_AUDIO_DENOISE", "0").strip().lower() in ("1", "true", "yes", "on")
+        filters = (
+            ["highpass=f=120", "lowpass=f=4200", "afftdn=nr=12:nf=-40:tn=1"]
+            if denoise else []
+        )
+        filters.extend(["aresample=16000:async=1:first_pts=0", "asetpts=N/SR/TB"])
         return [
             ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "warning",
             "-rtsp_transport", cand["transport"],
@@ -362,10 +371,9 @@ class Camera:
             "-vn", "-sn", "-dn",
             # `a:0` picks the first audio stream whatever its index is.
             "-map", "0:a:0",
-            # Decoded PCM must advance on its own sample clock, even if the
-            # upstream RTSP/AAC packets have backward or duplicated timestamps.
-            # This does not change the encoded camera publish path.
-            "-af", "asetpts=N/SR/TB",
+            # Normalize decoded PCM to a uniform sample clock; the separate
+            # RTSP video publisher is not changed by this filter.
+            "-af", ",".join(filters),
             "-acodec", "pcm_s16le", "-ac", "1", "-ar", "16000",
             "-f", "s16le", "pipe:1",
         ]
@@ -1312,6 +1320,9 @@ class Camera:
                 "vad_start_rms": round(self.kws_segmenter.last_start_rms, 5),
                 "vad_end_rms": round(self.kws_segmenter.last_end_rms, 5),
                 "vad_max_length_drops": self.kws_segmenter.max_length_drops,
+                "vad_backend": self.kws_segmenter.vad_backend,
+                "vad_last_speech_frame": self.kws_segmenter.last_speech_frame,
+                "audio_denoise_enabled": os.environ.get("MSDS_KWS_AUDIO_DENOISE", "0").strip().lower() in ("1", "true", "yes", "on"),
                 "vad_start_threshold": 0.025,
                 "vad_continue_threshold": 0.015,
                 "segments_seen": self.kws_segments_seen,
