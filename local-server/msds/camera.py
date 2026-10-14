@@ -25,6 +25,7 @@ from .config import (AUDIO_CHUNK_SECONDS, AUDIO_ENGINE, HLS_PORT, HLS_PROBE_TTL,
                      RTSP_PORT, VIDEO_FPS, VIDEO_GOP, VIDEO_MAX_WIDTH,
                      VIDEO_THREADS, WEBRTC_PORT, match_distress)
 from .kws_engine import KWS_ENGINE, StreamingSpeechSegmenter
+from .kws_audio_filters import denoise_enabled, selected_profile, pcm_audio_filter
 from . import kws_verifier
 
 # Presentation/runtime configuration is custom-only, so importing this module
@@ -357,12 +358,7 @@ class Camera:
         # Denoise is opt-in because aggressive filtering can alter the
         # characteristics of existing unfiltered KWS training templates.
         # FFmpeg's FFT denoiser is native and requires no new model download.
-        denoise = os.environ.get("MSDS_KWS_AUDIO_DENOISE", "0").strip().lower() in ("1", "true", "yes", "on")
-        filters = (
-            ["highpass=f=120", "lowpass=f=4200", "afftdn=nr=12:nf=-40:tn=1"]
-            if denoise else []
-        )
-        filters.extend(["aresample=16000:async=1:first_pts=0", "asetpts=N/SR/TB"])
+        filters = pcm_audio_filter()
         return [
             ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "warning",
             "-rtsp_transport", cand["transport"],
@@ -373,7 +369,7 @@ class Camera:
             "-map", "0:a:0",
             # Normalize decoded PCM to a uniform sample clock; the separate
             # RTSP video publisher is not changed by this filter.
-            "-af", ",".join(filters),
+            "-af", filters,
             "-acodec", "pcm_s16le", "-ac", "1", "-ar", "16000",
             "-f", "s16le", "pipe:1",
         ]
@@ -1322,7 +1318,8 @@ class Camera:
                 "vad_max_length_drops": self.kws_segmenter.max_length_drops,
                 "vad_backend": self.kws_segmenter.vad_backend,
                 "vad_last_speech_frame": self.kws_segmenter.last_speech_frame,
-                "audio_denoise_enabled": os.environ.get("MSDS_KWS_AUDIO_DENOISE", "0").strip().lower() in ("1", "true", "yes", "on"),
+                "audio_denoise_enabled": denoise_enabled(),
+                "audio_noise_profile": selected_profile(),
                 "vad_start_threshold": 0.025,
                 "vad_continue_threshold": 0.015,
                 "segments_seen": self.kws_segments_seen,
