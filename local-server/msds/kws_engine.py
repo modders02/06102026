@@ -23,6 +23,11 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
+try:
+    import webrtcvad  # from webrtcvad-wheels, optional for existing installations
+except ImportError:  # retain the tested adaptive-energy baseline
+    webrtcvad = None
+
 SAMPLE_RATE = 16000
 SAMPLE_WIDTH = 2
 # Chapter I scope is English-only on this branch. The Tagalog-trained runtime
@@ -129,6 +134,19 @@ class StreamingSpeechSegmenter:
     def __init__(self) -> None:
         self.blocks_seen = 0
         self.max_length_drops = 0
+        self.last_speech_frame = False
+        self.webrtc_vad = None
+        self.vad_backend = "adaptive-energy"
+        if os.environ.get("MSDS_KWS_WEBRTC_VAD", "0").strip().lower() in ("1", "true", "yes", "on"):
+            if webrtcvad is not None:
+                try:
+                    mode = max(0, min(3, int(os.environ.get("MSDS_KWS_WEBRTC_MODE", "2"))))
+                    self.webrtc_vad = webrtcvad.Vad(mode)
+                    self.vad_backend = f"webrtc-{mode}"
+                except (ValueError, TypeError):
+                    self.vad_backend = "adaptive-energy (invalid WebRTC mode)"
+            else:
+                self.vad_backend = "adaptive-energy (WebRTC package unavailable)"
         self.reset()
 
     def _reset_utterance(self) -> None:
@@ -148,6 +166,7 @@ class StreamingSpeechSegmenter:
         self.last_rms = 0.0
         self.last_start_rms = START_RMS
         self.last_end_rms = CONTINUE_RMS
+        self.last_speech_frame = False
         self._reset_utterance()
 
     @staticmethod
@@ -189,6 +208,19 @@ class StreamingSpeechSegmenter:
 
             self.last_start_rms = max(START_RMS, self.noise_floor_rms * 1.55 + 0.004)
             self.last_end_rms = max(CONTINUE_RMS, self.noise_floor_rms * 1.20 + 0.002)
+            # WebRTC VAD is a speech/non-speech discriminator rather than a
+            # pure energy threshold. Require a small excess over ambient RMS
+            # as well to veto stationary fan/static that WebRTC may mislabel.
+            # The conservative energy VAD remains available as a fallback.
+            if self.webrtc_vad is not None:
+                speech = self.webrtc_vad.is_speech(frame, SAMPLE_RATE)
+                speech = speech and rms >= max(0.007, self.noise_floor_rms * 1.08)
+                start_frame = speech
+                continue_frame = speech
+            else:
+                start_frame = rms >= self.last_start_rms
+                continue_frame = rms >= self.last_end_rms
+            self.last_speech_frame = bool(speech) if self.webrtc_vad is not None else start_frame
 
             if not self.active:
                 self.pre_roll.extend(frame)
@@ -199,7 +231,7 @@ class StreamingSpeechSegmenter:
                     # ambient level before being mistaken for a keyword.
                     self._start_frames = 0
                     continue
-                if rms >= self.last_start_rms:
+                if start_frame:
                     self._start_frames += 1
                 else:
                     self._start_frames = 0
@@ -213,7 +245,7 @@ class StreamingSpeechSegmenter:
 
             self.speech.extend(frame)
             self.total_samples += self.FRAME_SAMPLES
-            if rms >= self.last_end_rms:
+            if continue_frame:
                 self.silence_samples = 0
             else:
                 self.silence_samples += self.FRAME_SAMPLES
