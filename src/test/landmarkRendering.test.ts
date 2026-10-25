@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { containedVideoRect, toCanvasPoint, drawConnections, drawQualityConnections, smoothLandmarks, updateTrail, drawTrail } from '@/lib/landmarkRendering';
+import { containedVideoRect, toCanvasPoint, drawConnections, drawFaceLandmarkBounds, faceLandmarkBounds, drawQualityConnections, smoothLandmarks, updateTrail, drawTrail } from '@/lib/landmarkRendering';
 
 describe('video-aligned face / pose / hand tracing geometry', () => {
   it('keeps camera geometry inside the actual object-contain video instead of painting letterboxes', () => {
@@ -78,6 +78,36 @@ describe('video-aligned face / pose / hand tracing geometry', () => {
     expect(trails.get('pose-0-15')).toHaveLength(2);
     updateTrail(trails, 'pose-0-15', { x: 0.8, y: 0.8 }, rect, 12, 50);
     expect(trails.get('pose-0-15')).toHaveLength(1);
+  });
+
+  it('draws an actual face box when 478 landmarks exist and restores paths', () => {
+    // Roughly an in-frame face near the left side of a 16:9 CCTV image.
+    const face = Array.from({ length: 478 }, (_, index) => ({
+      x: 0.25 + (index % 22) * 0.008,
+      y: 0.22 + Math.floor(index / 22) * 0.011,
+    }));
+    const rect = containedVideoRect(960, 540, 1920, 1080);
+    const ctx = {
+      save: vi.fn(), restore: vi.fn(), strokeRect: vi.fn(), setLineDash: vi.fn(),
+      beginPath: vi.fn(), moveTo: vi.fn(), lineTo: vi.fn(), stroke: vi.fn(),
+      strokeStyle: '', lineWidth: 0, lineCap: 'butt', lineJoin: 'miter', globalAlpha: 1,
+    } as unknown as CanvasRenderingContext2D;
+    const bounds = faceLandmarkBounds(face, rect);
+    expect(bounds?.width).toBeGreaterThan(100);
+    expect(bounds?.x).toBeGreaterThan(100);
+    expect(drawFaceLandmarkBounds(ctx, face, rect)).toBe(true);
+    expect(ctx.strokeRect).toHaveBeenCalledTimes(1);
+    const edges = drawConnections(ctx, face,
+      [{ start: 5, end: 6 }, { start: 20, end: 21 }], rect, '#22d3ee');
+    expect(edges).toBe(2);
+    expect(ctx.lineTo).toHaveBeenCalledTimes(2);
+  });
+  it('rejects off-camera/empty/implausibly large face boxes', () => {
+    const rect = containedVideoRect(640, 360, 640, 360);
+    expect(faceLandmarkBounds([], rect)).toBeNull();
+    expect(faceLandmarkBounds(Array.from({ length: 40 }, () => ({ x: -3, y: 2 })), rect)).toBeNull();
+    const xSpread = Array.from({ length: 120 }, (_, i) => ({ x: i / 119, y: i / 119 }));
+    expect(faceLandmarkBounds(xSpread, rect)).toBeNull();
   });
 
 });
