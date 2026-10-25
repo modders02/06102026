@@ -45,9 +45,11 @@ describe('incident-only Event History significance policy', () => {
     expect(isSignificantHistoryEvent({
       ...verifiedFire, fireConfirmed: false,
     })).toBe(false);
+    // A too-small region is not a verified Camera Alert, but the actual
+    // independently confirmed visual fire remains significant in history.
     expect(isSignificantHistoryEvent({
       ...verifiedFire, fireRegionRatio: 0.01,
-    })).toBe(false);
+    })).toBe(true);
   });
   it('logs detector-confirmed visual-only fire/smoke, not unconfirmed candidates', () => {
     expect(isSignificantHistoryEvent(evt('fire', {
