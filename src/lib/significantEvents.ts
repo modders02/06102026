@@ -5,7 +5,7 @@ type EventCandidate = Omit<DetectionEvent, 'id'> | DetectionEvent;
 
 export const SIGNIFICANT_EVENT_COOLDOWN_MS = 45_000;
 export const HAPPY_EVENT_COOLDOWN_MS = 120_000;
-export const HAPPY_EXPRESSION_MIN_CONFIDENCE = 0.70;
+export const HAPPY_EXPRESSION_MIN_CONFIDENCE = 0.60;
 export const HAPPY_SMILE_MIN_ACTIVATION = 0.60;
 
 /**
