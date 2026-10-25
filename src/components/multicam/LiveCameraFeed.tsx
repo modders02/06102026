@@ -2,11 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, Maximize2, Mic, MicOff, RefreshCw, VideoOff, Volume2, VolumeX, ScanFace, PersonStanding, Hand } from 'lucide-react';
 import { useCctvTalk } from '@/hooks/useCctvTalk';
 import { useCameraSession } from '@/lib/cameraSessions';
+import { useCameraRegistry } from '@/hooks/useCameraRegistry';
+import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
+import { HAPPY_SMILE_MIN_ACTIVATION, shouldRecordSignificantEvent } from '@/lib/significantEvents';
 import ValidationLayer from '@/components/dashboard/ValidationLayer';
 import MotionTraceOverlay, { type TracingModes } from '@/components/multicam/MotionTraceOverlay';
 import { formatWakeWordDecision } from '@/lib/wakeWordValidation';
 import type { FacialMovementObservation } from '@/lib/facialMovementCues';
-import type { CameraConfig, MultiCamSettings } from '@/types/multicam';
+import type { CameraConfig, DetectionEvent, MultiCamSettings } from '@/types/multicam';
 
 function statusIsOnline(runtime: { status?: string } | null) {
   return runtime?.status === 'online';
@@ -22,6 +25,8 @@ interface Props {
 /** Mounts the monitoring session's video, keeping a single stream and AI pipeline per camera. */
 export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }: Props) {
   const { video, runtime, home, reconnect } = useCameraSession(camera.id);
+  const { addEvent } = useCameraRegistry();
+  const lastSmilingHistoryAt = useRef(new Map<string, number>());
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const [speaker, setSpeaker] = useState(false);
@@ -30,11 +35,31 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
   const [meshDetail, setMeshDetail] = useState<'mesh' | 'outline'>('mesh');
   const [showDetectionBoxes, setShowDetectionBoxes] = useState(false);
   const [faceMovement, setFaceMovement] = useState<FacialMovementObservation | null>(null);
-  // Does not update camera runtime or emergency validation. Display only.
+  // Smile geometry is supporting visual HISTORY context, never emergency
+  // validation. Face-api's separate classifier can still read "Neutral" when
+  // MediaPipe sees clear bilateral mouth-corner movement, so record this cue
+  // independently instead of relying on the old face-api emotion label.
   const onFaceMovement = useCallback((observation: FacialMovementObservation | null) => {
     setFaceMovement(old => old?.kind === observation?.kind
       && old?.activation === observation?.activation ? old : observation);
-  }, []);
+    if (!camera.aiEnabled || observation?.kind !== 'smile'
+        || observation.activation < HAPPY_SMILE_MIN_ACTIVATION) return;
+    const event: Omit<DetectionEvent, 'id'> = {
+      cameraId: camera.id,
+      cameraName: camera.name,
+      location: camera.location,
+      type: 'emotion',
+      label: 'Happy',
+      confidence: observation.activation,
+      timestamp: new Date().toISOString(),
+    };
+    if (!shouldRecordSignificantEvent(event, lastSmilingHistoryAt.current)) return;
+    addEvent({
+      ...event,
+      id: crypto.randomUUID(),
+      snapshot: captureCameraEventSnapshot(camera.id),
+    });
+  }, [addEvent, camera.id, camera.name, camera.location, camera.aiEnabled]);
   const tracingActive = traceEnabled && !!video && statusIsOnline(runtime) && camera.aiEnabled;
   const talk = useCctvTalk(settings.pythonServer, camera.id);
   const stopTalk = talk.stopTalk;
