@@ -57,7 +57,8 @@ export function isSignificantHistoryEvent(event: EventCandidate): boolean {
  * Incomplete or rejected multimodal-distress events never gain this bypass.
  */
 export function isIndependentVisualHistoryEvent(event: EventCandidate): boolean {
-  return (event.type === 'fire' || event.type === 'smoke' || event.type === 'motion-anomaly')
+  return (event.type === 'fire' || event.type === 'smoke'
+      || event.type === 'motion-anomaly' || event.type === 'emotion')
     && isSignificantHistoryEvent(event);
 }
 
