@@ -40,6 +40,16 @@ export function isSignificantHistoryEvent(event: EventCandidate): boolean {
   return false;
 }
 
+
+/** Permit a significant detector-confirmed visual incident to retain its
+ * contemporaneous snapshot regardless of voice/facial validation status.
+ * Incomplete or rejected multimodal-distress events never gain this bypass.
+ */
+export function isIndependentVisualHistoryEvent(event: EventCandidate): boolean {
+  return (event.type === 'fire' || event.type === 'smoke' || event.type === 'motion-anomaly')
+    && isSignificantHistoryEvent(event);
+}
+
 export function significantEventSignature(
   event: Pick<DetectionEvent, 'cameraId' | 'type' | 'label'>,
 ): string {
