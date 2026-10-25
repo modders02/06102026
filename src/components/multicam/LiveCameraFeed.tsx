@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, Maximize2, Mic, MicOff, RefreshCw, VideoOff, Volume2, VolumeX, ScanFace, PersonStanding, Hand } from 'lucide-react';
 import { useCctvTalk } from '@/hooks/useCctvTalk';
 import { useCameraSession } from '@/lib/cameraSessions';
 import ValidationLayer from '@/components/dashboard/ValidationLayer';
 import MotionTraceOverlay, { type TracingModes } from '@/components/multicam/MotionTraceOverlay';
 import { formatWakeWordDecision } from '@/lib/wakeWordValidation';
+import type { FacialMovementObservation } from '@/lib/facialMovementCues';
 import type { CameraConfig, MultiCamSettings } from '@/types/multicam';
 
 function statusIsOnline(runtime: { status?: string } | null) {
@@ -28,6 +29,12 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
   const [traceModes, setTraceModes] = useState<TracingModes>({ face: true, body: true, hands: true });
   const [meshDetail, setMeshDetail] = useState<'mesh' | 'outline'>('mesh');
   const [showDetectionBoxes, setShowDetectionBoxes] = useState(false);
+  const [faceMovement, setFaceMovement] = useState<FacialMovementObservation | null>(null);
+  // Does not update camera runtime or emergency validation. Display only.
+  const onFaceMovement = useCallback((observation: FacialMovementObservation | null) => {
+    setFaceMovement(old => old?.kind === observation?.kind
+      && old?.activation === observation?.activation ? old : observation);
+  }, []);
   const tracingActive = traceEnabled && !!video && statusIsOnline(runtime) && camera.aiEnabled;
   const talk = useCctvTalk(settings.pythonServer, camera.id);
   const stopTalk = talk.stopTalk;
@@ -185,18 +192,28 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
             className={`rounded border px-2 py-1 ${showDetectionBoxes ? 'border-primary bg-primary/15 text-primary' : 'border-border bg-background text-muted-foreground'}`}>
             Object boxes {showDetectionBoxes ? 'on' : 'off'}
           </button>
+          <span className="rounded bg-cyan-500/10 px-2 py-1 font-medium text-cyan-700 dark:text-cyan-300"
+            role="status" data-testid="face-movement-cue"
+            title="Facial movement estimate from MediaPipe blendshape coefficients. Activation is not a probability of emotion.">
+            Face movement: {tracingActive && traceModes.face
+              ? faceMovement
+                ? `${faceMovement.label}${faceMovement.kind !== 'neutral' ? ` (${Math.round(faceMovement.activation * 100)}% activation)` : ''}`
+                : 'Analyzing…'
+              : 'Off'}
+          </span>
           {runtime?.faceDistress?.label && runtime.faceDistress.confidence >= 0.55 && (
             <span className="rounded bg-background px-2 py-1 text-muted-foreground"
-              title="Estimated visible facial expression, not a diagnosis of mood">
-              Expression estimate: {runtime.faceDistress.label} ({(runtime.faceDistress.confidence * 100).toFixed(0)}%) · not mood
+              title="Existing independent facial expression classifier; score is not psychological certainty">
+              Existing expression estimate: {runtime.faceDistress.label} ({(runtime.faceDistress.confidence * 100).toFixed(0)}%)
             </span>
           )}
+          <span className="text-muted-foreground">Visible cues are not proof of mood or distress.</span>
         </div>
       )}
       <div className="relative aspect-video bg-black">
         <div ref={containerRef} className="absolute inset-0" />
         <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full object-contain" />
-        {tracingActive && video && <MotionTraceOverlay key={`${traceModes.face}-${traceModes.body}-${traceModes.hands}-${meshDetail}`} video={video} modes={traceModes} detail={meshDetail} />}
+        {tracingActive && video && <MotionTraceOverlay key={`${traceModes.face}-${traceModes.body}-${traceModes.hands}-${meshDetail}`} video={video} modes={traceModes} detail={meshDetail} onMovement={onFaceMovement} />}
         {status !== 'online' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/80 px-6 text-center">
             <VideoOff className="h-8 w-8 text-muted-foreground" />
