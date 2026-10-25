@@ -42,9 +42,9 @@ describe('MediaPipe 52-blendshape facial movement cue classifier', () => {
     expect(classifyFacialMovement(categories().filter(x => x.categoryName !== 'eyeWideLeft'))).toBeNull();
   });
   it('ignores malformed or impossible values rather than inflating expression scores', () => {
-    expect(classifyFacialMovement(categories({ jawOpen: Number.NaN }))?.kind).toBe('neutral');
-    expect(classifyFacialMovement(categories({ jawOpen: 5 }))?.kind).toBe('neutral');
-    expect(classifyFacialMovement(categories({ jawOpen: -3 }))?.kind).toBe('neutral');
+    expect(classifyFacialMovement(categories({ jawOpen: Number.NaN }))).toBeNull();
+    expect(classifyFacialMovement(categories({ jawOpen: 5 }))).toBeNull();
+    expect(classifyFacialMovement(categories({ jawOpen: -3 }))).toBeNull();
   });
   it('does not persist a facial expression after the face vanishes', () => {
     const smiling = classifyFacialMovement(categories({ mouthSmileLeft: 0.70, mouthSmileRight: 0.66 }))!;
