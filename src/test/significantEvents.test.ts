@@ -35,6 +35,26 @@ describe('incident-only Event History significance policy', () => {
     expect(isSignificantHistoryEvent(evt('object', { label: 'person', confidence: 0.99 }))).toBe(false);
     expect(isSignificantHistoryEvent(evt('audio-distress', { label: 'Wake word: "help"' }))).toBe(false);
   });
+  it('allows high-confidence Happy expression events in history but not Camera Alerts', () => {
+    const happy = evt('emotion', {
+      label: 'Happy', confidence: 0.94,
+      alertValidation: { status: 'rejected', keyword: '', emotion: '',
+        reason: 'No matching wake word' },
+    });
+    expect(isSignificantHistoryEvent(happy)).toBe(true);
+    expect(isPriorityCameraAlert(happy)).toBe(false);
+    expect(isSignificantHistoryEvent({ ...happy, confidence: 0.79 })).toBe(false);
+    expect(isSignificantHistoryEvent({ ...happy, label: 'Neutral', confidence: 1 })).toBe(false);
+    expect(isSignificantHistoryEvent({ ...happy, label: 'Sad', confidence: 1 })).toBe(false);
+    expect(isSignificantHistoryEvent({ ...happy, confidence: Number.NaN })).toBe(false);
+    expect(isSignificantHistoryEvent({ ...happy, confidence: 1.2 })).toBe(false);
+    const recentlyRecorded = new Map<string, number>();
+    expect(shouldRecordSignificantEvent(happy, recentlyRecorded, 10_000)).toBe(true);
+    expect(shouldRecordSignificantEvent(happy, recentlyRecorded, 10_001)).toBe(false);
+    expect(shouldRecordSignificantEvent(happy, recentlyRecorded,
+      10_000 + SIGNIFICANT_EVENT_COOLDOWN_MS)).toBe(true);
+  });
+
   it('retains exact accepted audio+visual evidence and archived alert history', () => {
     expect(isSignificantHistoryEvent(verifiedHelp)).toBe(true);
     expect(isSignificantHistoryEvent(verifiedFire)).toBe(true);
