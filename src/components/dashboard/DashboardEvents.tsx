@@ -209,7 +209,7 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
 
       <section aria-label="Event history" className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border px-4 py-3"><Film className="h-4 w-4 text-primary" /><h3 className="text-sm font-bold">Event history</h3><span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{filtered.length}</span></div>
-        <p className="px-4 py-3 text-xs text-muted-foreground">Event History records significant camera incidents without requiring a matching keyword or alert validation. Routine sightings, neutral expressions and saliency changes are excluded.</p>
+        <p className="px-4 py-3 text-xs text-muted-foreground">Event History records confirmed hazards and stable, high-confidence Happy expression estimates without requiring keyword validation. Ordinary sightings, Neutral, and saliency changes are excluded. Facial-expression labels describe model estimates, not proven feelings.</p>
         <div tabIndex={0} className="max-h-96 divide-y divide-border overflow-y-auto overscroll-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
           {filtered.length === 0 && <p className="p-4 text-sm text-muted-foreground">No significant events recorded for {filter === 'all' ? 'your cameras' : 'this camera'}.</p>}
           {filtered.slice(0, CAMERA_HISTORY_LIMIT).map(event => {
