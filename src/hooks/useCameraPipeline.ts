@@ -19,6 +19,7 @@ import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/mu
 import { useFaceDistress } from '@/hooks/useFaceDistress';
 import type { FinalSpeechResult } from '@/hooks/useSpeechRecognition';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
+import { advanceHappyHistory, freshHappyHistoryState } from '@/lib/happyHistoryGate';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
 import {
   FIRE_FUSION_WINDOW_MS,
@@ -160,6 +161,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const fireSpeechAfterFrameRef = useRef(0);
   const analysisRevisionRef = useRef(0);
   const faceAnalysisRevisionRef = useRef<number | null>(null);
+  const happyHistoryStateRef = useRef(freshHappyHistoryState());
   const analysisActiveRef = useRef(camera.enabled && camera.aiEnabled);
   analysisActiveRef.current = camera.enabled && camera.aiEnabled;
   const lastAudioRef = useRef<string | undefined>(undefined);
@@ -1037,6 +1039,14 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     return () => { stopped = true; window.clearInterval(id); };
   }, [camera.enabled, camera.aiEnabled, playbackEnabled]);
 
+  // Reset the optional Happy history observation on camera/AI shutdown so
+  // reopening the player never reuses an old face observation.
+  useEffect(() => {
+    if (!camera.enabled || !camera.aiEnabled) {
+      happyHistoryStateRef.current = freshHappyHistoryState();
+    }
+  }, [camera.enabled, camera.aiEnabled, camera.id]);
+
   // Facial expression tracking.
   // Expressions alone never alert. Each accepted word must match its configured
   // expression; Sad is available only to the ambulance pairing.
@@ -1078,8 +1088,14 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       });
     }
 
-    if (d.hasFace && emotion && d.probability >= DISTRESS_FACE_MIN_CONFIDENCE) {
-      emit('emotion', emotion.label, d.probability);
+    // A stable high-confidence Happy face-api label is significant to the
+    // user's EVENT HISTORY, even though it is not a verified emergency.
+    // Require consecutive observations; do not emit every frame, and do not
+    // change matching-word/face validation or the Camera Alert gate.
+    const happyHistory = advanceHappyHistory(happyHistoryStateRef.current, d);
+    happyHistoryStateRef.current = happyHistory.state;
+    if (happyHistory.emit) {
+      emit('emotion', 'Happy', d.probability);
     }
 
     if (fusionExpression && distressFace) {
