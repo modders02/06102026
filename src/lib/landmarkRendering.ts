@@ -67,7 +67,7 @@ export function drawPoints(
 export type TraceTrail = { x: number; y: number }[];
 export function updateTrail(
   trails: Map<string, TraceTrail>, key: string, point: TracePoint | undefined,
-  rect: TraceRect, maxPoints = 16,
+  rect: TraceRect, maxPoints = 16, maxJumpPx = Number.POSITIVE_INFINITY,
 ): TraceTrail {
   const position = point ? toCanvasPoint(point, rect) : null;
   if (!position || (point?.visibility ?? 1) < 0.45) {
@@ -75,6 +75,12 @@ export function updateTrail(
     return [];
   }
   const path = trails.get(key) ?? [];
+  // If a detector suddenly snaps to a distant body part, never connect
+  // both positions with a misleading movement streak across the CCTV image.
+  const last = path[path.length - 1];
+  if (last && Math.hypot(last.x - position.x, last.y - position.y) > maxJumpPx) {
+    path.length = 0;
+  }
   path.push(position);
   if (path.length > maxPoints) path.splice(0, path.length - maxPoints);
   trails.set(key, path);
