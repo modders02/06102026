@@ -13,8 +13,11 @@ const EVENTS_KEY = 'msd-detection-events-v1';
 const ALERTS_KEY = 'msd-camera-alerts-v1';
 export const CAMERA_HISTORY_LIMIT = 50;
 export const isCameraAlert = (event: DetectionEvent) => isPriorityCameraAlert(event);
+// Standalone facial expressions (including Happy) are live-view observations,
+// not significant Event History incidents. Also purge legacy emotion entries.
 const isRelevantStoredEvent = (event: DetectionEvent) =>
-  event.type !== 'object' || isRelevantIndoorObject(event.label);
+  event.type !== 'emotion'
+  && (event.type !== 'object' || isRelevantIndoorObject(event.label));
 
 /** Once an alert is no longer the active Camera Alert, keep it as history only. */
 export const archiveCameraAlert = (event: DetectionEvent): DetectionEvent => ({
