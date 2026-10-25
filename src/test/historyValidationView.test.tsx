@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DashboardEvents from '@/components/dashboard/DashboardEvents';
@@ -34,7 +34,7 @@ const accepted: NonNullable<CameraRuntime['alertValidation']> = {
 beforeEach(() => { mocks.events = []; });
 afterEach(() => { cleanup(); clearCameraSession('validation-history'); vi.useRealTimers(); });
 
-describe('validation in event history', () => {
+describe('live validation and significant event history', () => {
   it.each(['accepted', 'rejected'] as const)('shows facial loading until the pipeline returns %s', status => {
     vi.useFakeTimers();
     const startedAt = Date.now();
@@ -140,33 +140,34 @@ describe('validation in event history', () => {
     expect(screen.queryByText(/Last checked/)).not.toBeInTheDocument();
   });
 
-  it('keeps saved event validation separate from later live checks', () => {
+  it('shows a significant confirmed smoke incident without showing its rejected audio validation', () => {
     mocks.events = [{
       id: 'recorded-check', cameraId: 'validation-history', cameraName: 'Kitchen camera',
-      location: 'Kitchen', type: 'smoke', label: 'Confirmed smoke with rejected audio',
+      location: 'Kitchen', type: 'smoke', label: 'Smoke detected',
       smokeConfirmed: true, confidence: 0.93, timestamp: '2026-10-15T00:59:00Z',
+      snapshot: 'data:image/jpeg;base64,smoke-evidence',
       alertValidation: { status: 'rejected', reason: 'duration_mismatch', keyword: 'fire', emotion: '' },
     }];
     publishCameraSession('validation-history', { runtime: runtime(accepted) });
     render(<MemoryRouter><ValidationLayer cameraId="validation-history" cameraName="Kitchen camera" /><DashboardEvents /></MemoryRouter>);
 
     const history = screen.getByRole('region', { name: 'Event history' });
-    const details = within(history).getByText('Validation at this event').closest('details')!;
-    fireEvent.click(details.querySelector('summary')!);
-    expect(details).toHaveAttribute('open');
-    expect(details).toHaveTextContent('REJECTED');
-    expect(details).toHaveTextContent('"fire"');
-    expect(details).not.toHaveTextContent('duration_mismatch');
-    expect(details).not.toHaveTextContent('Frightened');
-    const savedText = details.textContent;
+    expect(within(history).getByText('Smoke detected')).toBeInTheDocument();
+    expect(within(history).getByRole('button', {
+      name: 'View snapshot: Smoke detected from Kitchen camera',
+    })).toBeInTheDocument();
+    expect(within(history).queryByText('Validation at this event')).not.toBeInTheDocument();
+    expect(history).not.toHaveTextContent('REJECTED');
+    expect(history).not.toHaveTextContent('duration_mismatch');
 
+    // Live validation remains distinct and continues to update normally.
     act(() => publishCameraSession('validation-history', {
       runtime: runtime({ ...accepted, status: 'pending', reason: 'Waiting for current camera evidence.' }),
     }));
-
-    expect(within(screen.getByRole('region', { name: 'Validation layer' })).getByRole('status')).toHaveTextContent('PENDING');
-    expect(within(history).queryByRole('region', { name: 'Validation layer' })).not.toBeInTheDocument();
-    expect(details.textContent).toBe(savedText);
+    expect(within(screen.getByRole('region', { name: 'Validation layer' }))
+      .getByRole('status')).toHaveTextContent('PENDING');
+    expect(within(history).getByText('Smoke detected')).toBeInTheDocument();
+    expect(history).not.toHaveTextContent('PENDING');
     expect(screen.getByRole('region', { name: 'Camera alerts' })).toHaveTextContent('No camera alerts yet.');
   });
 });
