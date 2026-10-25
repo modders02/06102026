@@ -4,6 +4,7 @@ import {
   archiveCameraAlert, isCameraAlert, makeCamera, revokeUnusedEventClips, type CameraEventHistory,
 } from '@/lib/cameraRegistry';
 import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
+import { isIndependentVisualHistoryEvent } from '@/lib/significantEvents';
 import type { CameraConfig, DetectionEvent, MultiCamSettings } from '@/types/multicam';
 
 const CAMERAS_EVT = 'msd-cameras-changed';
@@ -74,7 +75,11 @@ export function useCameraRegistry() {
       revokeUnusedEventClips([evt], [...current.events, ...current.alertEvents]);
       return;
     }
-    const rejectedValidation = evt.alertValidation?.status === 'rejected';
+    // A detector-confirmed visual incident is significant historical evidence
+    // even when no audio keyword matched. Rejected/incomplete multimodal
+    // candidates retain the strict snapshot exclusion.
+    const rejectedValidation = evt.alertValidation?.status === 'rejected'
+      && !isIndependentVisualHistoryEvent(evt);
     const unconfirmedFire = evt.type === 'fire' && evt.fireConfirmed !== true;
     const unconfirmedSmoke = evt.type === 'smoke' && evt.smokeConfirmed !== true;
     const staleAlert = isCameraAlert(evt) && current.alertEvents.some(event =>
