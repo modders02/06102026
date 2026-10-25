@@ -26,6 +26,8 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
   const [speaker, setSpeaker] = useState(false);
   const [traceEnabled, setTraceEnabled] = useState(false);
   const [traceModes, setTraceModes] = useState<TracingModes>({ face: true, body: true, hands: true });
+  const [meshDetail, setMeshDetail] = useState<'mesh' | 'outline'>('mesh');
+  const [showDetectionBoxes, setShowDetectionBoxes] = useState(false);
   const tracingActive = traceEnabled && !!video && statusIsOnline(runtime) && camera.aiEnabled;
   const talk = useCctvTalk(settings.pythonServer, camera.id);
   const stopTalk = talk.stopTalk;
@@ -100,7 +102,7 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
     const sy = canvas.height / (runtime.frameHeight || Math.max(1, Math.round((video.videoHeight / video.videoWidth) * 320)));
     ctx.lineWidth = 3;
     ctx.font = '600 16px Inter, sans-serif';
-    for (const object of runtime.objects) {
+    if (!tracingActive || showDetectionBoxes) for (const object of runtime.objects) {
       const [x, y, width, height] = object.bbox;
       ctx.strokeStyle = object.label === 'person' ? 'hsl(150 90% 50%)' : 'hsl(190 90% 55%)';
       ctx.strokeRect(x * sx, y * sy, width * sx, height * sy);
@@ -117,7 +119,7 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
       ctx.lineWidth = 4;
       ctx.strokeRect(x * sx, y * sy, width * sx, height * sy);
     }
-  }, [runtime, video, camera.aiEnabled]);
+  }, [runtime, video, camera.aiEnabled, tracingActive, showDetectionBoxes]);
 
   return (
     <article className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
@@ -170,19 +172,31 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
               <Icon className="h-3.5 w-3.5" />{label}
             </button>
           ))}
-          <span className="text-muted-foreground">Expression estimates do not establish mood.</span>
+          {traceModes.face && (
+            <button onClick={() => setMeshDetail(value => value === 'mesh' ? 'outline' : 'mesh')}
+              aria-label="Switch face mesh detail" aria-pressed={meshDetail === 'mesh'}
+              className="rounded border border-border bg-background px-2 py-1 text-muted-foreground hover:text-foreground"
+              title="Detailed mesh shows face triangles; outline emphasizes eyes, brows, mouth and face oval">
+              {meshDetail === 'mesh' ? 'Detailed mesh' : 'Face outline'}
+            </button>
+          )}
+          <button onClick={() => setShowDetectionBoxes(value => !value)}
+            aria-label="Show object detection boxes while tracing" aria-pressed={showDetectionBoxes}
+            className={`rounded border px-2 py-1 ${showDetectionBoxes ? 'border-primary bg-primary/15 text-primary' : 'border-border bg-background text-muted-foreground'}`}>
+            Object boxes {showDetectionBoxes ? 'on' : 'off'}
+          </button>
+          {runtime?.faceDistress?.label && runtime.faceDistress.confidence >= 0.55 && (
+            <span className="rounded bg-background px-2 py-1 text-muted-foreground"
+              title="Estimated visible facial expression, not a diagnosis of mood">
+              Expression estimate: {runtime.faceDistress.label} ({(runtime.faceDistress.confidence * 100).toFixed(0)}%) · not mood
+            </span>
+          )}
         </div>
       )}
       <div className="relative aspect-video bg-black">
         <div ref={containerRef} className="absolute inset-0" />
         <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full object-contain" />
-        {tracingActive && video && <MotionTraceOverlay key={`${traceModes.face}-${traceModes.body}-${traceModes.hands}`} video={video} modes={traceModes} />}
-        {tracingActive && runtime?.faceDistress?.label && runtime.faceDistress.confidence >= 0.55 && (
-          <span className="pointer-events-none absolute left-2 top-2 rounded bg-black/70 px-2 py-1 text-[11px] text-white"
-            title="Estimate of visible facial expression, not actual mood or a verified emergency">
-            Expression cue: {runtime.faceDistress.label} ({(runtime.faceDistress.confidence * 100).toFixed(0)}%) · not mood
-          </span>
-        )}
+        {tracingActive && video && <MotionTraceOverlay key={`${traceModes.face}-${traceModes.body}-${traceModes.hands}-${meshDetail}`} video={video} modes={traceModes} detail={meshDetail} />}
         {status !== 'online' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/80 px-6 text-center">
             <VideoOff className="h-8 w-8 text-muted-foreground" />
