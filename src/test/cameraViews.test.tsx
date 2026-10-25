@@ -520,6 +520,30 @@ describe('camera alerts and event history', () => {
     expect(history.getByText('Lobby smoke detected')).toBeInTheDocument();
   });
 
+  it('shows Happy expression estimates with a snapshot in Event History but never Camera Alerts', () => {
+    const happy: DetectionEvent = {
+      id: 'happy-once', cameraId: 'slot-1', cameraName: 'Camera 1',
+      location: 'Lobby', type: 'emotion', label: 'Happy',
+      confidence: 0.95, timestamp: '2026-10-25T17:30:00Z',
+      snapshot: 'data:image/jpeg;base64,happy-expression',
+      alertValidation: { status: 'rejected', keyword: '', emotion: '',
+        reason: 'No accepted audio; historical expression only' },
+    };
+    mocks.events = [happy, {
+      ...happy, id: 'neutral-old', label: 'Neutral', confidence: 0.99,
+    }];
+    render(<MemoryRouter initialEntries={['/cameras?camera=slot-1']}><Monitoring /></MemoryRouter>);
+    const history = within(screen.getByRole('region', { name: 'Event history' }));
+    expect(history.getByText(/Happy/)).toBeInTheDocument();
+    expect(history.getByRole('button', {
+      name: 'View snapshot: Happy from Camera 1',
+    })).toBeInTheDocument();
+    expect(history.queryByText(/Neutral/)).not.toBeInTheDocument();
+    expect(history.queryByText('Validation at this event')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Camera alerts' }))
+      .getByText('No camera alerts yet.')).toBeInTheDocument();
+  });
+
   it('keeps an alert snapshot available after the event leaves general history', () => {
     mocks.events = [mocks.events[0]];
     render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
