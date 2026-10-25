@@ -16,13 +16,21 @@ vi.mock('@/hooks/useCctvTalk', () => ({
   useCctvTalk: () => ({ talking: false, error: null, startTalk: vi.fn(), stopTalk: vi.fn() }),
 }));
 vi.mock('@/components/multicam/MotionTraceOverlay', () => ({
-  default: ({ modes, detail }: {
+  default: ({ modes, detail, onMovement }: {
     modes: { face: boolean; body: boolean; hands: boolean };
     detail?: 'mesh' | 'outline';
+    onMovement?: (value: { kind: 'smile'; label: string; activation: number; features: string[]; source: 'mediapipe-blendshapes' }) => void;
   }) => (
-    <output data-testid="trace-models">
-      {Object.keys(modes).filter(key => modes[key as keyof typeof modes]).join(',')} | {detail}
-    </output>
+    <div>
+      <output data-testid="trace-models">
+        {Object.keys(modes).filter(key => modes[key as keyof typeof modes]).join(',')} | {detail}
+      </output>
+      <button onClick={() => onMovement?.({
+        kind: 'smile', label: 'Smiling', activation: 0.72,
+        features: ['mouthSmileLeft', 'mouthSmileRight'],
+        source: 'mediapipe-blendshapes',
+      })}>Simulate blendshape movement</button>
+    </div>
   ),
 }));
 
@@ -56,6 +64,9 @@ describe('optional CCTV landmark controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Enable landmark tracing for Camera 1' }));
     expect(screen.getByTestId('trace-models').textContent).toContain('face,body,hands | mesh');
     expect(originalVideo?.parentElement).toBeTruthy();
+    expect(screen.getByTestId('face-movement-cue').textContent).toContain('Analyzing');
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate blendshape movement' }));
+    expect(screen.getByTestId('face-movement-cue').textContent).toContain('Smiling (72% activation)');
     fireEvent.click(screen.getByRole('button', { name: 'Body pose tracing' }));
     expect(screen.getByTestId('trace-models').textContent).toContain('face,hands | mesh');
     fireEvent.click(screen.getByRole('button', { name: 'Switch face mesh detail' }));
