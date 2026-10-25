@@ -41,6 +41,7 @@ import { clipFileName, recordClip, saveClip } from '@/lib/clipRecorder';
 import { classifyPriorityScenario, isPriorityCameraAlert } from '@/lib/priorityScenario';
 import type { CameraRuntime, DetectionEvent } from '@/types/multicam';
 import { isSignificantHistoryEvent, isIndependentVisualHistoryEvent, shouldRecordSignificantEvent } from '@/lib/significantEvents';
+import { advanceHappyHistory, freshHappyHistoryState, type HappyHistoryState } from '@/lib/happyHistoryGate';
 import type { Alert, QualityMode } from '@/types/dashboard';
 import { DEFAULT_PRIORITY_OBJECTS } from '@/types/dashboard';
 
@@ -164,6 +165,7 @@ export default function Index() {
   const lastLocalSpeechTrigger = useRef<number | null>(null);
   const recordingCameras = useRef(new Set<string>());
   const lastSignificantHistoryAt = useRef(new Map<string, number>());
+  const happyByCamera = useRef(new Map<string, { state: HappyHistoryState; lastAt: number }>());
   const householdMatches = useRef(new Map<number, { phrase: string; at: number }>());
   const previousConnections = useRef(new Set<number>());
   const connected = slots.filter(slot => slot.connected);
@@ -245,6 +247,20 @@ export default function Index() {
     // Keep the Event History strictly incident-based. This is also the
     // centralized gate for dashboard, backend audio and local microphone.
     // Non-significant observations still update live detection metrics.
+    // Keep live camera expression outputs intact; only the Event History
+    // persistence path needs stable Happy episodes. A missing face often
+    // emits no 'emotion' event, so time out an old episode after 7 seconds.
+    if (event.type === 'emotion') {
+      const now = Date.now();
+      const previous = happyByCamera.current.get(event.cameraId);
+      const baseline = previous && now - previous.lastAt <= 7_000
+        ? previous.state : freshHappyHistoryState();
+      const update = advanceHappyHistory(baseline, {
+        hasFace: true, expression: event.label, probability: event.confidence,
+      });
+      happyByCamera.current.set(event.cameraId, { state: update.state, lastAt: now });
+      if (!update.emit) return '';
+    }
     if (!shouldRecordSignificantEvent(event, lastSignificantHistoryAt.current)) return '';
     const id = crypto.randomUUID();
     const rejectedValidation = event.alertValidation?.status === 'rejected'
