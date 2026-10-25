@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { Camera, Maximize2, Mic, MicOff, RefreshCw, VideoOff, Volume2, VolumeX } from 'lucide-react';
+import { Camera, Maximize2, Mic, MicOff, RefreshCw, VideoOff, Volume2, VolumeX, ScanFace, PersonStanding, Hand } from 'lucide-react';
 import { useCctvTalk } from '@/hooks/useCctvTalk';
 import { useCameraSession } from '@/lib/cameraSessions';
 import ValidationLayer from '@/components/dashboard/ValidationLayer';
+import MotionTraceOverlay, { type TracingModes } from '@/components/multicam/MotionTraceOverlay';
 import { formatWakeWordDecision } from '@/lib/wakeWordValidation';
 import type { CameraConfig, MultiCamSettings } from '@/types/multicam';
+
+function statusIsOnline(runtime: { status?: string } | null) {
+  return runtime?.status === 'online';
+}
 
 interface Props {
   camera: CameraConfig;
@@ -19,6 +24,9 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const [speaker, setSpeaker] = useState(false);
+  const [traceEnabled, setTraceEnabled] = useState(false);
+  const [traceModes, setTraceModes] = useState<TracingModes>({ face: true, body: true, hands: true });
+  const tracingActive = traceEnabled && !!video && statusIsOnline(runtime) && camera.aiEnabled;
   const talk = useCctvTalk(settings.pythonServer, camera.id);
   const stopTalk = talk.stopTalk;
   const status = runtime?.status || 'connecting';
@@ -134,13 +142,41 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
             aria-pressed={talk.talking}
             className={`touch-none rounded-lg p-2 hover:bg-muted ${talk.talking ? 'text-destructive' : 'text-muted-foreground'}`}
           >{talk.talking ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}</button>
+          <button
+            onClick={() => setTraceEnabled(value => !value)}
+            disabled={!camera.aiEnabled || !video || status !== 'online'}
+            aria-label={traceEnabled ? `Disable landmark tracing for ${camera.name}` : `Enable landmark tracing for ${camera.name}`}
+            aria-pressed={traceEnabled}
+            title="Optional face mesh, body skeleton and hand tracing (visual only)"
+            className={`rounded-lg p-2 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 ${traceEnabled ? 'bg-primary/15 text-primary' : 'text-muted-foreground'}`}
+          ><ScanFace className="h-4 w-4" /></button>
           {reconnect && <button onClick={reconnect} title="Reconnect camera" aria-label="Reconnect camera" className="rounded-lg p-2 text-muted-foreground hover:bg-muted"><RefreshCw className="h-4 w-4" /></button>}
           {onExpand && <button onClick={() => onExpand(camera.id)} title="Open camera" aria-label={`Open ${camera.name}`} className="rounded-lg p-2 text-muted-foreground hover:bg-muted"><Maximize2 className="h-4 w-4" /></button>}
         </div>
       </div>
+      {traceEnabled && camera.aiEnabled && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 text-xs" aria-label="Landmark tracing controls">
+          <span className="font-semibold">Trace (visual only)</span>
+          {([
+            ['face', 'Face mesh', ScanFace],
+            ['body', 'Body pose', PersonStanding],
+            ['hands', 'Hands', Hand],
+          ] as const).map(([mode, label, Icon]) => (
+            <button key={mode} onClick={() => setTraceModes(previous => {
+              const updated = { ...previous, [mode]: !previous[mode] };
+              return Object.values(updated).some(Boolean) ? updated : previous;
+            })} aria-pressed={traceModes[mode]} aria-label={`${label} tracing`}
+              className={`inline-flex items-center gap-1 rounded px-2 py-1 ${traceModes[mode] ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground'}`}>
+              <Icon className="h-3.5 w-3.5" />{label}
+            </button>
+          ))}
+          <span className="text-muted-foreground">Expression estimates do not establish mood.</span>
+        </div>
+      )}
       <div className="relative aspect-video bg-black">
         <div ref={containerRef} className="absolute inset-0" />
         <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full object-contain" />
+        {tracingActive && video && <MotionTraceOverlay key={`${traceModes.face}-${traceModes.body}-${traceModes.hands}`} video={video} modes={traceModes} />}
         {status !== 'online' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/80 px-6 text-center">
             <VideoOff className="h-8 w-8 text-muted-foreground" />
