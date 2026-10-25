@@ -143,8 +143,8 @@ describe('validation in event history', () => {
   it('keeps saved event validation separate from later live checks', () => {
     mocks.events = [{
       id: 'recorded-check', cameraId: 'validation-history', cameraName: 'Kitchen camera',
-      location: 'Kitchen', type: 'audio-distress', label: 'Earlier wake-word check',
-      confidence: 0.93, timestamp: '2026-10-15T00:59:00Z',
+      location: 'Kitchen', type: 'smoke', label: 'Confirmed smoke with rejected audio',
+      smokeConfirmed: true, confidence: 0.93, timestamp: '2026-10-15T00:59:00Z',
       alertValidation: { status: 'rejected', reason: 'duration_mismatch', keyword: 'fire', emotion: '' },
     }];
     publishCameraSession('validation-history', { runtime: runtime(accepted) });
