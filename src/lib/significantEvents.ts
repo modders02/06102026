@@ -4,6 +4,9 @@ import { isPriorityCameraAlert } from '@/lib/priorityScenario';
 type EventCandidate = Omit<DetectionEvent, 'id'> | DetectionEvent;
 
 export const SIGNIFICANT_EVENT_COOLDOWN_MS = 45_000;
+export const HAPPY_EVENT_COOLDOWN_MS = 120_000;
+export const HAPPY_EXPRESSION_MIN_CONFIDENCE = 0.70;
+export const HAPPY_SMILE_MIN_ACTIVATION = 0.60;
 
 /**
  * Event History is an INCIDENT log, not a log of per-frame inference.
@@ -13,11 +16,20 @@ export const SIGNIFICANT_EVENT_COOLDOWN_MS = 45_000;
  * documenting even when the audio validation was rejected, absent or pending.
  * Only a true, separately validated multimodal trigger may use the word
  * "Verified". Routine people, neutral expression, raw speech and saliency
- * are not significant events. Existing fusion still exclusively controls
+ * are not significant events. A high-confidence Happy/smile observation may
+ * be retained as an informational facial-expression event, never an alarm.
+ * Existing fusion still exclusively controls
  * Camera Alerts, notifications and emergency recordings.
  */
 export function isSignificantHistoryEvent(event: EventCandidate): boolean {
   if (!event || !Number.isFinite(event.confidence)) return false;
+  if (event.type === 'emotion') {
+    // A clearly detected Happy/smile is user-requested history context, not
+    // verified internal mood. Other routine/neutral expression observations
+    // are deliberately excluded to avoid hundreds of passive history entries.
+    return event.label.trim().toLowerCase() === 'happy'
+      && event.confidence >= HAPPY_EXPRESSION_MIN_CONFIDENCE;
+  }
   if (event.type === 'multimodal-distress') {
     // Archived alerts have priorityScenario=false even though their original
     // accepted evidence remains valid. Do not discard that evidence.
@@ -74,7 +86,9 @@ export function shouldRecordSignificantEvent(
   if (isPriorityCameraAlert({ ...event, priorityScenario: undefined })) return true;
   const signature = significantEventSignature(event);
   const last = lastRecorded.get(signature);
-  if (last !== undefined && now >= last && now - last < SIGNIFICANT_EVENT_COOLDOWN_MS) {
+  const cooldownMs = event.type === 'emotion'
+    ? HAPPY_EVENT_COOLDOWN_MS : SIGNIFICANT_EVENT_COOLDOWN_MS;
+  if (last !== undefined && now >= last && now - last < cooldownMs) {
     return false;
   }
   lastRecorded.set(signature, now);
