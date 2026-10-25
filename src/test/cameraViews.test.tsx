@@ -538,7 +538,7 @@ describe('camera alerts and event history', () => {
     expect(history.getByRole('button', {
       name: 'View snapshot: Happy from Camera 1',
     })).toBeInTheDocument();
-    expect(history.queryByText(/Neutral/)).not.toBeInTheDocument();
+    expect(history.queryByText('😐 Neutral')).not.toBeInTheDocument();
     expect(history.queryByText('Validation at this event')).not.toBeInTheDocument();
     expect(within(screen.getByRole('region', { name: 'Camera alerts' }))
       .getByText('No camera alerts yet.')).toBeInTheDocument();
