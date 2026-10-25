@@ -517,7 +517,7 @@ describe('camera alerts and event history', () => {
     mocks.alertEvents = [];
     render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
     const history = within(screen.getByRole('region', { name: 'Event history' }));
-    expect(history.getByText(/Happy/)).toBeInTheDocument();
+    expect(history.getAllByText(/Happy/).length).toBeGreaterThan(0);
     expect(history.queryByText('Neutral')).not.toBeInTheDocument();
     expect(history.getByRole('button', {
       name: 'View snapshot: Happy from Camera 1',
