@@ -5,6 +5,52 @@ export interface TracePoint { x: number; y: number; visibility?: number; presenc
 export interface TraceConnection { start: number; end: number; }
 export interface TraceRect { x: number; y: number; width: number; height: number; }
 
+/** Face and hand mesh models return coordinates, but do not consistently
+ * estimate per-point visibility. Some runtimes populate visibility=0
+ * as an unsupported/default value. Do not interpret that as occlusion.
+ *
+ * Pose Landmarker DOES estimate visibility; its data is kept intact and
+ * checked separately to avoid connecting hallucinated body joints.
+ */
+export function imageLandmarks(points: readonly TracePoint[]): TracePoint[] {
+  return points.map(point => ({ x: point.x, y: point.y }));
+}
+
+/** Basic geometry validity, independent of optional visibility metadata. */
+export function validLandmarkCount(points: readonly TracePoint[]): number {
+  return points.reduce((count, point) =>
+    count + (Number.isFinite(point.x) && Number.isFinite(point.y)
+      && point.x >= 0 && point.x <= 1
+      && point.y >= 0 && point.y <= 1 ? 1 : 0), 0);
+}
+
+/** Reject implausibly compact/degenerate face geometry, not low visibility
+ * scores unsupported by Face Landmarker.
+ */
+export function usableFaceLandmarks(points: readonly TracePoint[]): boolean {
+  if (points.length < 20 || validLandmarkCount(points) < points.length * 0.55) return false;
+  let minX = 1, maxX = 0, minY = 1, maxY = 0;
+  for (const point of points) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)
+        || point.x < 0 || point.x > 1 || point.y < 0 || point.y > 1) continue;
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minY = Math.min(minY, point.y);
+    maxY = Math.max(maxY, point.y);
+  }
+  return maxX - minX > 0.035 && maxY - minY > 0.045;
+}
+
+export const FACE_68_CONNECTIONS: TraceConnection[] = [
+  ...[[0,16], [17,21], [22,26], [27,30], [31,35], [36,41], [42,47], [48,59], [60,67]]
+    .flatMap(([from, to]) => Array.from({ length: to - from },
+      (_, index) => ({ start: from + index, end: from + index + 1 }))),
+  ...[36, 42, 48, 60].map(index => ({
+    start: index === 36 ? 41 : index === 42 ? 47 : index === 48 ? 59 : 67,
+    end: index,
+  })),
+];
+
 export function containedVideoRect(
   width: number, height: number, videoWidth: number, videoHeight: number,
 ): TraceRect {
