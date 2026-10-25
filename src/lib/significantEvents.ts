@@ -8,11 +8,13 @@ export const SIGNIFICANT_EVENT_COOLDOWN_MS = 45_000;
 /**
  * Event History is an INCIDENT log, not a log of per-frame inference.
  *
- * A confirmed visual fire/smoke or credible collapse can be important without
- * an accepted keyword. Those are HISTORY-ONLY, not validated Camera Alerts.
- * Audio-only, expression-only, routine people/objects and saliency are not
- * incidents. The already validated face+word / fire+word fusion remains the
- * only path into Camera Alerts.
+ * Camera HISTORY is independent of the audio/facial alert-validation state:
+ * detector-confirmed visual fire/smoke and credible collapse can be worth
+ * documenting even when the audio validation was rejected, absent or pending.
+ * Only a true, separately validated multimodal trigger may use the word
+ * "Verified". Routine people, neutral expression, raw speech and saliency
+ * are not significant events. Existing fusion still exclusively controls
+ * Camera Alerts, notifications and emergency recordings.
  */
 export function isSignificantHistoryEvent(event: EventCandidate): boolean {
   if (!event || !Number.isFinite(event.confidence)) return false;
@@ -24,8 +26,7 @@ export function isSignificantHistoryEvent(event: EventCandidate): boolean {
   if (event.type === 'fire') {
     if (isPriorityCameraAlert({ ...event, priorityScenario: undefined })) return true;
     return event.fireConfirmed === true
-      && event.confidence >= 0.55
-      && event.alertValidation?.status !== 'rejected';
+      && event.confidence >= 0.55;
   }
   if (event.type === 'smoke') {
     // An unconfigured smoke+word fusion may be marked rejected while the
@@ -34,8 +35,7 @@ export function isSignificantHistoryEvent(event: EventCandidate): boolean {
   }
   if (event.type === 'motion-anomaly') {
     return event.confidence >= 0.75
-      && /\b(person\s+collapse|person\s+collapsed|person\s+fall(?:en|ing)?|human\s+fall(?:en|ing)?)\b/i.test(event.label)
-      && event.alertValidation?.status !== 'rejected';
+      && /\b(person\s+collapse|person\s+collapsed|person\s+fall(?:en|ing)?|human\s+fall(?:en|ing)?)\b/i.test(event.label);
   }
   return false;
 }
