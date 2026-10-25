@@ -40,7 +40,7 @@ import { getCameraSession } from '@/lib/cameraSessions';
 import { clipFileName, recordClip, saveClip } from '@/lib/clipRecorder';
 import { classifyPriorityScenario, isPriorityCameraAlert } from '@/lib/priorityScenario';
 import type { CameraRuntime, DetectionEvent } from '@/types/multicam';
-import { isSignificantHistoryEvent, shouldRecordSignificantEvent } from '@/lib/significantEvents';
+import { isSignificantHistoryEvent, isIndependentVisualHistoryEvent, shouldRecordSignificantEvent } from '@/lib/significantEvents';
 import type { Alert, QualityMode } from '@/types/dashboard';
 import { DEFAULT_PRIORITY_OBJECTS } from '@/types/dashboard';
 
@@ -247,9 +247,12 @@ export default function Index() {
     // Non-significant observations still update live detection metrics.
     if (!shouldRecordSignificantEvent(event, lastSignificantHistoryAt.current)) return '';
     const id = crypto.randomUUID();
-    const rejectedValidation = event.alertValidation?.status === 'rejected';
+    const rejectedValidation = event.alertValidation?.status === 'rejected'
+      && !isIndependentVisualHistoryEvent(event);
     const unconfirmedFire = event.type === 'fire' && event.fireConfirmed !== true;
     const unconfirmedSmoke = event.type === 'smoke' && event.smokeConfirmed !== true;
+    // A verified VISUAL incident does not need a matching audio keyword to
+    // preserve its historical evidence. This never changes Camera Alerts.
     const storedEvent = rejectedValidation || unconfirmedFire || unconfirmedSmoke
       ? { ...event, snapshot: undefined, priorityScenario: false }
       : event;
