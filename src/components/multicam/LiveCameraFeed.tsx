@@ -177,6 +177,12 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
         <div ref={containerRef} className="absolute inset-0" />
         <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full object-contain" />
         {tracingActive && video && <MotionTraceOverlay key={`${traceModes.face}-${traceModes.body}-${traceModes.hands}`} video={video} modes={traceModes} />}
+        {tracingActive && runtime?.faceDistress?.label && runtime.faceDistress.confidence >= 0.55 && (
+          <span className="pointer-events-none absolute left-2 top-2 rounded bg-black/70 px-2 py-1 text-[11px] text-white"
+            title="Estimate of visible facial expression, not actual mood or a verified emergency">
+            Expression cue: {runtime.faceDistress.label} ({(runtime.faceDistress.confidence * 100).toFixed(0)}%) · not mood
+          </span>
+        )}
         {status !== 'online' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/80 px-6 text-center">
             <VideoOff className="h-8 w-8 text-muted-foreground" />
