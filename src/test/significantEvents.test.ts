@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  SIGNIFICANT_EVENT_COOLDOWN_MS, isSignificantHistoryEvent, isIndependentVisualHistoryEvent,
+  SIGNIFICANT_EVENT_COOLDOWN_MS, HAPPY_EVENT_COOLDOWN_MS, HAPPY_EXPRESSION_MIN_CONFIDENCE, isSignificantHistoryEvent, isIndependentVisualHistoryEvent,
   shouldRecordSignificantEvent,
 } from '@/lib/significantEvents';
 import type { DetectionEvent } from '@/types/multicam';
@@ -34,6 +34,22 @@ describe('incident-only Event History significance policy', () => {
     }
     expect(isSignificantHistoryEvent(evt('object', { label: 'person', confidence: 0.99 }))).toBe(false);
     expect(isSignificantHistoryEvent(evt('audio-distress', { label: 'Wake word: "help"' }))).toBe(false);
+  });
+  it('records confident Happy but not neutral, weak or other routine facial expressions', () => {
+    expect(isSignificantHistoryEvent(evt('emotion', { label: 'Happy', confidence: 0.93 }))).toBe(true);
+    expect(isSignificantHistoryEvent(evt('emotion', { label: ' happy ', confidence: HAPPY_EXPRESSION_MIN_CONFIDENCE }))).toBe(true);
+    expect(isSignificantHistoryEvent(evt('emotion', { label: 'Happy', confidence: 0.59 }))).toBe(false);
+    expect(isSignificantHistoryEvent(evt('emotion', { label: 'Neutral', confidence: 1 }))).toBe(false);
+    expect(isSignificantHistoryEvent(evt('emotion', { label: 'Sad', confidence: 1 }))).toBe(false);
+    expect(isSignificantHistoryEvent(evt('object', { label: 'Happy', confidence: 1 }))).toBe(false);
+  });
+  it('deduplicates smiling history for two minutes independently by camera', () => {
+    const history = new Map<string, number>();
+    const happy = evt('emotion', { label: 'Happy', confidence: 0.74 });
+    expect(shouldRecordSignificantEvent(happy, history, 100_000)).toBe(true);
+    expect(shouldRecordSignificantEvent(happy, history, 100_020)).toBe(false);
+    expect(shouldRecordSignificantEvent({ ...happy, cameraId: 'slot-2' }, history, 100_020)).toBe(true);
+    expect(shouldRecordSignificantEvent(happy, history, 100_000 + HAPPY_EVENT_COOLDOWN_MS)).toBe(true);
   });
   it('retains exact accepted audio+visual evidence and archived alert history', () => {
     expect(isSignificantHistoryEvent(verifiedHelp)).toBe(true);
