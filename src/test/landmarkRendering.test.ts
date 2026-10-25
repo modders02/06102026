@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { containedVideoRect, toCanvasPoint, drawConnections, updateTrail, drawTrail } from '@/lib/landmarkRendering';
+import { containedVideoRect, toCanvasPoint, drawConnections, drawQualityConnections, smoothLandmarks, updateTrail, drawTrail } from '@/lib/landmarkRendering';
 
 describe('video-aligned face / pose / hand tracing geometry', () => {
   it('keeps camera geometry inside the actual object-contain video instead of painting letterboxes', () => {
@@ -41,4 +41,43 @@ describe('video-aligned face / pose / hand tracing geometry', () => {
     drawTrail(ctx, [{ x: 10, y: 20 }, { x: 15, y: 30 }], '#fbbf24');
     expect(ctx.stroke).toHaveBeenCalledOnce();
   });
+  it('smooths small frame-to-frame jitter without dragging landmarks after abrupt changes', () => {
+    const prev = [{ x: 0.4, y: 0.4, visibility: 0.95 }];
+    const smoothed = smoothLandmarks(prev, [{ x: 0.5, y: 0.4, visibility: 0.95 }], 0.5);
+    expect(smoothed[0].x).toBeCloseTo(0.45);
+    const jumped = smoothLandmarks(smoothed, [{ x: 0.95, y: 0.95, visibility: 0.95 }], 0.5);
+    expect(jumped[0]).toMatchObject({ x: 0.95, y: 0.95 });
+    const occluded = smoothLandmarks(smoothed, [{ x: 0.46, y: 0.46, visibility: 0.1 }]);
+    expect(occluded[0]).toMatchObject({ x: 0.46, y: 0.46 });
+    expect(smoothLandmarks(null, prev)).toEqual(prev);
+  });
+  it('drops body bones that are occluded, off-camera or implausibly long', () => {
+    const ctx = {
+      save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(),
+      lineTo: vi.fn(), stroke: vi.fn(), strokeStyle: '', lineWidth: 0,
+      lineJoin: 'miter', lineCap: 'butt', globalAlpha: 1,
+    } as unknown as CanvasRenderingContext2D;
+    const points = [
+      { x: 0.1, y: 0.1, visibility: 0.99, presence: 0.99 },
+      { x: 0.2, y: 0.2, visibility: 0.97, presence: 0.97 },
+      { x: 0.8, y: 0.8, visibility: 0.97, presence: 0.97 },
+      { x: 0.3, y: 0.4, visibility: 0.1, presence: 0.97 },
+    ];
+    const count = drawQualityConnections(ctx, points,
+      [{ start: 0, end: 1 }, { start: 1, end: 2 }, { start: 0, end: 3 }],
+      { x: 0, y: 0, width: 640, height: 360 }, '#4ade80');
+    expect(count).toBe(1);
+    expect(ctx.moveTo).toHaveBeenCalledTimes(1);
+    expect(ctx.lineTo).toHaveBeenCalledTimes(1);
+  });
+  it('resets motion trails when the detector snaps across the screen', () => {
+    const trails = new Map();
+    const rect = containedVideoRect(500, 500, 500, 500);
+    updateTrail(trails, 'pose-0-15', { x: 0.1, y: 0.1 }, rect, 12, 50);
+    updateTrail(trails, 'pose-0-15', { x: 0.12, y: 0.12 }, rect, 12, 50);
+    expect(trails.get('pose-0-15')).toHaveLength(2);
+    updateTrail(trails, 'pose-0-15', { x: 0.8, y: 0.8 }, rect, 12, 50);
+    expect(trails.get('pose-0-15')).toHaveLength(1);
+  });
+
 });
