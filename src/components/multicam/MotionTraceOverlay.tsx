@@ -246,7 +246,7 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
             }
             previousHands = nextHands;
             for (const key of [...paths.keys()]) {
-              const match = /^hand-(\\d+)$/.exec(key);
+              const match = /^hand-(\d+)$/.exec(key);
               if (match && Number(match[1]) >= hands.length) paths.delete(key);
             }
           }
