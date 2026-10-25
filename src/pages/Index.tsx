@@ -40,6 +40,7 @@ import { getCameraSession } from '@/lib/cameraSessions';
 import { clipFileName, recordClip, saveClip } from '@/lib/clipRecorder';
 import { classifyPriorityScenario, isPriorityCameraAlert } from '@/lib/priorityScenario';
 import type { CameraRuntime, DetectionEvent } from '@/types/multicam';
+import { isSignificantHistoryEvent, shouldRecordSignificantEvent } from '@/lib/significantEvents';
 import type { Alert, QualityMode } from '@/types/dashboard';
 import { DEFAULT_PRIORITY_OBJECTS } from '@/types/dashboard';
 
@@ -162,6 +163,7 @@ export default function Index() {
   const alertCooldown = useRef(new Map<string, number>());
   const lastLocalSpeechTrigger = useRef<number | null>(null);
   const recordingCameras = useRef(new Set<string>());
+  const lastSignificantHistoryAt = useRef(new Map<string, number>());
   const householdMatches = useRef(new Map<number, { phrase: string; at: number }>());
   const previousConnections = useRef(new Set<number>());
   const connected = slots.filter(slot => slot.connected);
@@ -182,7 +184,10 @@ export default function Index() {
   const saliency = currentRuntime?.saliencyScore ?? 0;
   const eventCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const event of events) counts.set(event.cameraId, (counts.get(event.cameraId) || 0) + 1);
+    for (const event of events) {
+      if (!isSignificantHistoryEvent(event)) continue;
+      counts.set(event.cameraId, (counts.get(event.cameraId) || 0) + 1);
+    }
     return counts;
   }, [events]);
   useWakeLock(running || connected.length > 0);
@@ -237,6 +242,10 @@ export default function Index() {
   }, [slots, setRunning]);
 
   const storeEvent = useCallback((event: Omit<DetectionEvent, 'id'>) => {
+    // Keep the Event History strictly incident-based. This is also the
+    // centralized gate for dashboard, backend audio and local microphone.
+    // Non-significant observations still update live detection metrics.
+    if (!shouldRecordSignificantEvent(event, lastSignificantHistoryAt.current)) return '';
     const id = crypto.randomUUID();
     const rejectedValidation = event.alertValidation?.status === 'rejected';
     const unconfirmedFire = event.type === 'fire' && event.fireConfirmed !== true;
@@ -287,7 +296,7 @@ export default function Index() {
     const storedEvent = { ...event, priorityScenario: priority.priority };
     const id = alreadyStored ? crypto.randomUUID() : storeEvent(storedEvent);
 
-    // Non-priority events are still recorded in Event History, but they do not
+    // Significant visual-only events enter Event History, but they do not
     // enter Camera alerts, announcements, email, or the emergency popup.
     if (!priority.priority) return;
 
@@ -311,7 +320,7 @@ export default function Index() {
   }, [storeEvent, logAlert, householdId, settings.alertCooldownMs]);
 
   const handleEvent = useCallback((event: Omit<DetectionEvent, 'id'>) => {
-    // Informational detections belong in Event History only.
+    // Routine objects, faces and saliency remain live diagnostics only.
     // Emotion events must never enter the alarm, announcement, email, or emergency path.
     if (event.type === 'object' || event.type === 'human' || event.type === 'emotion' || event.type === 'saliency') {
       storeEvent(event);
@@ -319,7 +328,7 @@ export default function Index() {
     }
 
     // Only accepted audio + matching camera fusion becomes a Camera alert.
-    // Ongoing visual, audio, motion, and saliency updates remain history.
+    // Only materially significant visual incidents enter history.
     const severity: Alert['severity'] = event.type === 'attention-alert'
       ? 'medium'
       : event.type === 'fire' || event.type === 'smoke' || event.type === 'multimodal-distress'
@@ -497,7 +506,7 @@ export default function Index() {
 
   const exportCSV = () => {
     const cell = (value: string) => `"${value.replace(/"/g, '""')}"`;
-    const rows = [['Timestamp', 'Camera', 'Detection', 'Confidence'], ...events.map(event => [event.timestamp, event.cameraName, event.label, String(event.confidence)])];
+    const rows = [['Timestamp', 'Camera', 'Detection', 'Confidence'], ...events.filter(isSignificantHistoryEvent).map(event => [event.timestamp, event.cameraName, event.label, String(event.confidence)])];
     const url = URL.createObjectURL(new Blob([rows.map(row => row.map(cell).join(',')).join('\n')], { type: 'text/csv' }));
     const link = document.createElement('a'); link.href = url; link.download = `camera-events-${new Date().toISOString().slice(0, 10)}.csv`; link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
