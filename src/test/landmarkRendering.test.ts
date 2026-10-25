@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { containedVideoRect, toCanvasPoint, drawConnections, drawFaceLandmarkBounds, faceLandmarkBounds, drawQualityConnections, smoothLandmarks, updateTrail, drawTrail } from '@/lib/landmarkRendering';
+import { containedVideoRect, toCanvasPoint, drawConnections, drawFaceLandmarkBounds, faceLandmarkBounds, imageLandmarks, usableFaceLandmarks, validLandmarkCount, FACE_68_CONNECTIONS, drawQualityConnections, smoothLandmarks, updateTrail, drawTrail } from '@/lib/landmarkRendering';
 
 describe('video-aligned face / pose / hand tracing geometry', () => {
   it('keeps camera geometry inside the actual object-contain video instead of painting letterboxes', () => {
@@ -108,6 +108,35 @@ describe('video-aligned face / pose / hand tracing geometry', () => {
     expect(faceLandmarkBounds(Array.from({ length: 40 }, () => ({ x: -3, y: 2 })), rect)).toBeNull();
     const xSpread = Array.from({ length: 120 }, (_, i) => ({ x: i / 119, y: i / 119 }));
     expect(faceLandmarkBounds(xSpread, rect)).toBeNull();
+  });
+
+  it('renders face mesh when MediaPipe marks visibility as unsupported/zero', () => {
+    const rawFace = Array.from({ length: 478 }, (_, index) => ({
+      x: 0.20 + (index % 22) * 0.013,
+      y: 0.25 + Math.floor(index / 22) * 0.014,
+      visibility: 0, presence: 0,
+    }));
+    const face = imageLandmarks(rawFace);
+    expect(face[0]).toEqual({ x: rawFace[0].x, y: rawFace[0].y });
+    expect(usableFaceLandmarks(face)).toBe(true);
+    expect(validLandmarkCount(face)).toBe(478);
+    const ctx = {
+      save: vi.fn(), restore: vi.fn(), beginPath: vi.fn(), moveTo: vi.fn(),
+      lineTo: vi.fn(), stroke: vi.fn(), strokeRect: vi.fn(), setLineDash: vi.fn(),
+      strokeStyle: '', lineWidth: 0, lineCap: 'butt', lineJoin: 'miter', globalAlpha: 1,
+    } as unknown as CanvasRenderingContext2D;
+    const rect = containedVideoRect(800, 500, 1920, 1080);
+    expect(drawConnections(ctx, rawFace, [{ start: 0, end: 1 }], rect, '#22d3ee')).toBe(0);
+    expect(drawConnections(ctx, face,
+      [{ start: 0, end: 1 }, { start: 5, end: 7 }], rect, '#22d3ee')).toBe(2);
+    expect(drawFaceLandmarkBounds(ctx, face, rect)).toBe(true);
+  });
+
+  it('generates closed mouth and eye contours for 68-point fallback', () => {
+    expect(FACE_68_CONNECTIONS.some(edge => edge.start === 41 && edge.end === 36)).toBe(true);
+    expect(FACE_68_CONNECTIONS.some(edge => edge.start === 67 && edge.end === 60)).toBe(true);
+    expect(FACE_68_CONNECTIONS.some(edge => edge.start === 0 && edge.end === 1)).toBe(true);
+    expect(usableFaceLandmarks(Array.from({ length: 68 }, () => ({ x: 0.5, y: 0.5 })))).toBe(false);
   });
 
 });
