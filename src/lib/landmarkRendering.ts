@@ -1,7 +1,7 @@
 /** Geometry for the optional CCTV tracing overlay, independent of alert fusion.
  * Coordinates are normalized MediaPipe landmark points, not identities.
  */
-export interface TracePoint { x: number; y: number; visibility?: number; }
+export interface TracePoint { x: number; y: number; visibility?: number; presence?: number; }
 export interface TraceConnection { start: number; end: number; }
 export interface TraceRect { x: number; y: number; width: number; height: number; }
 
@@ -93,4 +93,65 @@ export function drawTrail(ctx: CanvasRenderingContext2D, trail: TraceTrail, colo
   });
   ctx.stroke();
   ctx.restore();
+}
+
+
+/** Smooth detected coordinates without inventing or carrying lost landmarks.
+ * Only safe for a single ephemeral, current-frame track, not person identity.
+ */
+export function smoothLandmarks(
+  previous: readonly TracePoint[] | null, current: readonly TracePoint[],
+  alpha = 0.55, maxJump = 0.18,
+): TracePoint[] {
+  if (!previous || previous.length !== current.length) return current.map(point => ({ ...point }));
+  const weight = Math.max(0, Math.min(1, alpha));
+  return current.map((point, index) => {
+    const before = previous[index];
+    if (!before || !Number.isFinite(point.x) || !Number.isFinite(point.y)
+        || !Number.isFinite(before.x) || !Number.isFinite(before.y)
+        || (point.visibility ?? 1) < 0.55 || (point.presence ?? 1) < 0.55
+        || Math.hypot(point.x - before.x, point.y - before.y) > maxJump) {
+      return { ...point };
+    }
+    return {
+      ...point,
+      x: before.x + weight * (point.x - before.x),
+      y: before.y + weight * (point.y - before.y),
+    };
+  });
+}
+
+/** Reject implausible/occluded body segments rather than drawing diagonal
+ * lines across the entire camera from hallucinated off-screen joints.
+ * This is visual quality filtering only, never a distress detection.
+ */
+export function drawQualityConnections(
+  ctx: CanvasRenderingContext2D, landmarks: readonly TracePoint[],
+  connections: readonly TraceConnection[], rect: TraceRect, color: string,
+  options: { minVisibility?: number; maxLength?: number; lineWidth?: number; opacity?: number } = {},
+): number {
+  const { minVisibility = 0.65, maxLength = 0.40, lineWidth = 2.5, opacity = 0.9 } = options;
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  let count = 0;
+  ctx.beginPath();
+  for (const { start, end } of connections) {
+    const a = landmarks[start], b = landmarks[end];
+    if (!a || !b
+        || (a.visibility ?? 1) < minVisibility || (b.visibility ?? 1) < minVisibility
+        || (a.presence ?? 1) < minVisibility || (b.presence ?? 1) < minVisibility
+        || Math.hypot(a.x - b.x, a.y - b.y) > maxLength) continue;
+    const p = toCanvasPoint(a, rect), q = toCanvasPoint(b, rect);
+    if (!p || !q) continue;
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(q.x, q.y);
+    count += 1;
+  }
+  ctx.stroke();
+  ctx.restore();
+  return count;
 }
