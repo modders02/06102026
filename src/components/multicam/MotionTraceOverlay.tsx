@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { drawConnections, drawFaceLandmarkBounds, drawPoints, drawTrail, containedVideoRect, drawQualityConnections, updateTrail, type TraceTrail } from '@/lib/landmarkRendering';
+import { drawConnections, drawFaceLandmarkBounds, drawPoints, drawTrail, containedVideoRect, drawQualityConnections, imageLandmarks, usableFaceLandmarks, FACE_68_CONNECTIONS, updateTrail, type TraceTrail } from '@/lib/landmarkRendering';
+import { detectFallbackFace68 } from '@/lib/faceLandmarkFallback';
 import type { TracePoint } from '@/lib/landmarkRendering';
 
 export interface TracingModes {
@@ -102,6 +103,11 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
     const paths = new Map<string, TraceTrail>();
     let lastTimestamp = 0;
     let lastVideoTime = -1;
+    let latestFallback: TracePoint[] | null = null;
+    let latestFallbackAt = 0;
+    let fallbackBusy = false;
+    let lastFallbackAttemptAt = 0;
+    let fallbackError = '';
     setState('loading');
     setMessage('Loading tracing models…');
 
@@ -132,6 +138,7 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
             || video.paused || !video.videoWidth || !video.videoHeight) {
           clearCanvas();
           paths.clear();
+          latestFallback = null;
           lastVideoTime = -1;
           schedule(analyze);
           return;
@@ -170,23 +177,62 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
             if (faces.length) {
               // Important regression fix: draw RAW, current-frame landmarks.
               // V2 overfiltered/smoothed valid points in some CCTV views.
-              const face = faces[0];
-              if (detail === 'mesh') {
+              // MediaPipe FaceLandmarker does NOT report the same reliable
+              // visibility scores as PoseLandmarker. A value of zero here
+              // may simply mean "unsupported", not "hidden". The old
+              // renderer rejected every connection and produced Face lines 0.
+              const face = imageLandmarks(faces[0]);
+              if (usableFaceLandmarks(face) && detail === 'mesh') {
                 faceLines += drawConnections(ctx, face,
                   tasks.FaceLandmarker.FACE_LANDMARKS_TESSELATION,
-                  rect, '#67e8f9', 0.48, 1.15);
+                  rect, '#67e8f9', 0.45, 1.0);
               }
               // Restore MediaPipe's COMPLETE contour topology from V1:
               // includes cheeks, brows, nose, eyes and lips. Drawing only
               // specialized face-oval/iris topology hid most features.
-              faceLines += drawConnections(ctx, face,
-                tasks.FaceLandmarker.FACE_LANDMARKS_CONTOURS,
-                rect, '#22d3ee', 1, 2.3);
-              // Always give the operator a visible facial localization when
-              // a real landmark set is present, even if the topology is sparse.
-              faceBox = drawFaceLandmarkBounds(ctx, face, rect);
+              if (usableFaceLandmarks(face)) {
+                faceLines += drawConnections(ctx, face,
+                  tasks.FaceLandmarker.FACE_LANDMARKS_CONTOURS,
+                  rect, '#22d3ee', 1, 2.3);
+                faceBox = drawFaceLandmarkBounds(ctx, face, rect);
+              }
             }
           }
+          // Fallback only when MediaPipe has no usable facial contours.
+          // Async face-api inference never blocks the main video loop.
+          // It uses the existing face-api dependency, without any identity
+          // recognition, changes to safety fusion, or persistent storage.
+          let faceSource = faceLines > 0 ? 'MediaPipe 478' : 'no usable landmarks';
+          const now = Date.now();
+          if (models.face && faceLines < 16) {
+            if (!fallbackBusy && now - lastFallbackAttemptAt >= 1200) {
+              fallbackBusy = true;
+              lastFallbackAttemptAt = now;
+              void detectFallbackFace68(video)
+                .then(result => {
+                  if (disposed) return;
+                  latestFallback = result;
+                  latestFallbackAt = result ? Date.now() : 0;
+                  fallbackError = '';
+                })
+                .catch(error => {
+                  if (disposed) return;
+                  fallbackError = error instanceof Error ? error.message : 'model unavailable';
+                  latestFallback = null;
+                  lastFallbackAttemptAt = Date.now() + 8000;
+                })
+                .finally(() => { fallbackBusy = false; });
+            }
+            if (latestFallback && now - latestFallbackAt < 1500) {
+              faceLines += drawConnections(ctx, latestFallback, FACE_68_CONNECTIONS,
+                rect, '#22d3ee', 1, 2.7);
+              faceBox = drawFaceLandmarkBounds(ctx, latestFallback, rect) || faceBox;
+              if (faceLines > 0) faceSource = 'face-api 68 fallback';
+            }
+          } else if (faceLines >= 16) {
+            latestFallback = null;
+          }
+
           if (models.pose) {
             const poses = models.pose.detectForVideo(video, timestamp).landmarks;
             poseCount = poses.length;
@@ -198,15 +244,29 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
               // V2's minVisibility=.64 and maxLength=.38 erased almost every
               // connection in actual low-angle CCTV. Use attainable bounds,
               // keep the length guard for far-away hallucinated joints.
-              poseLines = drawQualityConnections(ctx, pose, bodyBones, rect, '#4ade80',
-                { minVisibility: 0.32, maxLength: 0.64, lineWidth: 3.0, opacity: 0.95 });
-              drawPoints(ctx, pose,
-                [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28],
-                rect, '#dcfce7');
+              const leftShoulder = pose[11], rightShoulder = pose[12];
+              // One half-hidden person can produce a "Pose 1" result whose
+              // arms and hands all collapse around the face. Require a
+              // plausible, visibly separated shoulder pair before drawing.
+              const shouldersValid = !!leftShoulder && !!rightShoulder
+                && (leftShoulder.visibility ?? 0) >= 0.40
+                && (rightShoulder.visibility ?? 0) >= 0.40
+                && Math.hypot(leftShoulder.x - rightShoulder.x,
+                  leftShoulder.y - rightShoulder.y) >= 0.09;
+              if (shouldersValid) {
+                poseLines = drawQualityConnections(ctx, pose, bodyBones, rect, '#4ade80',
+                  { minVisibility: 0.40, maxLength: 0.48, lineWidth: 3.0, opacity: 0.95 });
+                drawPoints(ctx, pose,
+                  [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28],
+                  rect, '#dcfce7');
+              }
+              // Motion streaks are meaningful only when several connected
+              // bones anchor the skeleton; otherwise they're visual noise.
               for (const wrist of [15, 16]) {
                 const observed = pose[wrist];
-                const confident = observed && (observed.visibility ?? 0) >= 0.50
-                  && (observed.presence ?? 1) >= 0.32;
+                const confident = shouldersValid && poseLines >= 5 && observed
+                  && (observed.visibility ?? 0) >= 0.65
+                  && (observed.presence ?? 1) >= 0.4;
                 const trail = updateTrail(paths, `pose-0-${wrist}`,
                   confident ? observed : undefined, rect, 12, rect.width * 0.16);
                 drawTrail(ctx, trail, '#bef264');
@@ -219,11 +279,12 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
             const hands = models.hand.detectForVideo(video, timestamp).landmarks;
             handCount = hands.length;
             for (const [index, hand] of hands.entries()) {
-              drawConnections(ctx, hand, tasks.HandLandmarker.HAND_CONNECTIONS,
+              const points = imageLandmarks(hand);
+              drawConnections(ctx, points, tasks.HandLandmarker.HAND_CONNECTIONS,
                 rect, '#fbbf24', 0.98, 2.8);
-              drawPoints(ctx, hand, [0, 4, 8, 12, 16, 20], rect, '#fef08a');
+              drawPoints(ctx, points, [0, 4, 8, 12, 16, 20], rect, '#fef08a');
               const trail = updateTrail(paths, `hand-${index}`,
-                hand[8] as TracePoint, rect, 14, rect.width * 0.16);
+                points[8] as TracePoint, rect, 14, rect.width * 0.16);
               drawTrail(ctx, trail, '#fb923c');
             }
             for (const key of [...paths.keys()]) {
@@ -233,11 +294,13 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
           }
           setMessage(current => {
             const next = showCount(faceCount, poseCount, handCount)
-              + (modes.face ? ` · Face lines ${faceLines}${faceBox ? ' + box' : ''}` : '')
+              + (modes.face ? ` · Face lines ${faceLines}${faceBox ? ' + box' : ''} (${faceSource})` : '')
               + (modes.body ? ` · Pose bones ${poseLines}` : '')
               + (models.hand && handCount === 0 ? ' · Raise hands into view' : '')
-              + (faceCount > 0 && faceLines === 0 && !faceBox
-                ? ' · Face geometry unavailable' : '');
+              + (modes.body && poseCount > 0 && poseLines === 0
+                ? ' · Body partly occluded / unreliable' : '')
+              + (modes.face && fallbackError && faceLines < 16
+                ? ' · fallback failed (see console)' : '');
             return next === current ? current : next;
           });
           schedule(analyze);
