@@ -28,11 +28,14 @@ export function drawConnections(
   ctx: CanvasRenderingContext2D, landmarks: readonly TracePoint[],
   connections: readonly TraceConnection[], rect: TraceRect, color: string,
   opacity = 0.85, lineWidth = 1.5,
-): void {
+): number {
   ctx.save();
   ctx.globalAlpha = opacity;
   ctx.lineWidth = lineWidth;
   ctx.strokeStyle = color;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  let drawn = 0;
   ctx.beginPath();
   for (const { start, end } of connections) {
     const a = landmarks[start], b = landmarks[end];
@@ -41,9 +44,11 @@ export function drawConnections(
     if (!p || !q) continue;
     ctx.moveTo(p.x, p.y);
     ctx.lineTo(q.x, q.y);
+    drawn++;
   }
   ctx.stroke();
   ctx.restore();
+  return drawn;
 }
 
 export function drawPoints(
@@ -160,4 +165,49 @@ export function drawQualityConnections(
   ctx.stroke();
   ctx.restore();
   return count;
+}
+
+
+/** A deliberately simple face-localization fallback: landmark-derived geometry
+ * remains visible even if a model's connection topology is unavailable or too
+ * noisy for useful lines. This is NOT a face-recognition identity box.
+ *
+ * Trim the outlying ~3% of points to keep errant landmark positions from
+ * producing the full-screen rectangles seen with unstable indoor detections.
+ */
+export function faceLandmarkBounds(
+  landmarks: readonly TracePoint[], rect: TraceRect,
+): TraceRect | null {
+  if (!(rect.width > 0 && rect.height > 0)) return null;
+  const valid = landmarks.filter(point =>
+    Number.isFinite(point.x) && Number.isFinite(point.y)
+    && point.x >= 0 && point.x <= 1 && point.y >= 0 && point.y <= 1
+    && (point.visibility ?? 1) >= 0.3);
+  if (valid.length < 20) return null;
+  const xs = valid.map(point => point.x).sort((a, b) => a - b);
+  const ys = valid.map(point => point.y).sort((a, b) => a - b);
+  const lo = Math.floor((valid.length - 1) * 0.03);
+  const hi = Math.ceil((valid.length - 1) * 0.97);
+  const left = rect.x + xs[lo] * rect.width;
+  const top = rect.y + ys[lo] * rect.height;
+  const width = (xs[hi] - xs[lo]) * rect.width;
+  const height = (ys[hi] - ys[lo]) * rect.height;
+  if (width < rect.width * 0.02 || height < rect.height * 0.02
+      || width > rect.width * 0.90 || height > rect.height * 0.90) return null;
+  return { x: left, y: top, width, height };
+}
+
+export function drawFaceLandmarkBounds(
+  ctx: CanvasRenderingContext2D, landmarks: readonly TracePoint[],
+  rect: TraceRect, color = '#67e8f9',
+): boolean {
+  const bounds = faceLandmarkBounds(landmarks, rect);
+  if (!bounds) return false;
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = color;
+  ctx.setLineDash([7, 5]);
+  ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+  ctx.restore();
+  return true;
 }
