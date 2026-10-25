@@ -10,6 +10,7 @@ import type { DetectionEvent, DetectionType } from '@/types/multicam';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
 import { RecordedValidationDetails } from '@/components/dashboard/ValidationLayer';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
+import { isSignificantHistoryEvent } from '@/lib/significantEvents';
 
 const typeIcon: Record<DetectionType, string> = {
   fire: '🔥', smoke: '💨', human: '🧍', object: '📦',
@@ -46,7 +47,11 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
     if (filter !== 'all' && !names.has(filter)) names.set(filter, /^slot-\d+$/.test(filter) ? `Camera ${filter.slice(5)}` : filter);
     return Array.from(names.entries());
   }, [activeSlots, events, alertEvents, filter]);
-  const filtered = useMemo(() => filter === 'all' ? events : events.filter(event => event.cameraId === filter), [events, filter]);
+  const filtered = useMemo(
+    () => events.filter(event =>
+      isSignificantHistoryEvent(event) && (filter === 'all' || event.cameraId === filter)),
+    [events, filter],
+  );
   const alerts = useMemo(
     () => (alertEvents ?? [])
       .filter(
@@ -59,7 +64,7 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
     [alertEvents, filter],
   );
   const viewingEvent = viewing
-    ? (viewing.source === 'alert' ? alertEvents ?? [] : events).find(event => event.id === viewing.id)
+    ? (viewing.source === 'alert' ? alertEvents ?? [] : filtered).find(event => event.id === viewing.id)
     : undefined;
 
   const selectFilter = (value: string) => {
@@ -205,9 +210,9 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
 
       <section aria-label="Event history" className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border px-4 py-3"><Film className="h-4 w-4 text-primary" /><h3 className="text-sm font-bold">Event history</h3><span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{filtered.length}</span></div>
-        <p className="px-4 py-3 text-xs text-muted-foreground">Open an event's validation details to review the result saved at that time.</p>
+        <p className="px-4 py-3 text-xs text-muted-foreground">Only significant events are recorded: confirmed fire/smoke, verified distress, or high-confidence collapse. Routine person/object sightings, neutral expressions and saliency updates are excluded.</p>
         <div tabIndex={0} className="max-h-96 divide-y divide-border overflow-y-auto overscroll-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
-          {filtered.length === 0 && <p className="p-4 text-sm text-muted-foreground">No events recorded for {filter === 'all' ? 'your cameras' : 'this camera'}.</p>}
+          {filtered.length === 0 && <p className="p-4 text-sm text-muted-foreground">No significant events recorded for {filter === 'all' ? 'your cameras' : 'this camera'}.</p>}
           {filtered.slice(0, CAMERA_HISTORY_LIMIT).map(event => {
             const emotion = event.type === 'emotion' ? historyEmotionMeta(event.label) : null;
             return (
