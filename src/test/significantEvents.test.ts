@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  SIGNIFICANT_EVENT_COOLDOWN_MS, isSignificantHistoryEvent,
+  SIGNIFICANT_EVENT_COOLDOWN_MS, isSignificantHistoryEvent, isIndependentVisualHistoryEvent,
   shouldRecordSignificantEvent,
 } from '@/lib/significantEvents';
 import type { DetectionEvent } from '@/types/multicam';
+import { isPriorityCameraAlert } from '@/lib/priorityScenario';
 
 function evt(type: DetectionEvent['type'], changes: Partial<DetectionEvent> = {}): DetectionEvent {
   return {
@@ -74,12 +75,42 @@ describe('incident-only Event History significance policy', () => {
     expect(isSignificantHistoryEvent(evt('motion-anomaly', {
       label: 'Person collapse', confidence: 0.60,
     }))).toBe(false);
+    // Historical observations are based on their visual detector, not on
+    // the accepted/rejected status of a separate voice/fusion attempt.
     expect(isSignificantHistoryEvent(evt('motion-anomaly', {
       label: 'Person collapse', confidence: 0.9,
       alertValidation: { status: 'rejected', keyword: '', emotion: '',
-        reason: 'Detection contradicted by validation' },
+        reason: 'No matching accepted keyword' },
+    }))).toBe(true);
+  });
+  it('records meaningful visual history without passing audio validation, but never invents a verified alert', () => {
+    for (const type of ['fire', 'smoke'] as const) {
+      const candidate = evt(type, {
+        label: type === 'fire' ? 'Fire detected' : 'Smoke detected',
+        fireConfirmed: type === 'fire',
+        smokeConfirmed: type === 'smoke',
+        alertValidation: {
+          status: 'rejected', keyword: 'fire', emotion: '',
+          reason: 'Speech did not pass keyword validation',
+        },
+      });
+      expect(isSignificantHistoryEvent(candidate)).toBe(true);
+      expect(isIndependentVisualHistoryEvent(candidate)).toBe(true);
+      expect(isPriorityCameraAlert(candidate)).toBe(false);
+    }
+    const fall = evt('motion-anomaly', {
+      label: 'Person collapse detected', confidence: 0.90,
+      alertValidation: { status: 'rejected', keyword: '', emotion: '', reason: 'No audio' },
+    });
+    expect(isIndependentVisualHistoryEvent(fall)).toBe(true);
+    expect(isIndependentVisualHistoryEvent(verifiedHelp)).toBe(false);
+    expect(isIndependentVisualHistoryEvent(evt('fire', { fireConfirmed: false }))).toBe(false);
+    expect(isSignificantHistoryEvent(evt('multimodal-distress', {
+      label: 'Verified distress: Angry + "help"',
+      alertValidation: { status: 'rejected', keyword: 'help', emotion: 'Angry', reason: 'Wrong evidence' },
     }))).toBe(false);
   });
+
   it('deduplicates repeated visual detections by camera/type without suppressing new cameras', () => {
     const saved = new Map<string, number>();
     const fire = evt('fire', { fireConfirmed: true, label: 'Fire detected' });
