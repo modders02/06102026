@@ -60,4 +60,6 @@ jobs:
         run: python -m unittest discover -s tests -p "test_*.py"
       - name: MediaMTX release config smoke test
         working-directory: local-server
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python smoke_mediamtx.py
