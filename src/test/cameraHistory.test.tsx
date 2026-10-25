@@ -408,6 +408,29 @@ describe('validation gate for Camera Alert', () => {
     expect(registry.result.current.events[0].snapshot).toBeUndefined();
   });
 
+  it.each([
+    ['fire', true, false],
+    ['smoke', false, true],
+  ] as const)('retains detector-confirmed %s evidence in Event History without accepted audio', (type, fireConfirmed, smokeConfirmed) => {
+    const registry = renderHook(useCameraRegistry);
+    const evidence = `data:image/jpeg;base64,visual-${type}`;
+    act(() => registry.result.current.addEvent(event(74, type, {
+      label: type === 'fire' ? 'Fire detected' : 'Smoke detected',
+      confidence: 0.92, fireConfirmed, smokeConfirmed,
+      snapshot: evidence,
+      alertValidation: {
+        status: 'rejected', keyword: 'fire', emotion: '',
+        reason: 'No accepted matching keyword.',
+      },
+    })));
+    expect(registry.result.current.alertEvents).toEqual([]);
+    expect(registry.result.current.events[0]).toMatchObject({
+      type, snapshot: evidence,
+      alertValidation: { status: 'rejected' },
+    });
+    expect(registry.result.current.events[0].priorityScenario).not.toBe(true);
+  });
+
   it('keeps unconfirmed fire out of Camera Alert and strips its snapshot', () => {
     const registry = renderHook(useCameraRegistry);
     act(() => registry.result.current.addEvent(event(1, 'fire', {
