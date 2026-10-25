@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { drawConnections, drawPoints, drawTrail, containedVideoRect, drawQualityConnections, smoothLandmarks, updateTrail, type TraceTrail } from '@/lib/landmarkRendering';
+import { drawConnections, drawFaceLandmarkBounds, drawPoints, drawTrail, containedVideoRect, drawQualityConnections, updateTrail, type TraceTrail } from '@/lib/landmarkRendering';
 import type { TracePoint } from '@/lib/landmarkRendering';
 
 export interface TracingModes {
@@ -100,9 +100,6 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
     let timer: ReturnType<typeof setTimeout> | undefined;
     let owned: Models | null = null;
     const paths = new Map<string, TraceTrail>();
-    let previousFace: TracePoint[] | null = null;
-    let previousPose: TracePoint[] | null = null;
-    let previousHands: TracePoint[][] = [];
     let lastTimestamp = 0;
     let lastVideoTime = -1;
     setState('loading');
@@ -135,9 +132,6 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
             || video.paused || !video.videoWidth || !video.videoHeight) {
           clearCanvas();
           paths.clear();
-          previousFace = null;
-          previousPose = null;
-          previousHands = [];
           lastVideoTime = -1;
           schedule(analyze);
           return;
@@ -169,82 +163,69 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
 
         try {
           let faceCount = 0, poseCount = 0, handCount = 0;
+          let faceLines = 0, poseLines = 0, faceBox = false;
           if (models.face) {
             const faces = models.face.detectForVideo(video, timestamp).faceLandmarks;
             faceCount = faces.length;
             if (faces.length) {
-              const face = smoothLandmarks(previousFace, faces[0], 0.6, 0.12);
-              previousFace = face;
-              // The outline is legible even against a busy indoor scene.
-              // Detailed tessellation is optional and drawn BELOW main features.
+              // Important regression fix: draw RAW, current-frame landmarks.
+              // V2 overfiltered/smoothed valid points in some CCTV views.
+              const face = faces[0];
               if (detail === 'mesh') {
-                drawConnections(ctx, face, tasks.FaceLandmarker.FACE_LANDMARKS_TESSELATION,
-                  rect, '#67e8f9', 0.42, 0.9);
+                faceLines += drawConnections(ctx, face,
+                  tasks.FaceLandmarker.FACE_LANDMARKS_TESSELATION,
+                  rect, '#67e8f9', 0.48, 1.15);
               }
-              drawConnections(ctx, face, tasks.FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,
-                rect, '#38bdf8', 0.98, 2.3);
-              drawConnections(ctx, face, tasks.FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,
-                rect, '#f8fafc', 1, 1.9);
-              drawConnections(ctx, face, tasks.FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,
-                rect, '#f8fafc', 1, 1.9);
-              drawConnections(ctx, face, tasks.FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,
-                rect, '#a5f3fc', 0.95, 2.0);
-              drawConnections(ctx, face, tasks.FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,
-                rect, '#a5f3fc', 0.95, 2.0);
-              drawConnections(ctx, face, tasks.FaceLandmarker.FACE_LANDMARKS_LIPS,
-                rect, '#fda4af', 0.96, 2.1);
-              drawConnections(ctx, face, tasks.FaceLandmarker.FACE_LANDMARKS_LEFT_IRIS,
-                rect, '#fef08a', 1, 1.6);
-              drawConnections(ctx, face, tasks.FaceLandmarker.FACE_LANDMARKS_RIGHT_IRIS,
-                rect, '#fef08a', 1, 1.6);
-            } else {
-              previousFace = null;
+              // Restore MediaPipe's COMPLETE contour topology from V1:
+              // includes cheeks, brows, nose, eyes and lips. Drawing only
+              // specialized face-oval/iris topology hid most features.
+              faceLines += drawConnections(ctx, face,
+                tasks.FaceLandmarker.FACE_LANDMARKS_CONTOURS,
+                rect, '#22d3ee', 1, 2.3);
+              // Always give the operator a visible facial localization when
+              // a real landmark set is present, even if the topology is sparse.
+              faceBox = drawFaceLandmarkBounds(ctx, face, rect);
             }
           }
           if (models.pose) {
             const poses = models.pose.detectForVideo(video, timestamp).landmarks;
             poseCount = poses.length;
             if (poses.length) {
-              const pose = smoothLandmarks(previousPose, poses[0], 0.52, 0.16);
-              previousPose = pose;
-              // Suppress face-keypoint lines from PoseLandmarker: face mesh
-              // already covers the head. Only reliable BODY joints are shown.
+              const pose = poses[0];
               const bodyBones = tasks.PoseLandmarker.POSE_CONNECTIONS.filter(
                 edge => edge.start >= 11 && edge.end >= 11,
               );
-              drawQualityConnections(ctx, pose, bodyBones, rect, '#4ade80',
-                { minVisibility: 0.64, maxLength: 0.38, lineWidth: 3.2 });
-              drawPoints(ctx, pose, [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28],
+              // V2's minVisibility=.64 and maxLength=.38 erased almost every
+              // connection in actual low-angle CCTV. Use attainable bounds,
+              // keep the length guard for far-away hallucinated joints.
+              poseLines = drawQualityConnections(ctx, pose, bodyBones, rect, '#4ade80',
+                { minVisibility: 0.32, maxLength: 0.64, lineWidth: 3.0, opacity: 0.95 });
+              drawPoints(ctx, pose,
+                [11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28],
                 rect, '#dcfce7');
-              // Hide unreliable wrists and reset trails on implausible jumps.
               for (const wrist of [15, 16]) {
                 const observed = pose[wrist];
-                const confident = observed && (observed.visibility ?? 0) >= 0.72
-                  && (observed.presence ?? 1) >= 0.65;
+                const confident = observed && (observed.visibility ?? 0) >= 0.50
+                  && (observed.presence ?? 1) >= 0.32;
                 const trail = updateTrail(paths, `pose-0-${wrist}`,
                   confident ? observed : undefined, rect, 12, rect.width * 0.16);
                 drawTrail(ctx, trail, '#bef264');
               }
             } else {
-              previousPose = null;
               for (const key of [...paths.keys()]) if (key.startsWith('pose-')) paths.delete(key);
             }
           }
           if (models.hand) {
             const hands = models.hand.detectForVideo(video, timestamp).landmarks;
             handCount = hands.length;
-            const nextHands: TracePoint[][] = [];
-            for (const [index, landmarks] of hands.entries()) {
-              const hand = smoothLandmarks(previousHands[index] ?? null, landmarks, 0.6, 0.14);
-              nextHands.push(hand);
-              drawQualityConnections(ctx, hand, tasks.HandLandmarker.HAND_CONNECTIONS,
-                rect, '#fbbf24', { minVisibility: 0, maxLength: 0.27, lineWidth: 2.5 });
+            for (const [index, hand] of hands.entries()) {
+              drawConnections(ctx, hand, tasks.HandLandmarker.HAND_CONNECTIONS,
+                rect, '#fbbf24', 0.98, 2.8);
               drawPoints(ctx, hand, [0, 4, 8, 12, 16, 20], rect, '#fef08a');
               const trail = updateTrail(paths, `hand-${index}`,
-                hand[8], rect, 14, rect.width * 0.16);
+                hand[8] as TracePoint, rect, 14, rect.width * 0.16);
               drawTrail(ctx, trail, '#fb923c');
             }
-            previousHands = nextHands;
             for (const key of [...paths.keys()]) {
               const match = /^hand-(\d+)$/.exec(key);
               if (match && Number(match[1]) >= hands.length) paths.delete(key);
@@ -252,7 +233,11 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
           }
           setMessage(current => {
             const next = showCount(faceCount, poseCount, handCount)
-              + (models.hand && handCount === 0 ? ' · Raise hands into view' : '');
+              + (modes.face ? ` · Face lines ${faceLines}${faceBox ? ' + box' : ''}` : '')
+              + (modes.body ? ` · Pose bones ${poseLines}` : '')
+              + (models.hand && handCount === 0 ? ' · Raise hands into view' : '')
+              + (faceCount > 0 && faceLines === 0 && !faceBox
+                ? ' · Face geometry unavailable' : '');
             return next === current ? current : next;
           });
           schedule(analyze);
