@@ -16,8 +16,13 @@ vi.mock('@/hooks/useCctvTalk', () => ({
   useCctvTalk: () => ({ talking: false, error: null, startTalk: vi.fn(), stopTalk: vi.fn() }),
 }));
 vi.mock('@/components/multicam/MotionTraceOverlay', () => ({
-  default: ({ modes }: { modes: { face: boolean; body: boolean; hands: boolean } }) => (
-    <output data-testid="trace-models">{Object.keys(modes).filter(key => modes[key as keyof typeof modes]).join(',')}</output>
+  default: ({ modes, detail }: {
+    modes: { face: boolean; body: boolean; hands: boolean };
+    detail?: 'mesh' | 'outline';
+  }) => (
+    <output data-testid="trace-models">
+      {Object.keys(modes).filter(key => modes[key as keyof typeof modes]).join(',')} | {detail}
+    </output>
   ),
 }));
 
@@ -49,10 +54,15 @@ describe('optional CCTV landmark controls', () => {
     render(<LiveCameraFeed camera={cam} settings={DEFAULT_SETTINGS} onConnect={vi.fn()} />);
     expect(screen.queryByTestId('trace-models')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Enable landmark tracing for Camera 1' }));
-    expect(screen.getByTestId('trace-models').textContent).toBe('face,body,hands');
+    expect(screen.getByTestId('trace-models').textContent).toContain('face,body,hands | mesh');
     expect(originalVideo?.parentElement).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Body pose tracing' }));
-    expect(screen.getByTestId('trace-models').textContent).toBe('face,hands');
+    expect(screen.getByTestId('trace-models').textContent).toContain('face,hands | mesh');
+    fireEvent.click(screen.getByRole('button', { name: 'Switch face mesh detail' }));
+    expect(screen.getByTestId('trace-models').textContent).toContain('face,hands | outline');
+    expect(screen.getByRole('button', { name: 'Show object detection boxes while tracing' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'Show object detection boxes while tracing' }));
+    expect(screen.getByRole('button', { name: 'Show object detection boxes while tracing' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Disable landmark tracing for Camera 1' }));
     expect(screen.queryByTestId('trace-models')).toBeNull();
   });
