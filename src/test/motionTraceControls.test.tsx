@@ -12,7 +12,7 @@ const mock = vi.hoisted(() => ({
     reconnect: null,
   },
 }));
-vi.mock('@/lib/cameraSessions', () => ({ useCameraSession: () => mock.session }));
+vi.mock('@/lib/cameraSessions', () => ({ useCameraSession: () => mock.session, getCameraSession: () => mock.session }));
 vi.mock('@/hooks/useCameraRegistry', () => ({ useCameraRegistry: () => ({ addEvent: mock.addEvent }) }));
 vi.mock('@/hooks/useCctvTalk', () => ({
   useCctvTalk: () => ({ talking: false, error: null, startTalk: vi.fn(), stopTalk: vi.fn() }),
