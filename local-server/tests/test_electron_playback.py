@@ -77,6 +77,30 @@ PROBE = r"""
     const quality = video.getVideoPlaybackQuality();
     results[name] = { ...sample, decoded: quality.totalVideoFrames, width: video.videoWidth };
     if (!sample.advanced || sample.fps < 5) throw new Error(name + ': video stopped advancing: ' + JSON.stringify(results[name]));
+    if (name === 'webrtc') {
+      // The synthetic camera encodes its capture timestamp in 48 black/white
+      // blocks. Measure rendered pixels, including bridge/decoder buffering,
+      // rather than assuming a healthy FPS means the picture is current.
+      const canvas = document.createElement('canvas');
+      canvas.width = 640; canvas.height = 360;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      const delays = [];
+      for (let index = 0; index < 15; index++) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        context.drawImage(video, 0, 0, 640, 360);
+        const pixels = context.getImageData(0, 20, 480, 1).data;
+        let capturedAt = 0;
+        for (let bit = 0; bit < 48; bit++) {
+          capturedAt = capturedAt * 2 + (pixels[(bit * 10 + 5) * 4] > 128 ? 1 : 0);
+        }
+        const delay = Date.now() - capturedAt;
+        if (delay < 0 || delay > 30000) throw new Error('Invalid synthetic capture timestamp: ' + capturedAt);
+        delays.push(delay);
+      }
+      delays.sort((a, b) => a - b);
+      results[name].latencyMedianMs = delays[Math.floor(delays.length / 2)];
+      results[name].latencyP95Ms = delays[Math.floor(delays.length * 0.95)];
+    }
   };
   try {
     await new Promise((resolve, reject) => {
@@ -163,6 +187,7 @@ class ElectronPlaybackTests(unittest.TestCase):
             })
             self.assertEqual(process.returncode, 0, result)
             self.assertEqual(result["origin"], "msds://app")
+            self.assertLessEqual(result["webrtc"]["latencyP95Ms"], 750, result)
             print("Electron installed-origin playback:", json.dumps(result), flush=True)
 
 

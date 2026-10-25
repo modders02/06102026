@@ -34,6 +34,7 @@ const event = (
     label,
     confidence: 0.9,
     fireConfirmed: type === 'fire' ? true : undefined,
+    fireRegionRatio: type === 'fire' ? 0.15 : undefined,
     smokeConfirmed: type === 'smoke' ? true : undefined,
     alertValidation: defaultValidation,
     timestamp: new Date(index * 1000).toISOString(),
@@ -64,6 +65,16 @@ afterEach(() => {
 });
 
 describe('single active Camera Alert with bounded Event History', () => {
+  it('retains older fire records without size evidence as history with their images intact', () => {
+    const legacy = event(1, 'fire', { fireRegionRatio: undefined, snapshot: 'data:image/jpeg;base64,legacy' });
+    localStorage.setItem('msd-camera-alerts-v1', JSON.stringify([legacy]));
+    const history = loadEventHistory();
+    expect(history.alertEvents).toHaveLength(0);
+    expect(history.events).toContainEqual(expect.objectContaining({
+      id: legacy.id, priorityScenario: false, snapshot: legacy.snapshot,
+    }));
+  });
+
   it('purges legacy irrelevant object detections while keeping relevant indoor history', () => {
     const legacy = [
       event(1, 'object', { label: 'dog' }),

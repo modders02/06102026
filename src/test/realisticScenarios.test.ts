@@ -47,7 +47,7 @@ describe('panelist realistic-condition scenario matrix', () => {
     const candidate = makeFireVisualSignal(true, 0.4, 0.002, 0.03, 80, 1000);
     expect(isImmediateFireSmoke(candidate)).toBe(false);
     expect(fuseFireWithSpeech(candidate, null)).toBeNull();
-    expect(fuseFireWithSpeech(candidate, makeFireSpeechSignal('fire', 0.95, 1500))).not.toBeNull();
+    expect(fuseFireWithSpeech(candidate, makeFireSpeechSignal('fire', 0.95, 1500))).toBeNull();
 
     expect(classifyPriorityScenario({
       type: 'fire',

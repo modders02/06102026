@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { classifyPriorityScenario, isPriorityCameraAlert } from '@/lib/priorityScenario';
 import type { DetectionEvent } from '@/types/multicam';
+import { KEYWORD_FACE_PAIRINGS } from '@/lib/multimodalDistress';
 
 const validation = (keyword: string, emotion: string, status: 'pending' | 'accepted' | 'rejected' = 'accepted') => ({
   status, reason: 'Fusion result', keyword, emotion,
@@ -10,6 +11,7 @@ const fire = {
   type: 'fire' as const,
   label: 'Verified fire: visual fire + "fire"',
   fireConfirmed: true,
+  fireRegionRatio: 0.15,
   alertValidation: validation('fire', 'visual fire'),
 };
 const distress = {
@@ -44,6 +46,10 @@ describe('camera alerts require both accepted audio and matching camera evidence
     { ...fire, alertValidation: validation('fire', 'visual fire candidate') },
     { ...fire, fireConfirmed: false },
     { ...fire, fireConfirmed: undefined },
+    { ...fire, fireRegionRatio: 0.01 },
+    { ...fire, fireRegionRatio: undefined },
+    { ...fire, fireRegionRatio: Number.NaN },
+    { ...fire, fireRegionRatio: 2 },
   ])('blocks incomplete or mismatched fire evidence %#', event => {
     expect(isPriorityCameraAlert(event)).toBe(false);
     expect(classifyPriorityScenario({ ...event, priorityScenario: true }, 'critical'))
@@ -85,5 +91,15 @@ describe('camera alerts require both accepted audio and matching camera evidence
     for (const event of [fire, distress]) {
       expect(isPriorityCameraAlert({ ...event, priorityScenario: false })).toBe(false);
     }
+  });
+
+  it.each(Object.entries(KEYWORD_FACE_PAIRINGS).flatMap(([keyword, expressions]) =>
+    expressions.map(emotion => [keyword, emotion] as const),
+  ))('uses the same %s + %s pairing for alerts, recordings, and notifications', (keyword, emotion) => {
+    const event = { ...distress, label: `Verified distress: ${emotion} + "${keyword}"`,
+      alertValidation: validation(keyword, emotion) };
+    expect(isPriorityCameraAlert(event)).toBe(true);
+    expect(isPriorityCameraAlert({ ...event, alertValidation: validation(keyword, 'Happy') })).toBe(false);
+    expect(isPriorityCameraAlert({ ...event, alertValidation: validation(keyword, emotion, 'pending') })).toBe(false);
   });
 });

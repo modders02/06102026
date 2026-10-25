@@ -23,7 +23,7 @@ vi.mock('@/lib/multiCamServer', () => ({
   describeAudioStatus: () => ({ message: 'Listening', tone: 'ok' }),
 }));
 
-const safetyEvent = { timestamp: '2026-10-04T00:00:01Z', transcript: 'call police', keyword: 'police', confidence: 0.99 };
+const safetyEvent = { timestamp: '2026-10-04T00:00:01Z', transcript: 'stop', keyword: 'stop', confidence: 0.99 };
 let drawImage: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   localStorage.clear();
@@ -47,6 +47,32 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('pipeline event snapshots', () => {
+  it.each([
+    ['duration_mismatch', 'Speech length does not match the wake word.'],
+    ['too_close_to_unknown', 'Speech sounds too similar to other words.'],
+  ])('explains %s while retaining the original decision and avoiding an audio alert', async (decision, explanation) => {
+    const evaluatedAt = '2026-10-04T00:00:01Z';
+    mocked.getAudioEvents.mockResolvedValue({
+      events: [],
+      status: { custom_kws: {
+        last_candidate: 'help', last_candidate_confidence: 0.93,
+        last_decision: decision, last_segment_at: evaluatedAt,
+      } },
+    });
+    const onEvent = vi.fn();
+    const pipeline = renderHook(() => useCameraPipeline({
+      camera: makeCamera({ id: 'snapshot-pipeline', aiEnabled: false }),
+      settings: DEFAULT_SETTINGS, playbackEnabled: false, onEvent,
+    }));
+    await act(async () => {});
+
+    expect(pipeline.result.current.runtime.alertValidation).toMatchObject({
+      status: 'rejected', keyword: 'help', confidence: 0.93,
+      reason: explanation, sourceDecision: decision, evaluatedAt,
+    });
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
   it('captures a still for every visual detection type, including objects, humans, and saliency', async () => {
     mocked.detectObjects.mockResolvedValue([{ label: 'person', confidence: 0.9, bbox: [0, 0, 20, 20] }]);
     mocked.detectFire.mockReturnValue({ fireDetected: true, smokeEmergency: true, confidence: 0.9, smokeRatio: 0.8 });

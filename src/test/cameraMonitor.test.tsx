@@ -93,12 +93,12 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const helpSafetyEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'help me', keyword: 'help', confidence: 0.99 };
-const standaloneSafetyEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'call police', keyword: 'police', confidence: 0.99 };
+const standaloneSafetyEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'stop', keyword: 'stop', confidence: 0.99 };
 const screamAudioEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: '', keyword: 'scream', confidence: 0.93 };
 const fireAudioEvent = { timestamp: '2026-10-02T00:00:01Z', transcript: 'fire', keyword: 'fire', confidence: 0.98 };
 const confirmedFire = {
   fireCandidate: true, fireDetected: true, smokeEmergency: false,
-  confidence: 0.9, firePixelRatio: 0.03, smokeRatio: 0, visibility: 100,
+  confidence: 0.9, firePixelRatio: 0.15, smokeRatio: 0, visibility: 100,
 };
 
 describe('camera snapshots and page-scoped playback', () => {
@@ -466,7 +466,7 @@ describe('camera snapshots and page-scoped playback', () => {
 
   it.each([
     ['happy', 'Happy', false, ''],
-    ['sad', 'Sad', false, ''],
+    ['sad', 'Sad', true, 'Sad'],
     ['angry', 'Angry', true, 'Angry'],
     ['fearful', 'Frightened', true, 'Frightened'],
     ['surprised', 'Frightened', true, 'Frightened'],
@@ -500,7 +500,16 @@ describe('camera snapshots and page-scoped playback', () => {
     ['fearful', 'help me', 'help', 'Frightened'],
     ['surprised', 'help me', 'help', 'Frightened'],
     ['shock', 'help me', 'help', 'Frightened'],
-  ] as const)('verifies %s + accepted help as one multimodal alert', async (expression, transcript, keyword, faceLabel) => {
+    ['fearful', 'emergency', 'emergency', 'Frightened'],
+    ['angry', 'danger', 'danger', 'Angry'],
+    ['fearful', 'danger', 'danger', 'Frightened'],
+    ['angry', 'intruder', 'intruder', 'Angry'],
+    ['fearful', 'intruder', 'intruder', 'Frightened'],
+    ['angry', 'help me', 'police', 'Angry'],
+    ['fearful', 'call police', 'police', 'Frightened'],
+    ['sad', 'ambulance', 'ambulance', 'Sad'],
+    ['fearful', 'ambulance', 'ambulance', 'Frightened'],
+  ] as const)('verifies %s + %s using accepted keyword %s as one multimodal alert', async (expression, transcript, keyword, faceLabel) => {
     mocked.getAudioEvents.mockResolvedValueOnce({
       events: [{ timestamp: '2026-10-02T00:00:01Z', transcript, keyword, confidence: 0.96 }],
       status: null,
@@ -520,13 +529,13 @@ describe('camera snapshots and page-scoped playback', () => {
       snapshot: 'data:image/jpeg;base64,preview',
       alertValidation: expect.objectContaining({
         status: 'accepted',
-        keyword: 'help',
+        keyword,
         emotion: faceLabel,
       }),
     }));
     expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
       status: 'accepted',
-      keyword: 'help',
+      keyword,
       emotion: faceLabel,
     });
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress' }));
@@ -538,7 +547,7 @@ describe('camera snapshots and page-scoped playback', () => {
       events: [{
         timestamp: '2026-10-02T00:00:01Z',
         transcript: 'help me',
-        keyword: 'police',
+        keyword: 'stop',
         confidence: 0.99,
       }],
       status: null,
@@ -731,9 +740,9 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
   });
 
-  it('rejects accepted help when facial-expression detection is unavailable', async () => {
+  it.each(['help', 'emergency', 'danger', 'intruder', 'police', 'ambulance'])('rejects accepted %s when facial-expression detection is unavailable', async keyword => {
     mocked.faceError = 'Face model unavailable';
-    mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [{ ...helpSafetyEvent, keyword, transcript: keyword }], status: null });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     const onEvent = vi.fn();
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
@@ -741,15 +750,18 @@ describe('camera snapshots and page-scoped playback', () => {
 
     expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
       status: 'rejected',
-      keyword: 'help',
+      keyword,
     });
     expect(getCameraSession('slot-1').runtime?.alertValidation?.reason)
       .toMatch(/facial-expression detection failed/i);
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
   });
 
-  it('moves accepted help from PENDING to REJECTED when facial evidence never arrives', async () => {
-    mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
+  it.each([
+    ['help', 'Angry/Frightened'], ['emergency', 'Frightened'], ['danger', 'Angry/Frightened'],
+    ['intruder', 'Angry/Frightened'], ['police', 'Angry/Frightened'], ['ambulance', 'Sad/Frightened'],
+  ])('moves accepted %s from PENDING to REJECTED when required facial evidence never arrives', async (keyword, required) => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [{ ...helpSafetyEvent, keyword, transcript: keyword }], status: null });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     const onEvent = vi.fn();
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
@@ -757,17 +769,17 @@ describe('camera snapshots and page-scoped playback', () => {
 
     expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
       status: 'pending',
-      keyword: 'help',
+      keyword,
     });
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
 
     await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
     expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
       status: 'rejected',
-      keyword: 'help',
+      keyword,
     });
     expect(getCameraSession('slot-1').runtime?.alertValidation?.reason)
-      .toMatch(/no usable Angry\/Frightened|did not satisfy Angry\/Frightened/i);
+      .toContain(required);
   });
 
   it('rejects an accepted KWS event below the configured frontend audio threshold', async () => {
@@ -833,7 +845,7 @@ describe('camera snapshots and page-scoped playback', () => {
       sourceDecision: 'below_threshold',
     });
     expect(getCameraSession('slot-1').runtime?.alertValidation?.reason)
-      .toMatch(/below the trained acceptance threshold/i);
+      .toBe('The wake word was not clear enough to confirm.');
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
   });
 
@@ -882,12 +894,48 @@ describe('camera snapshots and page-scoped playback', () => {
 
   it('does not alarm on fire without a visual fire candidate', async () => {
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
+    mocked.analyzeFace.mockResolvedValue({ hasFace: true, expression: 'fearful', probability: 0.95, distressScore: 90, distressLevel: 'severe' });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     const onEvent = vi.fn();
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'fire' }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
+  });
+
+  it('requires a large current fire region and ignores an older large smoothed box', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
+    mocked.detectFire.mockReturnValue({ ...confirmedFire, firePixelRatio: 0.01,
+      bbox: [0, 0, 20, 20], smoothedBbox: [0, 0, 160, 90] });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({ status: 'pending', keyword: 'fire' });
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(0);
+
+    mocked.detectFire.mockReturnValue({ ...confirmedFire, firePixelRatio: 0.01, bbox: [0, 0, 120, 80] });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({ status: 'accepted', keyword: 'fire' });
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(1);
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'fire', fireConfirmed: true,
+      alertValidation: expect.objectContaining({ status: 'accepted', keyword: 'fire' }),
+    }));
+  });
+
+  it('keeps the newest accepted word pending when an older keyword timeout would have fired', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} />);
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [{ keyword: 'ambulance', transcript: 'ambulance', confidence: 0.99, timestamp: new Date().toISOString() }], status: null });
+    await act(async () => { await vi.advanceTimersByTimeAsync(700); });
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({ status: 'pending', keyword: 'ambulance' });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1800); });
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({ status: 'pending', keyword: 'ambulance' });
   });
 
   it('waits for confirmed fire and rejects unmatched accepted speech when its fusion window expires', async () => {

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Camera, Maximize2, Mic, MicOff, RefreshCw, VideoOff, Volume2, VolumeX } from 'lucide-react';
 import { useCctvTalk } from '@/hooks/useCctvTalk';
 import { useCameraSession } from '@/lib/cameraSessions';
+import ValidationLayer from '@/components/dashboard/ValidationLayer';
+import { formatWakeWordDecision } from '@/lib/wakeWordValidation';
 import type { CameraConfig, MultiCamSettings } from '@/types/multicam';
 
 interface Props {
@@ -32,9 +34,12 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
     : kws?.last_decision
       ? 'text-amber-500'
       : 'text-muted-foreground';
-  const diagnosticLabel = kws?.last_decision === 'accepted_help_90'
+  const diagnosticLabel = kwsAccepted
     ? 'ACCEPTED'
-    : kws?.last_decision || 'waiting';
+    : kws?.last_decision === 'verification_pending'
+      ? 'CHECKING'
+      : kws?.last_decision ? 'NOT CONFIRMED' : 'WAITING';
+  const diagnosticReason = formatWakeWordDecision(kws?.last_decision);
   const pct = (value?: number) => typeof value === 'number'
     ? `${(value * 100).toFixed(1)}%`
     : '—';
@@ -44,7 +49,7 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
   const customSpeechText = customKeywordMode && kws?.last_candidate
     ? kwsAccepted
       ? (kws.last_keyword || kws.last_candidate)
-      : `Candidate: ${kws.last_candidate} (${pct(kws.last_candidate_confidence)}) · ${kws.last_decision || 'evaluating'}`
+      : `Candidate: ${kws.last_candidate} (${pct(kws.last_candidate_confidence)}) · ${formatWakeWordDecision(kws.last_decision || 'verification_pending')}`
     : '';
   const speechText = customSpeechText || runtime?.transcript || '';
 
@@ -195,6 +200,7 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
               {diagnosticLabel}
             </span>
           </div>
+          <p className="mb-2 text-xs text-muted-foreground">{diagnosticReason}</p>
           {kws.language_scope && (
             <p className="mb-2 text-xs text-muted-foreground">
               Scope: <span className="font-semibold text-foreground">English only</span>
@@ -224,6 +230,9 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
           </div>
         </div>
       )}
+      <div className="border-t border-border px-4 py-3">
+        <ValidationLayer cameraId={camera.id} cameraName={camera.name} />
+      </div>
       <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5"><Camera className="h-3.5 w-3.5" />{camera.aiEnabled ? 'AI monitoring on' : 'AI monitoring off'}</span>
         {runtime?.status === 'online' && <span className="font-mono">{runtime.transport === 'webrtc' || runtime.transport === 'local' ? 'Realtime · ' : ''}{runtime.fps} FPS</span>}

@@ -7,7 +7,6 @@ interface ControlsPanelProps {
   threshold: number;
   showBoundingBoxes: boolean;
   showHeatmap: boolean;
-  showAlerts: boolean;
   quality: QualityMode;
   mirror: boolean;
   heatmapOpacity: number;
@@ -25,7 +24,6 @@ interface ControlsPanelProps {
   onAlertCooldownChange: (v: number) => void;
   onToggleBoundingBoxes: () => void;
   onToggleHeatmap: () => void;
-  onToggleAlerts: () => void;
   onQualityChange: (q: QualityMode) => void;
   onToggleMirror: () => void;
   onHeatmapOpacityChange: (v: number) => void;
@@ -37,11 +35,11 @@ interface ControlsPanelProps {
 
 export default function ControlsPanel(props: ControlsPanelProps) {
   const {
-    snapshotMode = false, running, threshold, showBoundingBoxes, showHeatmap, showAlerts,
+    snapshotMode = false, running, threshold, showBoundingBoxes, showHeatmap,
     quality, mirror, heatmapOpacity, simulationMode, priorityObjects, minConfidence,
     saliencyMode, attentionThreshold, alertCooldownMs,
     onStart, onStop, onThresholdChange, onSaliencyModeChange, onAttentionThresholdChange, onAlertCooldownChange,
-    onToggleBoundingBoxes, onToggleHeatmap, onToggleAlerts,
+    onToggleBoundingBoxes, onToggleHeatmap,
     onQualityChange, onToggleMirror, onHeatmapOpacityChange,
     onToggleSimulation, onPriorityObjectsChange, onMinConfidenceChange, onExportCSV,
   } = props;
@@ -60,14 +58,13 @@ export default function ControlsPanel(props: ControlsPanelProps) {
 
 
       {/* Toggles grid */}
-      <div className="grid grid-cols-2 gap-1.5">
+      <div className={`grid gap-1.5 ${snapshotMode ? 'grid-cols-1' : 'grid-cols-2'}`}>
         {[
           { label: 'Boxes', active: showBoundingBoxes, toggle: onToggleBoundingBoxes },
           { label: 'Heatmap', active: showHeatmap, toggle: onToggleHeatmap },
-          { label: 'Alerts', active: showAlerts, toggle: onToggleAlerts },
           { label: 'Mirror', active: mirror, toggle: onToggleMirror },
           { label: 'Simulate', active: simulationMode, toggle: onToggleSimulation },
-        ].filter(({ label }) => !snapshotMode || label === 'Alerts' || label === 'Mirror').map(({ label, active, toggle }) => (
+        ].filter(({ label }) => !snapshotMode || label === 'Mirror').map(({ label, active, toggle }) => (
           <button
             key={label}
             onClick={toggle}

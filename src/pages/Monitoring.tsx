@@ -21,11 +21,6 @@ export default function Monitoring() {
   const focused = includedSlots.some(slot => `slot-${slot.index}` === requestedCamera) ? requestedCamera : null;
   const visible = focused ? includedSlots.filter(slot => `slot-${slot.index}` === focused) : includedSlots;
   const connected = includedSlots.filter(isConnected);
-  const validationSlot = focused
-    ? includedSlots.find(slot => `slot-${slot.index}` === focused)
-    : connected[0] ?? includedSlots[0];
-  const validationCameraId = validationSlot ? `slot-${validationSlot.index}` : 'slot-1';
-  const validationCameraName = validationSlot?.name || `Camera ${validationSlot?.index ?? 1}`;
 
   useEffect(() => {
     if (searchParams.has('events')) {
@@ -91,12 +86,8 @@ export default function Monitoring() {
               </button>
             ))}
           </section>
-          <aside aria-label="Camera controls and activity" className="min-w-0">
-            <DashboardEvents
-              initialFilter={focused || 'all'}
-              validationCameraId={validationCameraId}
-              validationCameraName={validationCameraName}
-            />
+          <aside aria-label="Camera controls and activity" tabIndex={0} className="max-h-[calc(100dvh-3rem)] min-w-0 overflow-y-auto overscroll-contain rounded-xl pr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary lg:sticky lg:top-6">
+            <DashboardEvents initialFilter={focused || 'all'} />
           </aside>
         </div>
       </main>

@@ -150,4 +150,17 @@ describe('camera pipeline realtime playback lifecycle', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(mocked.rtc).toHaveLength(2);
   });
+
+  it('reopens only the delayed realtime player when frames accumulate behind live time', async () => {
+    const hook = open();
+    deliverStream();
+    const error = new Error('Realtime video fell behind. Reconnecting to the latest frames…');
+    error.name = 'CameraPlaybackDelayError';
+    act(() => mocked.rtc[0].callbacks.onError(error));
+    expect(mocked.rtc[0].close).toHaveBeenCalledOnce();
+    expect(hook.result.current.runtime).toMatchObject({ status: 'connecting', transport: 'webrtc' });
+    expect(hook.result.current.runtime.playbackWarning).toBe(error.message);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(mocked.rtc).toHaveLength(2);
+  });
 });

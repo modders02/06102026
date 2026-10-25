@@ -1,6 +1,8 @@
 export const FIRE_FUSION_WINDOW_MS = 10_000;
 export const SMOKE_REGION_MIN_RATIO = 0.18;
 export const FIRE_LOW_VISIBILITY = 45;
+/** A confirmed live flame region must cover at least 10% of the camera frame. */
+export const LARGE_FIRE_MIN_FRAME_RATIO = 0.1;
 
 export interface FireVisualSignal {
   confidence: number;
@@ -10,6 +12,8 @@ export interface FireVisualSignal {
   visibility: number;
   smokeCorroborated: boolean;
   lowVisibilityCorroborated: boolean;
+  /** Current detector region area / frame area, when available. */
+  regionRatio?: number;
 }
 
 export interface FireSpeechSignal {
@@ -26,6 +30,23 @@ export interface VerifiedFireSpeech {
 }
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+
+export function measureFireRegionRatio(
+  firePixelRatio: number,
+  bbox: readonly [number, number, number, number] | null | undefined,
+  frameWidth: number,
+  frameHeight: number,
+): number {
+  const pixels = clamp01(firePixelRatio);
+  if (!bbox || !bbox.every(Number.isFinite)
+    || !Number.isFinite(frameWidth) || !Number.isFinite(frameHeight)
+    || frameWidth <= 0 || frameHeight <= 0) return pixels;
+  const [x, y, width, height] = bbox;
+  if (width <= 0 || height <= 0) return pixels;
+  const visibleWidth = Math.max(0, Math.min(frameWidth, x + width) - Math.max(0, x));
+  const visibleHeight = Math.max(0, Math.min(frameHeight, y + height) - Math.max(0, y));
+  return Math.max(pixels, visibleWidth * visibleHeight / (frameWidth * frameHeight));
+}
 
 /**
  * A visual fire candidate is deliberately looser than a standalone fire alarm.
@@ -81,6 +102,8 @@ export function fuseFireWithSpeech(
   windowMs = FIRE_FUSION_WINDOW_MS,
 ): VerifiedFireSpeech | null {
   if (!fire || !speech || Math.abs(fire.at - speech.at) > windowMs) return null;
+  const regionRatio = fire.regionRatio ?? fire.firePixelRatio;
+  if (!Number.isFinite(regionRatio) || regionRatio < LARGE_FIRE_MIN_FRAME_RATIO || regionRatio > 1) return null;
   return {
     fire,
     speech,

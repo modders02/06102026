@@ -72,7 +72,7 @@ function SlotCard({
   onConnected: (v: { connected: boolean; streamUrl: string; webrtcUrl?: string }) => void;
 }) {
   const [status, setStatus] = useState<BackendCameraStatus | null>(null);
-  const [busy, setBusy] = useState<'' | 'check' | 'start' | 'restart' | 'stop' | 'test'>('');
+  const [busy, setBusy] = useState<'' | 'start' | 'restart' | 'stop' | 'test'>('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [expanded, setExpanded] = useState(false);
@@ -96,28 +96,15 @@ function SlotCard({
     if (live) setError('');
   }, [onConnected, server]);
 
-  const check = useCallback(async (silent = true) => {
-    if (!silent) { setBusy('check'); setError(''); }
+  const check = useCallback(async () => {
     try {
       const s = await getMultiStatus(server);
       const mine = s.cameras.find(c => c.id === id) ?? null;
       apply(mine);
-      if (!silent) {
-        setMessage(cameraReady(mine) ? '' : mine?.ffmpeg
-          ? 'Waiting for camera connection confirmation.'
-          : 'Camera is not connected. Press Connect to try again.');
-        if (mine?.error) setError(mine.error);
-      }
       return mine;
     } catch {
       apply(null);
-      if (!silent) {
-        setMessage('');
-        setError(backendHint(server) || `Could not reach the local server at ${server}.`);
-      }
       return null;
-    } finally {
-      if (!silent) setBusy('');
     }
   }, [server, id, apply]);
 
@@ -126,8 +113,8 @@ function SlotCard({
   checkRef.current = check;
   useEffect(() => {
     if (!slot.ip.trim()) return;
-    void checkRef.current(true);
-    const t = window.setInterval(() => { void checkRef.current(true); }, 2500);
+    void checkRef.current();
+    const t = window.setInterval(() => { void checkRef.current(); }, 2500);
     return () => window.clearInterval(t);
   }, [slot.ip, server, id]);
 
@@ -219,7 +206,7 @@ function SlotCard({
       }
       connectionIntent.current = true;
       onPatch({ autoConnect: true });
-      const confirmed = await check(true);
+      const confirmed = await check();
       if (cameraReady(confirmed)) setMessage('');
       else if (!confirmed) { setMessage(''); setError('Could not confirm the camera connection. Try again.'); }
       else { setMessage('Waiting for camera connection confirmation.'); if (confirmed.error) setError(confirmed.error); }
@@ -454,19 +441,13 @@ function SlotCard({
         <button
           type="button"
           onClick={() => { void handleConnect(true); }}
-          disabled={busy !== '' || !live}
+          disabled={busy !== '' || !slot.ip.trim()}
           aria-label={`Reconnect ${slot.name}`}
           title={`Reconnect ${slot.name}`}
-          className="shrink-0 flex h-10 w-10 items-center justify-center rounded-lg border border-border hover:bg-muted disabled:opacity-50"
-        >
-          {busy === 'restart' ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-        </button>
-        <button
-          onClick={() => check(false)}
-          disabled={busy !== ''}
           className="flex items-center gap-2 text-[15px] font-semibold px-3 py-2.5 rounded-lg border border-border hover:bg-muted disabled:opacity-50"
         >
-          <RefreshCw className={`w-4 h-4 ${busy === 'check' ? 'animate-spin' : ''}`} /> Check
+          {busy === 'restart' ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          {busy === 'restart' ? 'Reconnecting…' : 'Reconnect'}
         </button>
         <button
           onClick={() => onAi(!slot.aiEnabled)}

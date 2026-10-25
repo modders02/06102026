@@ -14,9 +14,15 @@ class FakePeer extends EventTarget {
   iceGatheringState = 'complete';
   connectionState = 'new';
   localDescription: RTCSessionDescriptionInit | null = null;
-  ontrack: ((event: { track: Track }) => void) | null = null;
+  ontrack: ((event: { track: Track; receiver?: { jitterBufferTarget?: number | null } }) => void) | null = null;
   onconnectionstatechange: (() => void) | null = null;
-  addTransceiver = vi.fn();
+  receivers: Array<{ jitterBufferTarget: number | null }> = [];
+  addTransceiver = vi.fn(() => {
+    const receiver = { jitterBufferTarget: null as number | null };
+    this.receivers.push(receiver);
+    return { receiver };
+  });
+  getStats = vi.fn().mockResolvedValue(new Map());
   createOffer = vi.fn().mockResolvedValue({ type: 'offer', sdp: 'camera offer' });
   setLocalDescription = vi.fn(async (offer: RTCSessionDescriptionInit) => { this.localDescription = offer; });
   setRemoteDescription = vi.fn().mockResolvedValue(undefined);
@@ -70,6 +76,7 @@ describe('camera WebRTC playback', () => {
     expect(peer.addTransceiver.mock.calls).toEqual([
       ['video', { direction: 'recvonly' }], ['audio', { direction: 'recvonly' }],
     ]);
+    expect(peer.receivers.map(receiver => receiver.jitterBufferTarget)).toEqual([0, 0]);
     expect(fetchMock).toHaveBeenCalledWith(endpoint, expect.objectContaining({
       method: 'POST', headers: { 'Content-Type': 'application/sdp' }, body: 'camera offer',
     }));
@@ -148,6 +155,108 @@ describe('camera WebRTC playback', () => {
     expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('interrupted') }));
     expect(peer.close).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledWith(session, { method: 'DELETE', keepalive: true });
+  });
+
+  it('keeps delivering tracks when a browser cannot apply the buffer target', async () => {
+    const { callbacks, peer } = open();
+    await flush();
+    const track = { id: 'video', stop: vi.fn() };
+    const receiver = Object.defineProperty({}, 'jitterBufferTarget', { get: () => null });
+    expect(() => peer.ontrack?.({ track, receiver })).not.toThrow();
+    expect(callbacks.onStream).toHaveBeenCalledOnce();
+    expect(callbacks.onError).not.toHaveBeenCalled();
+  });
+
+  it.each(['jitter buffer', 'decoder'])('recovers sustained %s backlog even while frames keep advancing', async queue => {
+    const { callbacks, peer } = open();
+    await flush();
+    let frames = 0;
+    peer.getStats.mockImplementation(async () => {
+      frames += 20;
+      return new Map([['video', {
+        id: 'video', type: 'inbound-rtp', kind: 'video',
+        framesDecoded: frames, jitterBufferEmittedCount: frames,
+        jitterBufferDelay: queue === 'jitter buffer' ? frames * 1.4 : 0,
+        totalProcessingDelay: queue === 'decoder' ? frames * 1.4 : 0,
+      }]]);
+    });
+    peer.state('connected');
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(callbacks.onError).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'CameraPlaybackDelayError', message: expect.stringContaining('fell behind'),
+    }));
+    expect(peer.close).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith(session, { method: 'DELETE', keepalive: true });
+    const polls = peer.getStats.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(peer.getStats).toHaveBeenCalledTimes(polls);
+  });
+
+  it('uses recent delay instead of the lifetime average after an old backlog clears', async () => {
+    const { callbacks, peer } = open();
+    await flush();
+    let frames = 100;
+    let delay = 200;
+    peer.getStats.mockImplementation(async () => {
+      frames += 20; delay += 2;
+      return new Map([['video', {
+        id: 'video', type: 'inbound-rtp', kind: 'video',
+        jitterBufferEmittedCount: frames, jitterBufferDelay: delay,
+      }]]);
+    });
+    peer.state('connected');
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(callbacks.onError).not.toHaveBeenCalled();
+    expect(peer.close).not.toHaveBeenCalled();
+  });
+
+  it('allows a short delay spike and requires consecutive delayed samples', async () => {
+    const { callbacks, peer } = open();
+    await flush();
+    const delays = [0, 1.4, 1.4, 0.1, 1.4, 1.4, 1.4];
+    let frames = 0;
+    let total = 0;
+    peer.getStats.mockImplementation(async () => {
+      total += (delays.shift() ?? 0.1) * 20;
+      frames += 20;
+      return new Map([['video', {
+        id: 'video', type: 'inbound-rtp', kind: 'video',
+        jitterBufferEmittedCount: frames, jitterBufferDelay: total,
+      }]]);
+    });
+    peer.state('connected');
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(callbacks.onError).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(callbacks.onError).toHaveBeenCalledOnce();
+  });
+
+  it('does not overlap stats requests or react to a result arriving after close', async () => {
+    const pending = deferred<Map<string, unknown>>();
+    const { client, callbacks, peer } = open();
+    await flush();
+    peer.getStats.mockReturnValue(pending.promise);
+    peer.state('connected');
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(peer.getStats).toHaveBeenCalledOnce();
+    client.close();
+    pending.resolve(new Map());
+    await flush();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(peer.getStats).toHaveBeenCalledOnce();
+    expect(callbacks.onError).not.toHaveBeenCalled();
+  });
+
+  it('keeps playback working when optional statistics are unavailable', async () => {
+    const { callbacks, peer } = open();
+    await flush();
+    peer.getStats.mockRejectedValue(new Error('Stats unavailable'));
+    peer.state('connected');
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(callbacks.onError).not.toHaveBeenCalled();
+    expect(peer.close).not.toHaveBeenCalled();
   });
 });
 

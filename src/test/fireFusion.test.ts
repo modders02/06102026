@@ -9,6 +9,8 @@ import {
   isImmediateFireSmoke,
   makeFireSpeechSignal,
   makeFireVisualSignal,
+  LARGE_FIRE_MIN_FRAME_RATIO,
+  measureFireRegionRatio,
 } from '@/lib/fireFusion';
 
 describe('fire verification fusion', () => {
@@ -41,7 +43,7 @@ describe('fire verification fusion', () => {
   });
 
   it('requires visual fire plus spoken fire within the fusion window', () => {
-    const fire = makeFireVisualSignal(true, 0.6, 0.01, 0, 90, 5000)!;
+    const fire = { ...makeFireVisualSignal(true, 0.6, 0.01, 0, 90, 5000)!, regionRatio: 0.15 };
     const speech = makeFireSpeechSignal('fire', 0.98, 5000 + FIRE_FUSION_WINDOW_MS)!;
     expect(fuseFireWithSpeech(fire, speech)).toMatchObject({
       confidence: 0.6,
@@ -52,7 +54,7 @@ describe('fire verification fusion', () => {
   });
 
   it('rejects spoken fire outside the fusion window', () => {
-    const fire = makeFireVisualSignal(true, 0.6, 0.01, 0, 90, 5000)!;
+    const fire = makeFireVisualSignal(true, 0.6, 0.15, 0, 90, 5000)!;
     const speech = makeFireSpeechSignal('fire', 0.98, 5000 + FIRE_FUSION_WINDOW_MS + 1)!;
     expect(fuseFireWithSpeech(fire, speech)).toBeNull();
   });
@@ -77,5 +79,21 @@ describe('fire verification fusion', () => {
   it('does not verify smoke or low visibility without a fire candidate', () => {
     expect(makeFireVisualSignal(false, 0.8, 0, 0.5, 20, 1000)).toBeNull();
     expect(isImmediateFireSmoke(null)).toBe(false);
+  });
+
+  it('requires a large current fire region even when spoken fire and a candidate agree', () => {
+    const speech = makeFireSpeechSignal('fire', 0.98, 1000);
+    const small = makeFireVisualSignal(true, 0.95, LARGE_FIRE_MIN_FRAME_RATIO - 0.001, 0, 100, 1000)!;
+    expect(fuseFireWithSpeech(small, speech)).toBeNull();
+    expect(fuseFireWithSpeech({ ...small, regionRatio: LARGE_FIRE_MIN_FRAME_RATIO }, speech)).not.toBeNull();
+    expect(fuseFireWithSpeech({ ...small, regionRatio: Number.NaN }, speech)).toBeNull();
+  });
+
+  it('measures a detector region in camera coordinates and clips it to the current frame', () => {
+    expect(measureFireRegionRatio(0.01, [0, 0, 120, 80], 320, 180)).toBeCloseTo(1 / 6);
+    expect(measureFireRegionRatio(0, [-160, 0, 200, 180], 320, 180)).toBe(0.125);
+    expect(measureFireRegionRatio(0.15, undefined, 320, 180)).toBe(0.15);
+    expect(measureFireRegionRatio(0.01, [0, 0, -100, 180], 320, 180)).toBe(0.01);
+    expect(measureFireRegionRatio(0.01, [0, 0, 100, 180], 0, 180)).toBe(0.01);
   });
 });

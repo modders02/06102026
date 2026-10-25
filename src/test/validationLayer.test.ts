@@ -29,6 +29,16 @@ const runtime = (alertValidation: CameraRuntime['alertValidation']): CameraRunti
 });
 
 describe('validation layer decision consistency', () => {
+  const withCandidate = (decision: string): CameraRuntime => ({
+    ...runtime(undefined),
+    audio: {
+      thread_running: true, connected: true, chunks_received: 1, bytes_received: 32000,
+      last_chunk_at: null, last_transcription_at: null, last_transcript: '',
+      error: null, ffmpeg_error: null,
+      custom_kws: { last_candidate: 'help', last_candidate_confidence: 0.93, last_decision: decision },
+    },
+  });
+
   it('shows ACCEPTED from the exact final alert-validation outcome', () => {
     const view = deriveValidationView(runtime({
       status: 'accepted',
@@ -109,4 +119,33 @@ describe('validation layer decision consistency', () => {
       state: 'rejected',
     });
   });
+
+  it.each(['accepted', 'accepted_help_90', 'verified', 'verified_help_rescue', 'verification_pending'])(
+    'keeps %s pending until the alert pipeline confirms camera evidence', decision => {
+      expect(deriveValidationView(withCandidate(decision))).toMatchObject({
+        keyword: 'help', decision: 'PENDING', state: 'pending',
+      });
+    },
+  );
+
+  it('waits for a decision when a candidate has not been checked yet', () => {
+    expect(deriveValidationView(withCandidate(''))).toMatchObject({
+      decision: 'WAITING', state: 'waiting',
+    });
+  });
+
+  it.each(['duration_mismatch', 'too_close_to_unknown'])(
+    'explains %s without exposing the code in either validation path', code => {
+      const legacy = deriveValidationView(withCandidate(code));
+      const authoritative = deriveValidationView(runtime({
+        status: 'rejected', keyword: 'help', confidence: 0.93,
+        emotion: '', emotionConfidence: 0, reason: code,
+        evaluatedAt: '2026-10-15T00:00:00Z', sourceDecision: code,
+      }));
+      expect(authoritative.crossCheck).toBe(legacy.crossCheck);
+      expect(legacy.crossCheck).not.toContain(code);
+      expect(legacy.crossCheck).not.toContain('UNKNOWN');
+      expect(authoritative.state).toBe('rejected');
+    },
+  );
 });

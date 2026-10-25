@@ -2,8 +2,39 @@ export const MULTIMODAL_FUSION_WINDOW_MS = 4_000;
 export const DISTRESS_FACE_MIN_CONFIDENCE = 0.55;
 export const DISTRESS_FACE_FRESHNESS_MS = 2500;
 
-export type DistressFaceLabel = 'Angry' | 'Frightened';
-export type DistressKeyword = 'help';
+export type DistressFaceLabel = 'Angry' | 'Frightened' | 'Sad';
+
+/** Application validation rules, not a diagnosis of the expression's cause. */
+export const KEYWORD_FACE_PAIRINGS = {
+  help: ['Angry', 'Frightened'],
+  emergency: ['Frightened'],
+  danger: ['Angry', 'Frightened'],
+  intruder: ['Angry', 'Frightened'],
+  police: ['Angry', 'Frightened'],
+  ambulance: ['Sad', 'Frightened'],
+} as const satisfies Record<string, readonly DistressFaceLabel[]>;
+
+export type FacialValidationKeyword = keyof typeof KEYWORD_FACE_PAIRINGS;
+// Fire keeps its separate detector-confirmed visual validation path.
+export type DistressKeyword = FacialValidationKeyword;
+const DISTRESS_KEYWORD_PATTERN = new RegExp(
+  `(^|[^a-z])(${Object.keys(KEYWORD_FACE_PAIRINGS).join('|')})(?=$|[^a-z])`, 'i',
+);
+
+export function facialExpressionsForKeyword(keyword: string): readonly DistressFaceLabel[] {
+  const normalized = keyword.trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(KEYWORD_FACE_PAIRINGS, normalized)
+    ? KEYWORD_FACE_PAIRINGS[normalized as FacialValidationKeyword] : [];
+}
+
+export function facialValidationRequirement(keyword: string): string {
+  return facialExpressionsForKeyword(keyword).join('/');
+}
+
+export function isKeywordFaceCompatible(keyword: string, expression: string | null | undefined) {
+  const label = normalizeDistressFaceLabel(expression);
+  return !!label && facialExpressionsForKeyword(keyword).includes(label);
+}
 
 export interface DistressFaceSignal {
   label: DistressFaceLabel;
@@ -30,6 +61,7 @@ export function normalizeDistressFaceLabel(
 ): DistressFaceLabel | null {
   const normalized = (expression ?? '').trim().toLowerCase();
   if (normalized === 'angry' || normalized === 'anger') return 'Angry';
+  if (normalized === 'sad' || normalized === 'sadness') return 'Sad';
   if (
     normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
     || normalized === 'surprised' || normalized === 'surprise'
@@ -53,8 +85,8 @@ export function makeDistressFaceSignal(
 }
 
 /**
- * Distress fusion is intentionally strict: only the accepted word "help"
- * can combine with an Angry/Frightened face to create a distress alert.
+ * Only a configured, accepted keyword can combine with its matching facial
+ * expression. Fire is handled separately with detector-confirmed visual fire.
  */
 export function makeDistressSpeechSignal(
   transcript: string | null | undefined,
@@ -62,8 +94,9 @@ export function makeDistressSpeechSignal(
   at = Date.now(),
 ): DistressSpeechSignal | null {
   const text = (transcript ?? '').toLowerCase();
-  if (!/(^|[^a-z])help([^a-z]|$)/i.test(text)) return null;
-  const keyword: DistressKeyword = 'help';
+  const match = DISTRESS_KEYWORD_PATTERN.exec(text);
+  if (!match) return null;
+  const keyword = match[2] as DistressKeyword;
   return {
     keyword,
     transcript: (transcript ?? '').trim(),
@@ -78,7 +111,7 @@ export function makeDistressSoundSignal(
   _at = Date.now(),
 ): DistressSpeechSignal | null {
   // Sound-only cues such as screaming are diagnostic only. They do not satisfy
-  // the distress alert fusion rule without the accepted spoken word "help".
+  // the distress alert fusion rule without an accepted configured keyword.
   return null;
 }
 
@@ -89,9 +122,7 @@ export function fuseDistressSignals(
 ): VerifiedMultimodalDistress | null {
   if (!face || !speech || Math.abs(face.at - speech.at) > windowMs) return null;
 
-  const compatible =
-    speech.keyword === 'help'
-    && (face.label === 'Angry' || face.label === 'Frightened');
+  const compatible = isKeywordFaceCompatible(speech.keyword, face.label);
 
   if (!compatible) return null;
 
@@ -104,5 +135,5 @@ export function fuseDistressSignals(
 }
 
 export function multimodalDistressLabel(result: VerifiedMultimodalDistress) {
-  return `Verified distress: ${result.face.label} + "help"`;
+  return `Verified distress: ${result.face.label} + "${result.speech.keyword}"`;
 }

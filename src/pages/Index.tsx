@@ -5,11 +5,9 @@ import { Moon, Sun, Home, LogOut, Shield, Wifi, X, Flame, HelpCircle, Menu, Spar
 import DashboardCameraCard from '@/components/dashboard/DashboardCameraCard';
 import CameraMonitor from '@/components/dashboard/CameraMonitor';
 import Monitoring from '@/pages/Monitoring';
-import AlertLog from '@/components/dashboard/AlertLog';
 import ControlsPanel from '@/components/dashboard/ControlsPanel';
 import AttentionGauge from '@/components/dashboard/AttentionGauge';
 import DetectionFeedback from '@/components/dashboard/DetectionFeedback';
-import PerformanceMonitor from '@/components/dashboard/PerformanceMonitor';
 import TutorialOverlay, { type TutorialStep } from '@/components/dashboard/TutorialOverlay';
 import ExpertMode, { type AlgorithmId } from '@/components/dashboard/ExpertMode';
 import AccessibilityPanel from '@/components/dashboard/AccessibilityPanel';
@@ -40,7 +38,6 @@ import { makeDistressSpeechSignal } from '@/lib/multimodalDistress';
 import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import { getCameraSession } from '@/lib/cameraSessions';
 import { clipFileName, recordClip, saveClip } from '@/lib/clipRecorder';
-import { CAMERA_HISTORY_LIMIT } from '@/lib/cameraRegistry';
 import { classifyPriorityScenario, isPriorityCameraAlert } from '@/lib/priorityScenario';
 import type { CameraRuntime, DetectionEvent } from '@/types/multicam';
 import type { Alert, QualityMode } from '@/types/dashboard';
@@ -66,17 +63,17 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
   fire: [
     {
       selector: '#tour-fire-analysis', placement: 'top', title: 'Fire and smoke analysis',
-      body: 'A fire alert requires an accepted “fire” keyword and a current, detector-confirmed visual fire. Visual-only fire and smoke detections continue updating Event history.',
+      body: 'A fire alert requires an accepted “fire” keyword and current, detector-confirmed large fire covering at least 10% of the camera frame. Visual-only fire and smoke detections continue updating Event history.',
       implementation: 'src/lib/fireDetection.ts',
-      code: `if (confirmedVisualFire && acceptedFireWithin10s) alert();`,
+      code: `if (confirmedLargeFire && acceptedFireWithin10s) alert();`,
     },
   ],
   face: [
     {
       selector: '#tour-face-distress', placement: 'top', title: 'Facial distress',
-      body: 'TinyFaceDetector finds the main face. Facial expressions never alarm by themselves: only Angry or Frightened can combine with an accepted "help" keyword inside the fusion window.',
+      body: 'Facial expressions never alarm by themselves. Help, danger, intruder, and police require Angry/Frightened; emergency requires Frightened; ambulance requires Sad/Frightened. Each accepted word must match the same camera within four seconds.',
       implementation: 'src/hooks/useFaceDistress.ts',
-      code: `alert = fuse(angryOrFrightened, acceptedHelp, 4_000);`,
+      code: `alert = fuse(matchingExpression, acceptedKeyword, 4_000);`,
     },
   ],
   speech: [
@@ -88,9 +85,9 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
     },
     {
       selector: '#tour-live-transcription', placement: 'bottom', title: 'Safety phrase matching',
-      body: 'Only accepted trained safety keywords are published. “Help” requires a recent Angry/Frightened face; “fire” uses its separate visual-fire verification path.',
+      body: 'Only accepted trained safety keywords are published. Each facial keyword requires its configured expression. “Fire” requires a large, detector-confirmed fire in the current camera frame.',
       implementation: 'src/lib/safetyLexicon.ts',
-      code: `if (angryOrFrightened && acceptedHelp && within4Seconds) raiseVerifiedAlert();`,
+      code: `if (matchingExpression && acceptedKeyword && within4Seconds) raiseVerifiedAlert();`,
     },
   ],
   audio: [
@@ -115,9 +112,9 @@ const ALGORITHM_TOURS: Record<AlgorithmId, TutorialStep[]> = {
       code: `attention = 0.40*visual + 0.30*audio + 0.30*objects;`,
     },
     {
-      selector: '#tour-alert-log', placement: 'left', title: '3. Record the result',
-      body: 'Accepted audio and matching camera evidence produce one alert with its exact trigger snapshot. Ongoing detections and recording updates appear in Event history.',
-      implementation: 'src/pages/Index.tsx · src/components/dashboard/AlertLog.tsx',
+      selector: '#tour-cams', placement: 'bottom', title: '3. Review the result',
+      body: 'Accepted audio and matching camera evidence produce one alert with its exact trigger snapshot. Use a camera’s Events button to review alerts, ongoing detections, and recording updates on the Cameras page.',
+      implementation: 'src/pages/Index.tsx · src/components/dashboard/DashboardEvents.tsx',
       code: `if (acceptedAudio && acceptedCameraEvidence) addAlert(event);`,
     },
   ],
@@ -132,7 +129,7 @@ export default function Index() {
   const [searchParams, setSearchParams] = useSearchParams();
   const liveView = location.pathname === '/cameras';
   const requestedCamera = searchParams.get('camera');
-  const { events, alertEvents, settings, addEvent, updateEvent, updateSettings } = useCameraRegistry();
+  const { events, settings, addEvent, updateEvent, updateSettings } = useCameraRegistry();
   const { householdId, checkForWakeWord, logAlert, logNotification } = useHousehold(user?.id);
   const { cameras, devices, startCameras, stopCameras, enumerateDevices } = useCamera();
   const { count, slots, setCount, updateSlot } = useCameraSlots();
@@ -154,11 +151,9 @@ export default function Index() {
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialOverride, setTutorialOverride] = useState<TutorialStep[] | null>(null);
   const [runtimes, setRuntimes] = useState<Record<number, CameraRuntime>>({});
-  const [alerts, setAlerts] = useState<Alert[]>([]);
   const [cameraError, setCameraError] = useState('');
   const [showBoundingBoxes, setShowBoundingBoxes] = useState(true);
   const [showHeatmap, setShowHeatmap] = useState(true);
-  const [showAlerts, setShowAlerts] = useState(true);
   const [quality, setQuality] = useState<QualityMode>('SD');
   const [mirror, setMirror] = useState(false);
   const [heatmapOpacity, setHeatmapOpacity] = useState(50);
@@ -190,9 +185,6 @@ export default function Index() {
     for (const event of events) counts.set(event.cameraId, (counts.get(event.cameraId) || 0) + 1);
     return counts;
   }, [events]);
-  const alertSnapshots = useMemo(() => Array.from(new Map([...events, ...(alertEvents || [])].map(event => [event.id, event])).values()).filter(event => event.snapshot).map(event => ({
-    id: event.id, cameraId: Number(event.cameraId.replace('slot-', '')), timestamp: new Date(event.timestamp), dataUrl: event.snapshot!, reason: event.label,
-  })), [events, alertEvents]);
   useWakeLock(running || connected.length > 0);
 
   useEffect(() => {
@@ -299,9 +291,6 @@ export default function Index() {
     // enter Camera alerts, announcements, email, or the emergency popup.
     if (!priority.priority) return;
 
-    const index = Number(event.cameraId.replace('slot-', '')) || 1;
-    setAlerts(previous => [{ id, snapshotId: alreadyStored ? undefined : id, timestamp: new Date(event.timestamp), message: `${event.cameraName}: ${event.label}`, severity, cameraId: index }, ...previous].slice(0, CAMERA_HISTORY_LIMIT));
-
     if (severity === 'high' || severity === 'critical') {
       announce(`Alert. ${event.cameraName}. ${event.label}`, true);
       void logAlert(event.type, `${event.cameraName}: ${event.label}`);
@@ -366,8 +355,8 @@ export default function Index() {
     if (!recognizedSpeech) return;
 
     // Always check accepted speech against the household Supabase wake_words
-    // table first. "help" is reserved for Angry/Frightened fusion and "fire"
-    // for visual-fire verification. Other accepted words are history-only.
+    // table first. Configured words are reserved for their matching facial
+    // expression, while "fire" requires a confirmed large live fire region.
     const match = checkForWakeWord(recognizedSpeech);
     if (
       makeDistressSpeechSignal(recognizedSpeech)
@@ -401,7 +390,7 @@ export default function Index() {
       lastLocalSpeechTrigger.current = null;
       return;
     }
-    // Each final speech segment is consumed once. Reserved help/fire cues use
+    // Each final speech segment is consumed once. Reserved safety cues use
     // the camera pipeline's shared fusion path, including pending validation.
     if (lastLocalSpeechTrigger.current === result.id) return;
     lastLocalSpeechTrigger.current = result.id;
@@ -429,8 +418,8 @@ export default function Index() {
     if (!running || !localCameras.length || connected.length) return;
 
     if (audioFeatures.audioEvent === 'scream') {
-      // Screaming is diagnostic only. Distress alerts require accepted "help"
-      // plus an Angry/Frightened face.
+      // Screaming is diagnostic only. Distress alerts require a configured
+      // accepted keyword plus its matching facial expression.
       return;
     }
 
@@ -471,7 +460,7 @@ export default function Index() {
 
     if (yamnet.topLabel === 'Screaming') {
       // Screaming alone, even with a facial cue, never satisfies the strict
-      // distress alert rule. Only accepted "help" + Angry/Frightened does.
+      // distress alert rule. An accepted keyword and matching expression are required.
       return;
     }
 
@@ -518,7 +507,6 @@ export default function Index() {
     { selector: '#tour-header', title: 'Monitoring dashboard', placement: 'bottom', body: 'Connect your cameras and review their latest snapshots here.' },
     { selector: '#tour-cams', title: 'Last-seen images', placement: 'bottom', body: 'Each card holds the last image captured from its camera. Open a connected camera for realtime video; offline cards open connection settings.' },
     { selector: '#tour-live-transcription', title: 'Camera audio', placement: 'bottom', body: 'The trained CCTV safety-keyword detector continues while the dashboard displays snapshots. Muting live playback does not stop listening.' },
-    { selector: '#tour-alert-log', title: 'Safety alerts', placement: 'left', body: 'Urgent safety triggers appear here. Each card’s Events button opens detailed alerts and history on the Cameras page.' },
     { selector: '#tour-start', title: 'Monitoring controls', placement: 'left', body: 'Use Start and Stop to control monitoring. Live video plays only on the Cameras page.' },
   ];
   useEffect(() => {
@@ -609,18 +597,16 @@ export default function Index() {
               <p className="mt-2 text-center text-sm text-muted-foreground">{running ? 'Snapshot detection and audio triggers are active.' : 'Connect a camera, then start monitoring.'}</p>
             </div>
             <AttentionGauge score={attention} />
-            <div id="tour-alert-log"><AlertLog alerts={alerts} visible={showAlerts} snapshots={alertSnapshots} /></div>
-            <ControlsPanel snapshotMode running={running} threshold={settings.saliencyThreshold ?? 40} showBoundingBoxes={showBoundingBoxes} showHeatmap={showHeatmap} showAlerts={showAlerts}
+            <ControlsPanel snapshotMode running={running} threshold={settings.saliencyThreshold ?? 40} showBoundingBoxes={showBoundingBoxes} showHeatmap={showHeatmap}
               quality={quality} mirror={mirror} heatmapOpacity={heatmapOpacity} simulationMode={simulationMode} priorityObjects={priorityObjects} minConfidence={Math.round(settings.objectThreshold * 100)}
               saliencyMode={settings.saliencyMode ?? 'sobel'} attentionThreshold={settings.attentionThreshold ?? 15} alertCooldownMs={settings.alertCooldownMs ?? 3000}
               onStart={handleStart} onStop={handleStop} onThresholdChange={value => updateSettings({ saliencyThreshold: value })}
               onSaliencyModeChange={value => updateSettings({ saliencyMode: value })} onAttentionThresholdChange={value => updateSettings({ attentionThreshold: value })}
               onAlertCooldownChange={value => updateSettings({ alertCooldownMs: value })}
               onToggleBoundingBoxes={() => setShowBoundingBoxes(value => !value)}
-              onToggleHeatmap={() => setShowHeatmap(value => !value)} onToggleAlerts={() => setShowAlerts(value => !value)} onQualityChange={setQuality}
+              onToggleHeatmap={() => setShowHeatmap(value => !value)} onQualityChange={setQuality}
               onToggleMirror={() => setMirror(value => !value)} onHeatmapOpacityChange={setHeatmapOpacity} onToggleSimulation={() => setSimulationMode(value => !value)}
               onPriorityObjectsChange={setPriorityObjects} onMinConfidenceChange={value => updateSettings({ objectThreshold: value / 100 })} onExportCSV={exportCSV} />
-            <PerformanceMonitor />
           </aside>
         </main>
       </div>}

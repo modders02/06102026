@@ -72,6 +72,8 @@ export interface DetectionEvent {
   priorityScenario?: boolean;
   /** Fire alerts require this detector-originated confirmation bit. */
   fireConfirmed?: boolean;
+  /** Current confirmed fire region area / frame area, retained for alert revalidation. */
+  fireRegionRatio?: number;
   /** Smoke alerts require this detector-originated confirmation bit. */
   smokeConfirmed?: boolean;
   /** Fusion outcome captured at emission; acceptance requires audio and camera evidence. */
@@ -166,6 +168,9 @@ export interface CameraRuntime {
     reason: string;
     evaluatedAt: string;
     sourceDecision?: string;
+    /** Local facial-validation window, independent of the backend event clock. */
+    startedAt?: string;
+    deadlineAt?: string;
   };
   /** Rolling live transcription of everything heard on this camera. */
   transcript: string;

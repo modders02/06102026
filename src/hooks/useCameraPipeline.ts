@@ -12,6 +12,7 @@ import {
   objectRelevanceScore,
 } from '@/lib/attentionFusion';
 import { validateFusionCycle } from '@/lib/signalValidation';
+import { formatWakeWordDecision } from '@/lib/wakeWordValidation';
 import { createMotionAnomalyState, detectMotionAnomaly } from '@/lib/motionAnomaly';
 import { createFireState, detectFire } from '@/lib/fireDetection';
 import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/multiCamServer';
@@ -24,6 +25,7 @@ import {
   fuseFireWithSpeech,
   makeFireVisualSignal,
   makeFireSpeechSignal,
+  measureFireRegionRatio,
   type FireVisualSignal,
   type FireSpeechSignal,
 } from '@/lib/fireFusion';
@@ -32,6 +34,8 @@ import {
   DISTRESS_FACE_MIN_CONFIDENCE,
   MULTIMODAL_FUSION_WINDOW_MS,
   fuseDistressSignals,
+  facialValidationRequirement,
+  isKeywordFaceCompatible,
   isMultimodalDistressExpression,
   makeDistressFaceSignal,
   makeDistressSpeechSignal,
@@ -280,12 +284,14 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       motionAlertKeyRef.current = null;
       attentionAlertKeyRef.current = null;
       const currentValidation = runtimeRef.current.alertValidation;
+      const pendingKeyword = pendingSpeech?.keyword || currentValidation?.keyword || 'help';
       patch({
         objects: [], humanCount: 0, saliencyScore: 0, attentionScore: 0,
         fire: { detected: false, candidate: false, confidence: 0 },
         smoke: { detected: false, confidence: 0 },
         faceDistress: { detected: false, label: '', confidence: 0 },
-        ...(pendingSpeech || pendingFireSpeech || (currentValidation?.status === 'pending' && ['help', 'fire'].includes(currentValidation.keyword))
+        ...(pendingSpeech || pendingFireSpeech || (currentValidation?.status === 'pending'
+          && (makeDistressSpeechSignal(currentValidation.keyword) || currentValidation.keyword === 'fire'))
           ? {
               alertValidation: {
                 status: 'rejected' as const,
@@ -296,8 +302,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                 reason: pendingFireSpeech || currentValidation?.keyword === 'fire'
                   ? 'Accepted "fire", but camera analysis became unavailable before visual validation completed.'
                   : !camera.enabled
-                    ? 'Accepted "help", but the camera is unavailable for facial validation.'
-                    : 'Accepted "help", but camera AI was disabled before facial validation completed.',
+                    ? `Accepted "${pendingKeyword}", but the camera is unavailable for facial validation.`
+                    : `Accepted "${pendingKeyword}", but camera AI was disabled before facial validation completed.`,
                 evaluatedAt: new Date().toISOString(),
                 sourceDecision: 'accepted',
               },
@@ -308,13 +314,13 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     return () => { analysisRevisionRef.current += 1; };
   }, [camera.enabled, camera.aiEnabled, camera.id, sourceStream, playbackEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.saliencyMode, settings.attentionThreshold, settings.priorityObjects, patch]);
 
-  // If facial inference fails while accepted help is waiting, fail closed with
+  // If facial inference fails while an accepted keyword is waiting, fail closed with
   // the real reason instead of leaving Validation stuck on PENDING.
   useEffect(() => {
     if (!face.error) return;
     const pending = recentDistressSpeechRef.current;
     const current = runtimeRef.current.alertValidation;
-    if (!pending && !(current?.status === 'pending' && current.keyword === 'help')) return;
+    if (!pending && !(current?.status === 'pending' && makeDistressSpeechSignal(current.keyword))) return;
     if (distressValidationTimerRef.current) {
       window.clearTimeout(distressValidationTimerRef.current);
       distressValidationTimerRef.current = undefined;
@@ -327,7 +333,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         confidence: pending?.confidence ?? current?.confidence ?? 0,
         emotion: current?.emotion || '',
         emotionConfidence: current?.emotionConfidence ?? 0,
-        reason: `Accepted "help", but facial-expression detection failed: ${face.error}`,
+        reason: `Accepted "${pending?.keyword || current?.keyword || 'help'}", but facial-expression detection failed: ${face.error}`,
         evaluatedAt: new Date().toISOString(),
         sourceDecision: 'accepted',
       },
@@ -360,6 +366,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       eventValidation?: DetectionEvent['alertValidation'],
       fireConfirmed = false,
       smokeConfirmed = false,
+      fireRegionRatio?: number,
     ) => {
       const now = Date.now();
       const key = type === 'fire' || type === 'smoke' ? type : `${type}:${label}`;
@@ -380,6 +387,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         confidence,
         alertValidation: eventValidation,
         fireConfirmed: type === 'fire' ? fireConfirmed : undefined,
+        fireRegionRatio: type === 'fire' ? fireRegionRatio : undefined,
         smokeConfirmed: type === 'smoke' ? smokeConfirmed : undefined,
         timestamp: new Date().toISOString(),
         snapshot: snapshot(),
@@ -534,6 +542,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             play();
           },
           onError: error => {
+            if (error.name === 'CameraPlaybackDelayError') {
+              scheduleWebRtcRetry(error.message);
+              return;
+            }
             const accessDenied = /HTTP (401|403)\b/.test(error.message);
             const advice = accessDenied
               ? 'Check MediaMTX authentication and read permission for this stream.'
@@ -741,11 +753,13 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       if (!thresholdSmokeDetected || thresholdFireDetected) visualSmokeAlertActiveRef.current = false;
 
       const pendingFireSpeech = recentFireSpeechRef.current;
-      const verifiedFire = thresholdFireDetected && frameSequence > fireSpeechAfterFrameRef.current
-        ? fuseFireWithSpeech(
-            makeFireVisualSignal(true, fire.confidence, fire.firePixelRatio, fire.smokeRatio, fire.visibility, fireObservedAt),
-            pendingFireSpeech,
-          )
+      const confirmedLiveFire = makeFireVisualSignal(thresholdFireDetected,
+        fire.confidence, fire.firePixelRatio, fire.smokeRatio, fire.visibility, fireObservedAt);
+      if (confirmedLiveFire) confirmedLiveFire.regionRatio = measureFireRegionRatio(
+        fire.firePixelRatio, fire.bbox, frame.width, frame.height,
+      );
+      const verifiedFire = frameSequence > fireSpeechAfterFrameRef.current
+        ? fuseFireWithSpeech(confirmedLiveFire, pendingFireSpeech)
         : null;
 
       const previousFire = runtimeRef.current.fire;
@@ -789,7 +803,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             window.clearTimeout(fireValidationTimerRef.current);
             fireValidationTimerRef.current = undefined;
           }
-          const validationReason = 'Accepted "fire" matched current detector-confirmed visual fire within the fusion window.';
+          const validationReason = 'Accepted "fire" matched current detector-confirmed large fire (at least 10% of the frame) within the fusion window.';
           patch({
             alertValidation: {
               status: 'accepted', keyword: 'fire', confidence: verifiedFire.speech.confidence,
@@ -802,7 +816,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
           // second separately accepted word can validate the continuing fire.
           emit('fire', 'Verified fire: visual fire + "fire"', verifiedFire.confidence, {
             status: 'accepted', reason: validationReason, keyword: 'fire', emotion: 'visual fire',
-          }, true);
+          }, true, false, verifiedFire.fire.regionRatio ?? verifiedFire.fire.firePixelRatio);
           visualFireAlertActiveRef.current = true;
         } else if (!visualFireAlertActiveRef.current) {
           visualFireAlertActiveRef.current = true;
@@ -1024,9 +1038,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   }, [camera.enabled, camera.aiEnabled, playbackEnabled]);
 
   // Facial expression tracking.
-  // Every base expression is non-alerting by itself. Angry and the configured
-  // Frightened aliases (fearful/surprised/shock) can verify accepted "help".
-  // All other expressions remain informational history only.
+  // Expressions alone never alert. Each accepted word must match its configured
+  // expression; Sad is available only to the ambulance pairing.
   useEffect(() => {
     if (!camera.enabled || !camera.aiEnabled || faceAnalysisRevisionRef.current !== analysisRevisionRef.current) return;
     const d = face.distress;
@@ -1045,13 +1058,15 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     });
 
     const activeValidation = runtimeRef.current.alertValidation;
-    if (activeValidation?.status === 'pending' && activeValidation.keyword === 'help' && !distressFace) {
+    if (activeValidation?.status === 'pending' && makeDistressSpeechSignal(activeValidation.keyword)
+      && (!distressFace || !isKeywordFaceCompatible(activeValidation.keyword, distressFace.label))) {
+      const required = facialValidationRequirement(activeValidation.keyword);
       const currentLabel = d.hasFace
         ? (emotion?.label || d.expression || 'unrecognized expression')
         : '';
       const reason = d.hasFace
-        ? `Accepted "help"; current expression ${currentLabel} (${(d.probability * 100).toFixed(0)}%) does not yet satisfy Angry/Frightened validation.`
-        : 'Accepted "help"; no face is currently detected, waiting for Angry/Frightened facial evidence.';
+        ? `Accepted "${activeValidation.keyword}"; current expression ${currentLabel} (${(d.probability * 100).toFixed(0)}%) does not yet satisfy ${required} validation.`
+        : `Accepted "${activeValidation.keyword}"; no face is currently detected, waiting for ${required} facial evidence.`;
       patch({
         alertValidation: {
           ...activeValidation,
@@ -1153,7 +1168,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             lastLocalSpeechIdRef.current = result.id;
             const text = result.transcript.trim();
             const { timestamp, confidence } = result;
-            if (makeDistressSpeechSignal(text)) localEvents.push({ keyword: 'help', transcript: text, confidence, timestamp });
+            const distressSpeech = makeDistressSpeechSignal(text);
+            if (distressSpeech) localEvents.push({ keyword: distressSpeech.keyword, transcript: text, confidence, timestamp });
             if (makeFireSpeechSignal(text)) localEvents.push({ keyword: 'fire', transcript: text, confidence, timestamp });
           }
         }
@@ -1176,19 +1192,6 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         const decision = kws?.last_decision || '';
         // The ASR-verified outcomes are accepted, not rejected diagnostics.
         if (candidate && decision && !['accepted', 'accepted_help_90', 'verified', 'verified_help_rescue', 'verification_pending'].includes(decision)) {
-          const reasons: Record<string, string> = {
-            negative_not_ready: 'UNKNOWN/non-keyword validation is not ready.',
-            duration_mismatch: 'Keyword duration does not match the trained examples.',
-            below_threshold: 'Keyword confidence is below the trained acceptance threshold.',
-            too_close_to_unknown: 'Candidate is too similar to UNKNOWN/non-keyword speech.',
-            insufficient_margin: 'Candidate is too close to another trained keyword.',
-            no_ready_candidate: 'No trained keyword candidate is ready.',
-            verification_timeout: 'Whisper speech verification timed out. Detection was not accepted; the model may still be loading.',
-            verification_busy: 'Whisper is still processing an earlier speech segment. This candidate was not accepted.',
-            verification_unavailable: 'Whisper could not run; the keyword remains unverified.',
-            verification_no_speech: 'Whisper returned no usable speech for this candidate.',
-            verification_mismatch: 'Whisper recognized a different word; the keyword was rejected.',
-          };
           const evaluatedAt = kws?.last_segment_at || new Date().toISOString();
           const previous = runtimeRef.current.alertValidation;
           if (
@@ -1204,7 +1207,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                 confidence: kws?.last_candidate_confidence ?? 0,
                 emotion: runtimeRef.current.faceDistress.label,
                 emotionConfidence: runtimeRef.current.faceDistress.confidence,
-                reason: reasons[decision] || `Keyword candidate rejected: ${decision}.`,
+                reason: formatWakeWordDecision(decision),
                 evaluatedAt,
                 sourceDecision: decision,
               },
@@ -1260,14 +1263,22 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
               patch({ audioDistress: { detected: false, keyword: '', confidence: 0, transcript: '' } });
             }, TRANSCRIPT_CLEAR_MS);
 
-            // "help" is intentionally not a standalone alarm. Hold it briefly
-            // so either speech-first or face-first ordering can verify the
-            // same-camera Angry/Frightened + accepted-help combination.
+            // Configured words never alarm alone. Hold accepted speech briefly
+            // for its matching facial expression from the same camera.
             const spokenAt = Number.isNaN(Date.parse(e.timestamp)) ? Date.now() : Date.parse(e.timestamp);
             // Fusion also uses only the accepted trained keyword. A displayed
-            // transcript that happens to contain "help" is not alert evidence.
+            // transcript that happens to contain another word is not alert evidence.
             const sourceText = keyword;
             let reservedForFusion = false;
+
+            // The newest accepted word owns validation. An earlier word's
+            // timeout must not overwrite a later keyword or fire check.
+            if (distressValidationTimerRef.current) window.clearTimeout(distressValidationTimerRef.current);
+            distressValidationTimerRef.current = undefined;
+            recentDistressSpeechRef.current = null;
+            if (fireValidationTimerRef.current) window.clearTimeout(fireValidationTimerRef.current);
+            fireValidationTimerRef.current = undefined;
+            recentFireSpeechRef.current = null;
 
             const fireSpeech = makeFireSpeechSignal(sourceText, confidence, spokenAt);
             if (fireSpeech) {
@@ -1300,7 +1311,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                   confidence: fireSpeech.confidence,
                   emotion: runtimeRef.current.fire.detected ? 'visual fire' : '',
                   emotionConfidence: runtimeRef.current.fire.confidence,
-                  reason: 'Accepted "fire"; waiting for current visual fire evidence.',
+                  reason: 'Accepted "fire"; waiting for current detector-confirmed large fire (at least 10% of the frame).',
                   evaluatedAt: e.timestamp,
                   sourceDecision: 'accepted',
                 },
@@ -1315,7 +1326,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                   status: 'rejected', keyword: 'fire', confidence: trackedSpeech.confidence,
                   emotion: runtimeRef.current.fire.candidate ? 'visual fire candidate' : '',
                   emotionConfidence: runtimeRef.current.fire.confidence,
-                  reason: 'Accepted "fire", but no current detector-confirmed visual fire matched within the fusion window.',
+                  reason: 'Accepted "fire", but no current detector-confirmed large fire (at least 10% of the frame) matched within the fusion window.',
                   evaluatedAt: new Date().toISOString(), sourceDecision: 'accepted',
                 } });
               }, Math.min(FIRE_FUSION_WINDOW_MS, remainingMs));
@@ -1324,6 +1335,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
 
             const distressSpeech = makeDistressSpeechSignal(sourceText, confidence, spokenAt);
             if (distressSpeech) {
+              const required = facialValidationRequirement(distressSpeech.keyword);
               reservedForFusion = true;
               recentDistressSpeechRef.current = distressSpeech;
 
@@ -1340,13 +1352,14 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                     emotion: currentFace.label,
                     emotionConfidence: currentFace.confidence,
                     reason: !currentAiEnabled
-                      ? 'Accepted "help", but camera AI is disabled so facial validation is unavailable.'
-                      : `Accepted "help", but facial-expression detection failed: ${currentFaceError}`,
+                      ? `Accepted "${distressSpeech.keyword}", but camera AI is disabled so facial validation is unavailable.`
+                      : `Accepted "${distressSpeech.keyword}", but facial-expression detection failed: ${currentFaceError}`,
                     evaluatedAt: e.timestamp,
                     sourceDecision: 'accepted',
                   },
                 });
               } else {
+                const startedAt = Date.now();
                 patch({
                   alertValidation: {
                     status: 'pending',
@@ -1354,9 +1367,11 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                     confidence: distressSpeech.confidence,
                     emotion: currentFace.label,
                     emotionConfidence: currentFace.confidence,
-                    reason: 'Accepted "help"; waiting for Angry/Frightened facial evidence.',
+                    reason: `Accepted "${distressSpeech.keyword}"; waiting for ${required} facial evidence.`,
                     evaluatedAt: e.timestamp,
                     sourceDecision: 'accepted',
+                    startedAt: new Date(startedAt).toISOString(),
+                    deadlineAt: new Date(startedAt + MULTIMODAL_FUSION_WINDOW_MS).toISOString(),
                   },
                 });
               }
@@ -1379,8 +1394,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                       emotion: faceState.label,
                       emotionConfidence: faceState.confidence,
                       reason: faceState.label
-                        ? `Accepted "help", but current facial evidence (${faceState.label}, ${(faceState.confidence * 100).toFixed(0)}%) did not satisfy Angry/Frightened within the fusion window.`
-                        : 'Accepted "help" but no usable Angry/Frightened face was detected within the fusion window.',
+                        ? `Accepted "${trackedSpeech.keyword}", but current facial evidence (${faceState.label}, ${(faceState.confidence * 100).toFixed(0)}%) did not satisfy ${required} within the fusion window.`
+                        : `Accepted "${trackedSpeech.keyword}" but no usable ${required} face was detected within the fusion window.`,
                       evaluatedAt: new Date().toISOString(),
                       sourceDecision: 'accepted',
                     },

@@ -7,6 +7,8 @@ import {
   makeDistressSoundSignal,
   makeDistressSpeechSignal,
   multimodalDistressLabel,
+  KEYWORD_FACE_PAIRINGS,
+  isKeywordFaceCompatible,
 } from '@/lib/multimodalDistress';
 
 describe('multimodal distress fusion', () => {
@@ -20,6 +22,8 @@ describe('multimodal distress fusion', () => {
     ['surprise', 'Frightened'],
     ['shock', 'Frightened'],
     ['shocked', 'Frightened'],
+    ['sad', 'Sad'],
+    ['sadness', 'Sad'],
   ] as const)('accepts a reliable %s face', (expression, label) => {
     expect(makeDistressFaceSignal(expression, 0.9, 1000)).toEqual({
       label,
@@ -31,7 +35,6 @@ describe('multimodal distress fusion', () => {
   it('rejects weak or non-target facial expressions', () => {
     expect(makeDistressFaceSignal('angry', DISTRESS_FACE_MIN_CONFIDENCE - 0.01, 1000)).toBeNull();
     expect(makeDistressFaceSignal('happy', 0.99, 1000)).toBeNull();
-    expect(makeDistressFaceSignal('sad', 0.99, 1000)).toBeNull();
     expect(makeDistressFaceSignal('neutral', 0.99, 1000)).toBeNull();
     expect(makeDistressFaceSignal('disgusted', 0.99, 1000)).toBeNull();
   });
@@ -39,6 +42,11 @@ describe('multimodal distress fusion', () => {
   it.each([
     ['help', 'help'],
     ['please help me', 'help'],
+    ['EMERGENCY!', 'emergency'],
+    ['danger', 'danger'],
+    ['intruder', 'intruder'],
+    ['call the police', 'police'],
+    ['call an ambulance', 'ambulance'],
   ] as const)('recognizes explicit help speech %s', (transcript, keyword) => {
     expect(makeDistressSpeechSignal(transcript, 0.95, 2000)).toMatchObject({
       keyword,
@@ -47,11 +55,10 @@ describe('multimodal distress fusion', () => {
     });
   });
 
-  it('rejects every non-help distress phrase for fusion', () => {
-    for (const phrase of ['fire', 'emergency', 'danger', 'intruder', 'police', 'ambulance', 'stop']) {
+  it('reserves fire for visual verification and rejects unconfigured or partial words', () => {
+    for (const phrase of ['fire', 'stop', 'helpful', 'dangerous', 'policeman', 'ambulances']) {
       expect(makeDistressSpeechSignal(phrase, 1, 2000)).toBeNull();
     }
-    expect(makeDistressSpeechSignal('call the police', 1, 2000)).toBeNull();
     expect(makeDistressSpeechSignal('tulong', 1, 2000)).toBeNull();
   });
 
@@ -92,5 +99,28 @@ describe('multimodal distress fusion', () => {
     const face = makeDistressFaceSignal('angry', 0.9, 1000)!;
     const speech = makeDistressSpeechSignal('help', 0.95, 1000 + MULTIMODAL_FUSION_WINDOW_MS + 1)!;
     expect(fuseDistressSignals(face, speech)).toBeNull();
+  });
+
+  it.each(Object.entries(KEYWORD_FACE_PAIRINGS).flatMap(([keyword, expressions]) =>
+    expressions.map(expression => [keyword, expression] as const),
+  ))('verifies configured %s + %s with the actual word in its evidence', (keyword, expression) => {
+    const face = makeDistressFaceSignal(expression, 0.94, 1000);
+    const speech = makeDistressSpeechSignal(keyword, 0.96, 1200);
+    const result = fuseDistressSignals(face, speech);
+    expect(result?.speech.keyword).toBe(keyword);
+    expect(result?.confidence).toBe(0.94);
+    expect(multimodalDistressLabel(result!)).toBe(`Verified distress: ${expression} + "${keyword}"`);
+  });
+
+  it.each(Object.keys(KEYWORD_FACE_PAIRINGS))('rejects incompatible and missing facial evidence for %s', keyword => {
+    const speech = makeDistressSpeechSignal(keyword, 0.96, 1200);
+    for (const expression of ['Angry', 'Frightened', 'Sad', 'Happy', 'Neutral', 'Disgust']) {
+      if (!isKeywordFaceCompatible(keyword, expression)) {
+        expect(fuseDistressSignals(makeDistressFaceSignal(expression, 0.94, 1000), speech)).toBeNull();
+      }
+    }
+    expect(fuseDistressSignals(null, speech)).toBeNull();
+    expect(fuseDistressSignals(makeDistressFaceSignal('fearful', 0.94, 1000),
+      makeDistressSpeechSignal(keyword, 0.96, 1000 + MULTIMODAL_FUSION_WINDOW_MS + 1))).toBeNull();
   });
 });
