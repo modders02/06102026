@@ -1,5 +1,6 @@
 import type { DetectionEvent } from '@/types/multicam';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
+import { HAPPY_HISTORY_MIN_CONFIDENCE } from '@/lib/happyHistoryGate';
 
 type EventCandidate = Omit<DetectionEvent, 'id'> | DetectionEvent;
 
@@ -13,11 +14,21 @@ export const SIGNIFICANT_EVENT_COOLDOWN_MS = 45_000;
  * documenting even when the audio validation was rejected, absent or pending.
  * Only a true, separately validated multimodal trigger may use the word
  * "Verified". Routine people, neutral expression, raw speech and saliency
- * are not significant events. Existing fusion still exclusively controls
- * Camera Alerts, notifications and emergency recordings.
+ * are not significant events, except a stable high-confidence Happy
+ * classifier transition expressly opted into the history policy.
+ * Existing fusion still exclusively controls Camera Alerts,
+ * notifications and emergency recordings.
  */
 export function isSignificantHistoryEvent(event: EventCandidate): boolean {
-  if (!event || !Number.isFinite(event.confidence)) return false;
+  if (!event || !Number.isFinite(event.confidence)
+      || event.confidence < 0 || event.confidence > 1) return false;
+  if (event.type === 'emotion') {
+    // Only high-confidence Happy is significant for HISTORY. Other
+    // expressions (including Neutral) remain live diagnostics. The upstream
+    // facial observation gate also requires two consecutive frames.
+    return event.label.trim().toLowerCase() === 'happy'
+      && event.confidence >= HAPPY_HISTORY_MIN_CONFIDENCE;
+  }
   if (event.type === 'multimodal-distress') {
     // Archived alerts have priorityScenario=false even though their original
     // accepted evidence remains valid. Do not discard that evidence.
