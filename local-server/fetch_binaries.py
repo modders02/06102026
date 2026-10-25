@@ -58,7 +58,15 @@ def osname() -> str:
 
 def download(url: str) -> bytes:
     print(f"  downloading {url}")
-    req = urllib.request.Request(url, headers={"User-Agent": "msds-setup"})
+    headers = {"User-Agent": "msds-setup"}
+    # The short-lived GitHub Actions token is sent ONLY to MediaMTX's exact
+    # GitHub API metadata URL. Never attach it to binary download URLs.
+    if url == MEDIAMTX_RELEASE_API:
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+            headers["Accept"] = "application/vnd.github+json"
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=300) as r:
         return r.read()
 
