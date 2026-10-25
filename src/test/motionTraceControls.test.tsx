@@ -4,6 +4,7 @@ import LiveCameraFeed from '@/components/multicam/LiveCameraFeed';
 import { DEFAULT_SETTINGS, type CameraConfig, type CameraRuntime } from '@/types/multicam';
 
 const mock = vi.hoisted(() => ({
+  addEvent: vi.fn(),
   session: {
     video: null as HTMLVideoElement | null,
     home: null as HTMLElement | null,
@@ -12,6 +13,7 @@ const mock = vi.hoisted(() => ({
   },
 }));
 vi.mock('@/lib/cameraSessions', () => ({ useCameraSession: () => mock.session }));
+vi.mock('@/hooks/useCameraRegistry', () => ({ useCameraRegistry: () => ({ addEvent: mock.addEvent }) }));
 vi.mock('@/hooks/useCctvTalk', () => ({
   useCctvTalk: () => ({ talking: false, error: null, startTalk: vi.fn(), stopTalk: vi.fn() }),
 }));
@@ -40,6 +42,7 @@ const cam = {
 } as CameraConfig;
 
 beforeEach(() => {
+  mock.addEvent.mockClear();
   mock.session.video = document.createElement('video');
   mock.session.home = document.createElement('div');
   mock.session.home.appendChild(mock.session.video);
@@ -67,6 +70,14 @@ describe('optional CCTV landmark controls', () => {
     expect(screen.getByTestId('face-movement-cue').textContent).toContain('Analyzing');
     fireEvent.click(screen.getByRole('button', { name: 'Simulate blendshape movement' }));
     expect(screen.getByTestId('face-movement-cue').textContent).toContain('Smiling (72% activation)');
+    expect(mock.addEvent).toHaveBeenCalledOnce();
+    expect(mock.addEvent).toHaveBeenCalledWith(expect.objectContaining({
+      cameraId: 'slot-1', type: 'emotion', label: 'Happy', confidence: 0.72,
+      id: expect.any(String),
+    }));
+    // Same smile in the same camera must not flood the Event History.
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate blendshape movement' }));
+    expect(mock.addEvent).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole('button', { name: 'Body pose tracing' }));
     expect(screen.getByTestId('trace-models').textContent).toContain('face,hands | mesh');
     fireEvent.click(screen.getByRole('button', { name: 'Switch face mesh detail' }));
@@ -76,6 +87,7 @@ describe('optional CCTV landmark controls', () => {
     expect(screen.getByRole('button', { name: 'Show object detection boxes while tracing' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Disable landmark tracing for Camera 1' }));
     expect(screen.queryByTestId('trace-models')).toBeNull();
+    expect(mock.addEvent).toHaveBeenCalledOnce();
   });
 
   it('never starts diagnostic tracing when AI is switched off', () => {
