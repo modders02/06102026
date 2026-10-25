@@ -300,7 +300,7 @@ describe('shared live camera views', () => {
 describe('camera alerts and event history', () => {
   beforeEach(() => {
     mocks.events = [
-      { id: 'first', cameraId: 'slot-1', cameraName: 'Camera 1', location: 'Lobby', type: 'object', label: 'Lobby delivery', confidence: 0.8, timestamp: '2026-10-02T02:40:23Z' },
+      { id: 'first', cameraId: 'slot-1', cameraName: 'Camera 1', location: 'Lobby', type: 'smoke', label: 'Lobby smoke detected', smokeConfirmed: true, confidence: 0.8, timestamp: '2026-10-02T02:40:23Z' },
     ];
     mocks.alertEvents = [
       {
@@ -478,7 +478,7 @@ describe('camera alerts and event history', () => {
     { evidence: 'visual fire only', type: 'fire', keyword: '', emotion: 'visual fire', label: 'Kitchen fire' },
     { evidence: 'audio only', type: 'multimodal-distress', keyword: 'help', emotion: '', label: 'Verified distress: Angry + "help"' },
     { evidence: 'facial expression only', type: 'multimodal-distress', keyword: '', emotion: 'Angry', label: 'Verified distress: Angry + "help"' },
-  ] as const)('keeps $evidence in Event history without a Camera alert', ({ type, keyword, emotion, label }) => {
+  ] as const)('shows only significant $evidence in Event history without a Camera alert', ({ type, keyword, emotion, label }) => {
     const candidate: DetectionEvent = {
       ...mocks.alertEvents[0],
       id: 'incomplete-evidence',
@@ -494,15 +494,37 @@ describe('camera alerts and event history', () => {
     const alerts = screen.getByRole('region', { name: 'Camera alerts' });
     expect(within(alerts).getByText('No camera alerts yet.')).toBeInTheDocument();
     expect(within(alerts).queryByText(label)).not.toBeInTheDocument();
-    expect(within(screen.getByRole('region', { name: 'Event history' })).getByText(label))
-      .toBeInTheDocument();
+    const history = within(screen.getByRole('region', { name: 'Event history' }));
+    if (type === 'fire') {
+      // Confirmed visual fire remains a significant HISTORY-only observation,
+      // even without a matching accepted keyword.
+      expect(history.getByText(label)).toBeInTheDocument();
+    } else {
+      // A fabricated verified-distress label must not bypass validation.
+      expect(history.queryByText(label)).not.toBeInTheDocument();
+    }
+  });
+
+  it('hides routine legacy objects and neutral expressions from the visible incident log', () => {
+    mocks.events = [
+      { id: 'old-person', cameraId: 'slot-1', cameraName: 'Camera 1', location: 'Lobby',
+        type: 'object', label: 'person', confidence: 0.99, timestamp: '2026-10-02T02:40:20Z' },
+      { id: 'old-neutral', cameraId: 'slot-1', cameraName: 'Camera 1', location: 'Lobby',
+        type: 'emotion', label: 'Neutral', confidence: 1, timestamp: '2026-10-02T02:40:21Z' },
+      ...mocks.events,
+    ];
+    render(<MemoryRouter initialEntries={['/cameras?camera=slot-1']}><Monitoring /></MemoryRouter>);
+    const history = within(screen.getByRole('region', { name: 'Event history' }));
+    expect(history.queryByText('person')).not.toBeInTheDocument();
+    expect(history.queryByText('Neutral')).not.toBeInTheDocument();
+    expect(history.getByText('Lobby smoke detected')).toBeInTheDocument();
   });
 
   it('keeps an alert snapshot available after the event leaves general history', () => {
     mocks.events = [mocks.events[0]];
     render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
 
-    expect(screen.getByText('Lobby delivery')).toBeInTheDocument();
+    expect(screen.getByText('Lobby smoke detected')).toBeInTheDocument();
     expect(screen.getByText(/Kitchen fire/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'View snapshot: Kitchen fire from Camera 2' }));
     expect(within(screen.getByRole('dialog')).getByRole('img')).toHaveAttribute('src', 'data:image/jpeg;base64,test');
@@ -616,12 +638,12 @@ describe('camera alerts and event history', () => {
     const view = render(<MemoryRouter initialEntries={['/cameras?camera=slot-1']}><Monitoring /><Location /></MemoryRouter>);
 
     expect(screen.getByRole('combobox', { name: 'Filter events by camera' })).toHaveValue('slot-1');
-    expect(screen.getByText('Lobby delivery')).toBeInTheDocument();
+    expect(screen.getByText('Lobby smoke detected')).toBeInTheDocument();
     expect(screen.queryByText('Kitchen fire')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Choose live camera' }), { target: { value: 'slot-2' } });
     expect(screen.getByRole('combobox', { name: 'Filter events by camera' })).toHaveValue('slot-2');
-    expect(screen.queryByText('Lobby delivery')).not.toBeInTheDocument();
+    expect(screen.queryByText('Lobby smoke detected')).not.toBeInTheDocument();
     expect(screen.getAllByText(/Kitchen fire/)).toHaveLength(1);
     expect(view.container.querySelector('video')).toBeNull();
     expect(screen.getByRole('button', { name: 'View snapshot: Kitchen fire from Camera 2' })).toBeInTheDocument();
@@ -631,10 +653,10 @@ describe('camera alerts and event history', () => {
     render(<MemoryRouter initialEntries={['/cameras?camera=slot-1&events=slot-2']}><Monitoring /><Location /></MemoryRouter>);
 
     expect(screen.getByRole('combobox', { name: 'Filter events by camera' })).toHaveValue('slot-2');
-    expect(screen.queryByText('Lobby delivery')).not.toBeInTheDocument();
+    expect(screen.queryByText('Lobby smoke detected')).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole('combobox', { name: 'Filter events by camera' }), { target: { value: 'all' } });
     expect(screen.getByRole('combobox', { name: 'Choose live camera' })).toHaveValue('slot-1');
-    expect(screen.getByText('Lobby delivery')).toBeInTheDocument();
+    expect(screen.getByText('Lobby smoke detected')).toBeInTheDocument();
     expect(screen.getByTestId('location')).toHaveTextContent('/cameras?camera=slot-1&events=all');
 
     fireEvent.click(screen.getByRole('button', { name: 'All live cameras' }));
