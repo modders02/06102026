@@ -505,6 +505,28 @@ describe('camera alerts and event history', () => {
     }
   });
 
+  it('shows Happy facial-expression history without requiring emergency validation', () => {
+    mocks.events = [
+      { id: 'happy-smile', cameraId: 'slot-1', cameraName: 'Camera 1',
+        location: 'Lobby', type: 'emotion', label: 'Happy', confidence: 0.78,
+        timestamp: '2026-10-25T17:00:00Z', snapshot: 'data:image/jpeg;base64,happy-smile' },
+      { id: 'neutral', cameraId: 'slot-1', cameraName: 'Camera 1',
+        location: 'Lobby', type: 'emotion', label: 'Neutral', confidence: 0.99,
+        timestamp: '2026-10-25T17:00:10Z' },
+    ];
+    mocks.alertEvents = [];
+    render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
+    const history = within(screen.getByRole('region', { name: 'Event history' }));
+    expect(history.getByText(/Happy/)).toBeInTheDocument();
+    expect(history.queryByText('Neutral')).not.toBeInTheDocument();
+    expect(history.getByRole('button', {
+      name: 'View snapshot: Happy from Camera 1',
+    })).toBeInTheDocument();
+    expect(history.queryByText('Validation at this event')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Camera alerts' }))
+      .getByText('No camera alerts yet.')).toBeInTheDocument();
+  });
+
   it('hides routine legacy objects and neutral expressions from the visible incident log', () => {
     mocks.events = [
       { id: 'old-person', cameraId: 'slot-1', cameraName: 'Camera 1', location: 'Lobby',
