@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { drawConnections, drawFaceLandmarkBounds, drawPoints, drawTrail, containedVideoRect, drawQualityConnections, imageLandmarks, usableFaceLandmarks, FACE_68_CONNECTIONS, updateTrail, type TraceTrail } from '@/lib/landmarkRendering';
 import { detectFallbackFace68 } from '@/lib/faceLandmarkFallback';
+import { classifyFacialMovement, stableFacialMovement, type FacialMovementObservation } from '@/lib/facialMovementCues';
 import type { TracePoint } from '@/lib/landmarkRendering';
 
 export interface TracingModes {
@@ -13,6 +14,8 @@ interface Props {
   video: HTMLVideoElement;
   modes: TracingModes;
   detail?: 'mesh' | 'outline';
+  /** Video-only heuristic observation; must not be used to trigger emergency alerts. */
+  onMovement?: (observation: FacialMovementObservation | null) => void;
 }
 
 const VISION_VERSION = '1.1.1';
@@ -50,7 +53,7 @@ async function modelsFor(modes: TracingModes): Promise<{ tasks: VisionTasks; mod
         baseOptions: { modelAssetPath: FACE_MODEL, delegate: 'CPU' },
         runningMode: 'VIDEO',
         numFaces: 1,
-        outputFaceBlendshapes: false,
+        outputFaceBlendshapes: true,
         minFaceDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5,
       });
@@ -91,10 +94,12 @@ function showCount(face: number, pose: number, hands: number): string {
  * No extra RTSP/WebRTC connection, persistent biometrics, identity recognition
  * or emergency-acceptance side effects. The main KWS/facial fusion is unchanged.
  */
-export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Props) {
+export default function MotionTraceOverlay({ video, modes, detail = 'mesh', onMovement }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [state, setState] = useState<'loading' | 'active' | 'error'>('loading');
   const [message, setMessage] = useState('Loading tracing models…');
+  const onMovementRef = useRef(onMovement);
+  onMovementRef.current = onMovement;
 
   useEffect(() => {
     let disposed = false;
@@ -108,9 +113,18 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
     let fallbackBusy = false;
     let lastFallbackAttemptAt = 0;
     let fallbackError = '';
+    let movementHistory: FacialMovementObservation[] = [];
+    let lastMovement: string | null = null;
     setState('loading');
     setMessage('Loading tracing models…');
 
+    const publishMovement = (observation: FacialMovementObservation | null) => {
+      const signature = observation
+        ? `${observation.kind}:${Math.round(observation.activation * 10)}` : null;
+      if (signature === lastMovement) return;
+      lastMovement = signature;
+      onMovementRef.current?.(observation);
+    };
     const clearCanvas = () => {
       const canvas = canvasRef.current;
       const ctx = canvas?.getContext('2d');
@@ -139,6 +153,8 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
           clearCanvas();
           paths.clear();
           latestFallback = null;
+          movementHistory = [];
+          publishMovement(null);
           lastVideoTime = -1;
           schedule(analyze);
           return;
@@ -172,8 +188,15 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
           let faceCount = 0, poseCount = 0, handCount = 0;
           let faceLines = 0, poseLines = 0, faceBox = false;
           if (models.face) {
-            const faces = models.face.detectForVideo(video, timestamp).faceLandmarks;
+            const faceResult = models.face.detectForVideo(video, timestamp);
+            const faces = faceResult.faceLandmarks;
             faceCount = faces.length;
+            const firstBlendshapes = faces.length > 0
+              ? faceResult.faceBlendshapes?.[0]?.categories : undefined;
+            const rawMovement = classifyFacialMovement(firstBlendshapes);
+            const stable = stableFacialMovement(movementHistory, rawMovement);
+            movementHistory = stable.history;
+            publishMovement(stable.displayed);
             if (faces.length) {
               // Important regression fix: draw RAW, current-frame landmarks.
               // V2 overfiltered/smoothed valid points in some CCTV views.
@@ -320,6 +343,7 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh' }: Pr
 
     return () => {
       disposed = true;
+      onMovementRef.current?.(null);
       if (timer) clearTimeout(timer);
       clearCanvas();
       paths.clear();
