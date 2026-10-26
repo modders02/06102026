@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { drawConnections, drawSolidFaceBox, drawPoints, drawTrail, containedVideoRect, drawQualityConnections, imageLandmarks, usableFaceLandmarks, FACE_68_CONNECTIONS, updateTrail, type TraceTrail } from '@/lib/landmarkRendering';
+import { drawConnections, drawSolidFaceBox, drawPoints, drawTrail, containedVideoRect, drawQualityConnections, imageLandmarks, usableFaceLandmarks, updateTrail, type TraceTrail } from '@/lib/landmarkRendering';
 import { detectFallbackFace68 } from '@/lib/faceLandmarkFallback';
 import { classifyFacialMovement, stableFacialMovement, type FacialMovementObservation } from '@/lib/facialMovementCues';
 import type { TracePoint } from '@/lib/landmarkRendering';
@@ -186,7 +186,7 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh', onMo
 
         try {
           let faceCount = 0, poseCount = 0, handCount = 0;
-          let faceLines = 0, poseLines = 0, faceBox = false;
+          let poseLines = 0, faceBox = false;
           if (models.face) {
             const faceResult = models.face.detectForVideo(video, timestamp);
             const faces = faceResult.faceLandmarks;
