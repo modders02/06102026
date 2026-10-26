@@ -523,8 +523,8 @@ describe('camera alerts and event history', () => {
     render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
     const history = within(screen.getByRole('region', { name: 'Event history' }));
     expect(history.getAllByText(/Happy/).length).toBeGreaterThan(0);
-    for (const label of ['Neutral', 'Sad', 'Angry', 'Frightened', 'Surprised', 'Disgust']) {
-      expect(history.getByText(new RegExp(label))).toBeInTheDocument();
+    for (const label of ['😐 Neutral', '😢 Sad', '😠 Angry', '😲 Frightened', '😮 Surprised', '🤢 Disgust']) {
+      expect(history.getByText(label)).toBeInTheDocument();
     }
     expect(history.getByRole('button', {
       name: 'View snapshot: Happy from Camera 1',
@@ -545,7 +545,7 @@ describe('camera alerts and event history', () => {
     render(<MemoryRouter initialEntries={['/cameras?camera=slot-1']}><Monitoring /></MemoryRouter>);
     const history = within(screen.getByRole('region', { name: 'Event history' }));
     expect(history.queryByText('person')).not.toBeInTheDocument();
-    expect(history.getByText(/Neutral/)).toBeInTheDocument();
+    expect(history.getByText('😐 Neutral')).toBeInTheDocument();
     expect(history.getByText('Lobby smoke detected')).toBeInTheDocument();
   });
 
