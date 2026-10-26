@@ -284,3 +284,32 @@ export function drawSolidFaceBox(
   ctx.restore();
   return true;
 }
+
+/** Draw one box per distinct visible face. The MediaPipe and fallback models
+ * can both return the same face; collapse only strongly overlapping boxes.
+ * Separate nearby/partly occluded people remain independent detections.
+ */
+export function drawDistinctFaceBoxes(
+  ctx: CanvasRenderingContext2D,
+  faces: readonly (readonly TracePoint[])[],
+  rect: TraceRect,
+): number {
+  const drawn: TraceRect[] = [];
+  for (const face of faces) {
+    if (!usableFaceLandmarks(face)) continue;
+    const bounds = faceLandmarkBounds(face, rect);
+    if (!bounds) continue;
+    const duplicate = drawn.some(other => {
+      const w = Math.max(0, Math.min(bounds.x + bounds.width, other.x + other.width)
+        - Math.max(bounds.x, other.x));
+      const h = Math.max(0, Math.min(bounds.y + bounds.height, other.y + other.height)
+        - Math.max(bounds.y, other.y));
+      const intersection = w * h;
+      const union = bounds.width * bounds.height + other.width * other.height - intersection;
+      return union > 0 && intersection / union > 0.55;
+    });
+    if (duplicate) continue;
+    if (drawSolidFaceBox(ctx, face, rect)) drawn.push(bounds);
+  }
+  return drawn.length;
+}
