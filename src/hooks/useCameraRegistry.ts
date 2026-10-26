@@ -76,15 +76,18 @@ export function useCameraRegistry() {
       revokeUnusedEventClips([evt], [...current.events, ...current.alertEvents]);
       return;
     }
-    // The live MediaPipe smile cue and the independent face-api classifier
-    // may both describe the same expression. Keep one history observation per
-    // camera/expression/cooldown, even after switching dashboard routes.
+    // Deduplicate each session-local face track independently, so two people
+    // showing the same expression can both appear in history. Legacy events
+    // without a track retain the original per-camera deduplication.
     if (evt.type === 'emotion') {
       const category = historyEmotionMeta(evt.label)?.emotion;
       const at = Date.parse(evt.timestamp);
       if (category && Number.isFinite(at) && current.events.some(previous =>
         previous.type === 'emotion'
         && previous.cameraId === evt.cameraId
+        && (evt.faceTrackId
+          ? previous.faceTrackId === evt.faceTrackId
+          : !previous.faceTrackId)
         && historyEmotionMeta(previous.label)?.emotion === category
         && Number.isFinite(Date.parse(previous.timestamp))
         && at >= Date.parse(previous.timestamp)
