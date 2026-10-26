@@ -502,6 +502,37 @@ describe('validation gate for Camera Alert', () => {
     });
     expect(registry.result.current.alertEvents).toEqual([]);
   });
+
+  it('persists every supported facial-expression class without creating Camera Alerts', () => {
+    const registry = renderHook(useCameraRegistry);
+    const labels = ['Happy', 'Sad', 'Angry', 'Frightened', 'Surprised', 'Disgust', 'Neutral'];
+    act(() => {
+      labels.forEach((label, index) => registry.result.current.addEvent(event(200 + index, 'emotion', {
+        label, confidence: 0.88,
+      })));
+    });
+    expect(registry.result.current.events.filter(e => e.type === 'emotion')
+      .map(e => e.label).sort()).toEqual([...labels].sort());
+    expect(registry.result.current.alertEvents).toEqual([]);
+    expect(loadEventHistory().events.filter(e => e.type === 'emotion')).toHaveLength(7);
+  });
+
+  it('deduplicates an expression emitted by two face detectors but allows other expressions', () => {
+    const registry = renderHook(useCameraRegistry);
+    const first = event(300, 'emotion', { label: 'Happy', confidence: 0.91 });
+    const duplicate = event(305, 'emotion', { label: ' happy ', confidence: 0.82 });
+    const change = event(306, 'emotion', { label: 'Sad', confidence: 0.93 });
+    const later = event(331, 'emotion', { label: 'Happy', confidence: 0.94 });
+    act(() => {
+      registry.result.current.addEvent(first);
+      registry.result.current.addEvent(duplicate);
+      registry.result.current.addEvent(change);
+      registry.result.current.addEvent(later);
+    });
+    expect(registry.result.current.events.filter(e => e.type === 'emotion')
+      .map(e => e.id).sort()).toEqual([first.id, change.id, later.id].sort());
+    expect(registry.result.current.alertEvents).toEqual([]);
+  });
 });
 
 describe('exact trigger snapshot retention', () => {
