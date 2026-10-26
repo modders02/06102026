@@ -71,6 +71,8 @@ export interface DetectionEvent {
   faceTrackId?: string;
   /** Display-only track number within the monitoring session. */
   faceNumber?: number;
+  /** Current-frame normalized face box, for suppressing spatial re-detections. */
+  faceBounds?: [number, number, number, number];
   confidence: number;    // 0..1
   /** True only when the event passed the priority-scenario alert gate. */
   priorityScenario?: boolean;
