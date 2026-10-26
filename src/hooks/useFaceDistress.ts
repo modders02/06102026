@@ -15,7 +15,7 @@ export type FaceDistress = {
   distressScore: number;         // 0..100, how distressed the person is
   distressLevel: 'none' | 'mild' | 'severe';
   /** Current frame only, never identity or long-term face recognition. */
-  faces: FaceExpressionSample[];
+  faces?: FaceExpressionSample[];
 };
 
 const EMPTY: FaceDistress = {
