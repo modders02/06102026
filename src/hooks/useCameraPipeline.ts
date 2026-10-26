@@ -268,6 +268,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   }, []);
 
   useEffect(() => {
+    // A reconnect or camera replacement is a different visual baseline.
+    // Never compare its new room/exposure against the previous smoke reference.
+    fireStateRef.current = createFireState();
+    prevFrameRef.current = null;
     const pending = recentFireSpeechRef.current;
     recentFireSpeechRef.current = null;
     recentFireVisualRef.current = null;
@@ -285,7 +289,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         evaluatedAt: new Date().toISOString(), sourceDecision: 'accepted',
       } });
     }
-  }, [camera.id, camera.path, camera.rtspUrl, camera.streamUrl, camera.webrtcUrl, sourceStream, patch]);
+  }, [camera.id, camera.path, camera.rtspUrl, camera.streamUrl, camera.webrtcUrl, sourceStream, nonce, patch]);
 
   // Work already awaiting a detector must not publish after its camera, AI
   // switch, source, or thresholds change. Audio retains its separate lifecycle.
