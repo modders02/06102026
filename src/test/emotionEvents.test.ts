@@ -2,7 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
 
 describe('emotion display mapping', () => {
-  it.each(['surprised', 'surprise', 'shock', 'shocked', 'fearful', 'fear', 'frightened'] as const)(
+  it.each(['surprised', 'surprise', 'shock', 'shocked'] as const)(
+    'shows %s as Surprised rather than incorrectly labeling fear',
+    expression => {
+      expect(historyEmotionMeta(expression)).toMatchObject({
+        emotion: 'surprised',
+        label: 'Surprised',
+      });
+    },
+  );
+  it.each(['fearful', 'fear', 'frightened'] as const)(
     'shows %s as Frightened',
     expression => {
       expect(historyEmotionMeta(expression)).toMatchObject({
