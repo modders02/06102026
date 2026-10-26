@@ -153,9 +153,12 @@ export function saveEventHistory(next: CameraEventHistory): CameraEventHistory {
   // accepted alert storage independent, then shed the OLDEST history entries
   // if earlier full-resolution snapshots exceed the remaining quota.
   write(ALERTS_KEY, retained.alertEvents);
-  while (!write(EVENTS_KEY, retained.events) && retained.events.length > 1) {
-    retained.events = retained.events.slice(0, Math.max(1, Math.floor(retained.events.length * 0.85)));
+  let persistedEvents = retained.events;
+  while (!write(EVENTS_KEY, persistedEvents) && persistedEvents.length > 1) {
+    persistedEvents = persistedEvents.slice(0, Math.max(1, Math.floor(persistedEvents.length * 0.85)));
   }
+  // Never discard live in-memory history merely because persistent storage
+  // failed or required smaller snapshots. New smaller crops reduce recurrence.
   historyCache = { history: retained, ...readHistoryStorage() };
   revokeUnusedEventClips(
     [
