@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, Maximize2, Mic, MicOff, RefreshCw, VideoOff, Volume2, VolumeX, ScanFace, PersonStanding, Hand } from 'lucide-react';
+import { Camera, Maximize2, Mic, MicOff, RefreshCw, VideoOff, Volume2, VolumeX } from 'lucide-react';
 import { useCctvTalk } from '@/hooks/useCctvTalk';
 import { useCameraSession } from '@/lib/cameraSessions';
 import { useCameraRegistry } from '@/hooks/useCameraRegistry';
 import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import { HAPPY_SMILE_MIN_ACTIVATION, shouldRecordSignificantEvent } from '@/lib/significantEvents';
 import ValidationLayer from '@/components/dashboard/ValidationLayer';
-import MotionTraceOverlay, { type TracingModes } from '@/components/multicam/MotionTraceOverlay';
+import MotionTraceOverlay from '@/components/multicam/MotionTraceOverlay';
 import { formatWakeWordDecision } from '@/lib/wakeWordValidation';
 import type { FacialMovementObservation } from '@/lib/facialMovementCues';
 import type { CameraConfig, DetectionEvent, MultiCamSettings } from '@/types/multicam';
@@ -30,10 +30,6 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const [speaker, setSpeaker] = useState(false);
-  const [traceEnabled, setTraceEnabled] = useState(false);
-  const [traceModes, setTraceModes] = useState<TracingModes>({ face: true, body: true, hands: true });
-  const [meshDetail, setMeshDetail] = useState<'mesh' | 'outline'>('mesh');
-  const [showDetectionBoxes, setShowDetectionBoxes] = useState(false);
   const [faceMovement, setFaceMovement] = useState<FacialMovementObservation | null>(null);
   // Smile geometry is supporting visual HISTORY context, never emergency
   // validation. Face-api's separate classifier can still read "Neutral" when
@@ -60,7 +56,7 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
       snapshot: captureCameraEventSnapshot(camera.id),
     });
   }, [addEvent, camera.id, camera.name, camera.location, camera.aiEnabled]);
-  const tracingActive = traceEnabled && !!video && statusIsOnline(runtime) && camera.aiEnabled;
+  const tracingActive = !!video && statusIsOnline(runtime) && camera.aiEnabled;
   const talk = useCctvTalk(settings.pythonServer, camera.id);
   const stopTalk = talk.stopTalk;
   const status = runtime?.status || 'connecting';
@@ -134,7 +130,7 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
     const sy = canvas.height / (runtime.frameHeight || Math.max(1, Math.round((video.videoHeight / video.videoWidth) * 320)));
     ctx.lineWidth = 3;
     ctx.font = '600 16px Inter, sans-serif';
-    if (!tracingActive || showDetectionBoxes) for (const object of runtime.objects) {
+    for (const object of runtime.objects) {
       const [x, y, width, height] = object.bbox;
       ctx.strokeStyle = object.label === 'person' ? 'hsl(150 90% 50%)' : 'hsl(190 90% 55%)';
       ctx.strokeRect(x * sx, y * sy, width * sx, height * sy);
@@ -151,7 +147,7 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
       ctx.lineWidth = 4;
       ctx.strokeRect(x * sx, y * sy, width * sx, height * sy);
     }
-  }, [runtime, video, camera.aiEnabled, tracingActive, showDetectionBoxes]);
+  }, [runtime, video, camera.aiEnabled]);
 
   return (
     <article className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
@@ -176,69 +172,14 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
             aria-pressed={talk.talking}
             className={`touch-none rounded-lg p-2 hover:bg-muted ${talk.talking ? 'text-destructive' : 'text-muted-foreground'}`}
           >{talk.talking ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}</button>
-          <button
-            onClick={() => setTraceEnabled(value => !value)}
-            disabled={!camera.aiEnabled || !video || status !== 'online'}
-            aria-label={traceEnabled ? `Disable landmark tracing for ${camera.name}` : `Enable landmark tracing for ${camera.name}`}
-            aria-pressed={traceEnabled}
-            title="Optional face mesh, body skeleton and hand tracing (visual only)"
-            className={`rounded-lg p-2 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 ${traceEnabled ? 'bg-primary/15 text-primary' : 'text-muted-foreground'}`}
-          ><ScanFace className="h-4 w-4" /></button>
           {reconnect && <button onClick={reconnect} title="Reconnect camera" aria-label="Reconnect camera" className="rounded-lg p-2 text-muted-foreground hover:bg-muted"><RefreshCw className="h-4 w-4" /></button>}
           {onExpand && <button onClick={() => onExpand(camera.id)} title="Open camera" aria-label={`Open ${camera.name}`} className="rounded-lg p-2 text-muted-foreground hover:bg-muted"><Maximize2 className="h-4 w-4" /></button>}
         </div>
       </div>
-      {traceEnabled && camera.aiEnabled && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-4 py-2 text-xs" aria-label="Landmark tracing controls">
-          <span className="font-semibold">Trace (visual only)</span>
-          {([
-            ['face', 'Face mesh', ScanFace],
-            ['body', 'Body pose', PersonStanding],
-            ['hands', 'Hands', Hand],
-          ] as const).map(([mode, label, Icon]) => (
-            <button key={mode} onClick={() => setTraceModes(previous => {
-              const updated = { ...previous, [mode]: !previous[mode] };
-              return Object.values(updated).some(Boolean) ? updated : previous;
-            })} aria-pressed={traceModes[mode]} aria-label={`${label} tracing`}
-              className={`inline-flex items-center gap-1 rounded px-2 py-1 ${traceModes[mode] ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground'}`}>
-              <Icon className="h-3.5 w-3.5" />{label}
-            </button>
-          ))}
-          {traceModes.face && (
-            <button onClick={() => setMeshDetail(value => value === 'mesh' ? 'outline' : 'mesh')}
-              aria-label="Switch face mesh detail" aria-pressed={meshDetail === 'mesh'}
-              className="rounded border border-border bg-background px-2 py-1 text-muted-foreground hover:text-foreground"
-              title="Detailed mesh shows face triangles; outline emphasizes eyes, brows, mouth and face oval">
-              {meshDetail === 'mesh' ? 'Detailed mesh' : 'Face outline'}
-            </button>
-          )}
-          <button onClick={() => setShowDetectionBoxes(value => !value)}
-            aria-label="Show object detection boxes while tracing" aria-pressed={showDetectionBoxes}
-            className={`rounded border px-2 py-1 ${showDetectionBoxes ? 'border-primary bg-primary/15 text-primary' : 'border-border bg-background text-muted-foreground'}`}>
-            Object boxes {showDetectionBoxes ? 'on' : 'off'}
-          </button>
-          <span className="rounded bg-cyan-500/10 px-2 py-1 font-medium text-cyan-700 dark:text-cyan-300"
-            role="status" data-testid="face-movement-cue"
-            title="Facial movement estimate from MediaPipe blendshape coefficients. Activation is not a probability of emotion.">
-            Face movement: {tracingActive && traceModes.face
-              ? faceMovement
-                ? `${faceMovement.label}${faceMovement.kind !== 'neutral' ? ` (${Math.round(faceMovement.activation * 100)}% activation)` : ''}`
-                : 'Analyzing…'
-              : 'Off'}
-          </span>
-          {runtime?.faceDistress?.label && runtime.faceDistress.confidence >= 0.55 && (
-            <span className="rounded bg-background px-2 py-1 text-muted-foreground"
-              title="Existing independent facial expression classifier; score is not psychological certainty">
-              Existing expression estimate: {runtime.faceDistress.label} ({(runtime.faceDistress.confidence * 100).toFixed(0)}%)
-            </span>
-          )}
-          <span className="text-muted-foreground">Visible cues are not proof of mood or distress.</span>
-        </div>
-      )}
       <div className="relative aspect-video bg-black">
         <div ref={containerRef} className="absolute inset-0" />
         <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full object-contain" />
-        {tracingActive && video && <MotionTraceOverlay key={`${traceModes.face}-${traceModes.body}-${traceModes.hands}-${meshDetail}`} video={video} modes={traceModes} detail={meshDetail} onMovement={onFaceMovement} />}
+        {tracingActive && video && <MotionTraceOverlay video={video} modes={{ face: true, body: false, hands: false }} detail="outline" onMovement={onFaceMovement} />}
         {status !== 'online' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/80 px-6 text-center">
             <VideoOff className="h-8 w-8 text-muted-foreground" />
