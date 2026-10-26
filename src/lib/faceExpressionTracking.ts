@@ -26,6 +26,8 @@ export interface FaceTrackingState {
 }
 export interface StableFaceExpression {
   trackId: number;
+  /** Left-to-right ordinal in the current camera frame, not a lifetime ID. */
+  faceNumber: number;
   label: string;
   confidence: number;
   bounds: FaceBounds;
@@ -45,6 +47,26 @@ function overlap(a: FaceBounds, b: FaceBounds): number {
   const intersection = width * height;
   const union = a.width * a.height + b.width * b.height - intersection;
   return union > 0 ? intersection / union : 0;
+}
+
+/**
+ * IoU alone fails when a face is tilted, moves closer, or turns sideways.
+ * Spatial distance is measured in units of average face size. This is a
+ * session-local association only; it cannot recognize identity.
+ */
+function spatialMatch(a: FaceBounds, b: FaceBounds): number {
+  const iou = overlap(a, b);
+  if (iou >= 0.12) return 1 + iou;
+  const centerAx = a.x + a.width / 2, centerAy = a.y + a.height / 2;
+  const centerBx = b.x + b.width / 2, centerBy = b.y + b.height / 2;
+  const avgWidth = (a.width + b.width) / 2;
+  const avgHeight = (a.height + b.height) / 2;
+  const dx = Math.abs(centerAx - centerBx) / avgWidth;
+  const dy = Math.abs(centerAy - centerBy) / avgHeight;
+  const scale = Math.max(a.width / b.width, b.width / a.width,
+    a.height / b.height, b.height / a.height);
+  if (scale > 2.2 || dx > 0.85 || dy > 0.75) return 0;
+  return 0.15 + (1 - dx / 0.85) * 0.45 + (1 - dy / 0.75) * 0.25;
 }
 
 function plausibleBounds(b: FaceBounds): boolean {
@@ -71,13 +93,16 @@ export function updateFaceExpressionTracks(
   const events: StableFaceExpression[] = [];
   let nextId = state.nextId;
 
-  for (const sample of samples.slice(0, 5)) {
-    if (!plausibleBounds(sample.bounds)) continue;
+  // Stable presentation order, independent of the detector's output order.
+  const ordered = samples.slice(0, 5)
+    .filter(sample => plausibleBounds(sample.bounds))
+    .sort((a, b) => a.bounds.x - b.bounds.x);
+  for (const [ordinal, sample] of ordered.entries()) {
     let match: FaceExpressionTrack | undefined;
     let bestScore = 0.12;
     for (const track of previous) {
       if (!remaining.has(track.id)) continue;
-      const score = overlap(track.bounds, sample.bounds);
+      const score = spatialMatch(track.bounds, sample.bounds);
       if (score > bestScore) { bestScore = score; match = track; }
     }
     if (match) remaining.delete(match.id);
@@ -99,6 +124,7 @@ export function updateFaceExpressionTracks(
     if (confirmed && confirmed !== old.confirmed) {
       events.push({
         trackId: old.id,
+        faceNumber: ordinal + 1,
         label: confirmed,
         confidence: sample.confidence,
         bounds: sample.bounds,
