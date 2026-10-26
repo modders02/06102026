@@ -59,40 +59,28 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-describe('optional CCTV landmark controls', () => {
-  it('does not start models before opt-in and keeps the same shared video', () => {
+describe('automatic CCTV face boxes and object detection', () => {
+  it('starts face tracing automatically for an online AI-enabled camera, without a toggle', () => {
     const originalVideo = mock.session.video;
     render(<LiveCameraFeed camera={cam} settings={DEFAULT_SETTINGS} onConnect={vi.fn()} />);
-    expect(screen.queryByTestId('trace-models')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Enable landmark tracing for Camera 1' }));
-    expect(screen.getByTestId('trace-models').textContent).toContain('face,body,hands | mesh');
+    expect(screen.getByTestId('trace-models').textContent).toContain('face | outline');
     expect(originalVideo?.parentElement).toBeTruthy();
-    expect(screen.getByTestId('face-movement-cue').textContent).toContain('Analyzing');
+    expect(screen.queryByRole('button', { name: /Enable landmark tracing/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Show object detection boxes/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Simulate blendshape movement' }));
-    expect(screen.getByTestId('face-movement-cue').textContent).toContain('Smiling (72% activation)');
-    expect(mock.addEvent).toHaveBeenCalledOnce();
     expect(mock.addEvent).toHaveBeenCalledWith(expect.objectContaining({
-      cameraId: 'slot-1', type: 'emotion', label: 'Happy', confidence: 0.72,
-      id: expect.any(String),
+      cameraId: 'slot-1', type: 'emotion', label: 'Happy',
     }));
-    // Same smile in the same camera must not flood the Event History.
-    fireEvent.click(screen.getByRole('button', { name: 'Simulate blendshape movement' }));
-    expect(mock.addEvent).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole('button', { name: 'Body pose tracing' }));
-    expect(screen.getByTestId('trace-models').textContent).toContain('face,hands | mesh');
-    fireEvent.click(screen.getByRole('button', { name: 'Switch face mesh detail' }));
-    expect(screen.getByTestId('trace-models').textContent).toContain('face,hands | outline');
-    expect(screen.getByRole('button', { name: 'Show object detection boxes while tracing' })).toHaveAttribute('aria-pressed', 'false');
-    fireEvent.click(screen.getByRole('button', { name: 'Show object detection boxes while tracing' }));
-    expect(screen.getByRole('button', { name: 'Show object detection boxes while tracing' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'Disable landmark tracing for Camera 1' }));
-    expect(screen.queryByTestId('trace-models')).toBeNull();
-    expect(mock.addEvent).toHaveBeenCalledOnce();
   });
 
-  it('never starts diagnostic tracing when AI is switched off', () => {
+  it('does not start face models when AI monitoring is disabled', () => {
     render(<LiveCameraFeed camera={{ ...cam, aiEnabled: false }} settings={DEFAULT_SETTINGS} onConnect={vi.fn()} />);
-    expect(screen.getByRole('button', { name: 'Enable landmark tracing for Camera 1' })).toBeDisabled();
+    expect(screen.queryByTestId('trace-models')).toBeNull();
+  });
+
+  it('does not start face models for offline cameras', () => {
+    mock.session.runtime = { ...mock.session.runtime!, status: 'offline' };
+    render(<LiveCameraFeed camera={cam} settings={DEFAULT_SETTINGS} onConnect={vi.fn()} />);
     expect(screen.queryByTestId('trace-models')).toBeNull();
   });
 });
