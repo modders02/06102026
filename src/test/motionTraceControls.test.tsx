@@ -68,9 +68,8 @@ describe('automatic CCTV face boxes and object detection', () => {
     expect(screen.queryByRole('button', { name: /Enable landmark tracing/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Show object detection boxes/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Simulate blendshape movement' }));
-    expect(mock.addEvent).toHaveBeenCalledWith(expect.objectContaining({
-      cameraId: 'slot-1', type: 'emotion', label: 'Happy',
-    }));
+    // Visual-only MediaPipe cues must not write competing Happy history records.
+    expect(mock.addEvent).not.toHaveBeenCalled();
   });
 
   it('does not start face models when AI monitoring is disabled', () => {
