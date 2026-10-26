@@ -69,6 +69,8 @@ export interface FireDetectorState {
   mode: 'color' | 'night' | null;
   smokeHistory: number[];        // recent smoke ratios OUTSIDE detected people (rising haze trend)
   smokeEvidenceFrames: number;   // consecutive confirmed temporal smoke candidates
+  smokeActive: boolean;          // confirmed haze until visibility recovers
+  smokeClearFrames: number;      // debounce smoke clearing to prevent toggles
   visibilityHistory: number[];   // recent visibility scores (drop trend)
   lastBbox: [number, number, number, number] | null;
   smoothBbox: [number, number, number, number] | null; // EMA-smoothed bbox
@@ -84,6 +86,8 @@ export function createFireState(): FireDetectorState {
     mode: null,
     smokeHistory: [],
     smokeEvidenceFrames: 0,
+    smokeActive: false,
+    smokeClearFrames: 0,
     visibilityHistory: [],
     lastBbox: null,
     smoothBbox: null,
@@ -506,8 +510,23 @@ export function detectFire(
     : 0;
   const smokeCorroborated = smokeRising && backgroundSmokeRatio >= SMOKE_COVERAGE_HIGH;
   const lowVisibilityCorroborated = enoughBackground && backgroundVisibility <= VISIBILITY_LOW && visibilityDropping;
-  const smokeEmergency = smokeCandidate
-    && state.smokeEvidenceFrames >= MIN_SMOKE_CONFIRM_FRAMES;
+  if (smokeCandidate && state.smokeEvidenceFrames >= MIN_SMOKE_CONFIRM_FRAMES) {
+    state.smokeActive = true;
+    state.smokeClearFrames = 0;
+  } else if (state.smokeActive) {
+    // Once a cloud stabilizes, the rising-trend window eventually forgets
+    // the original clear frame. Keep confirmed smoke active while haze remains
+    // rather than repeatedly reporting new smoke incidents.
+    const stillHazy = enoughBackground
+      && backgroundSmokeRatio >= SMOKE_COVERAGE_HIGH
+      && backgroundVisibility <= VISIBILITY_LOW;
+    state.smokeClearFrames = stillHazy ? 0 : state.smokeClearFrames + 1;
+    if (state.smokeClearFrames >= 3) {
+      state.smokeActive = false;
+      state.smokeClearFrames = 0;
+    }
+  }
+  const smokeEmergency = state.smokeActive;
 
   const baseResult = {
     screenSuppressed: false,
