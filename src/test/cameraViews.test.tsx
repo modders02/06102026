@@ -353,6 +353,8 @@ describe('camera alerts and event history', () => {
     expect(screen.getByText('Angry')).toBeInTheDocument();
     expect(screen.getByText('Trigger word:')).toBeInTheDocument();
     expect(screen.getByText('"help"')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Camera alerts' }))
+      .getByText(/Previously accepted event — historical evidence/)).toBeInTheDocument();
     expect(screen.getByRole('img', {
       name: 'Verified distress: Angry + "help" snapshot from Camera 1',
     })).toHaveAttribute('src', 'data:image/jpeg;base64,distress-trigger');
