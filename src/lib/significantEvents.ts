@@ -59,7 +59,7 @@ export function isIndependentVisualHistoryEvent(event: EventCandidate): boolean 
 }
 
 export function significantEventSignature(
-  event: Pick<DetectionEvent, 'cameraId' | 'type' | 'label'>,
+  event: Pick<DetectionEvent, 'cameraId' | 'type' | 'label' | 'faceTrackId'>,
 ): string {
   // Group a confirmed fire by episode, including 'night vision' label changes.
   const kind = event.type === 'fire' || event.type === 'smoke'
@@ -67,7 +67,8 @@ export function significantEventSignature(
     : event.type === 'emotion'
       ? (historyEmotionMeta(event.label)?.emotion ?? event.label.toLowerCase().trim())
       : event.label.toLowerCase().trim().replace(/\s+/g, ' ');
-  return `${event.cameraId}:${event.type}:${kind}`;
+  const faceKey = event.type === 'emotion' && event.faceTrackId ? `:${event.faceTrackId}` : '';
+  return `${event.cameraId}:${event.type}:${kind}${faceKey}`;
 }
 
 /**
