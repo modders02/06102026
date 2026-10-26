@@ -19,6 +19,7 @@ import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/mu
 import { useFaceDistress } from '@/hooks/useFaceDistress';
 import type { FinalSpeechResult } from '@/hooks/useSpeechRecognition';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
+import { emptyFaceTrackingState, updateFaceExpressionTracks, type FaceBounds } from '@/lib/faceExpressionTracking';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
 import {
   FIRE_FUSION_WINDOW_MS,
@@ -47,6 +48,34 @@ import type {
   CameraConfig, CameraRuntime, DetectionEvent, MultiCamSettings,
 } from '@/types/multicam';
 import { hlsUrlFor, webrtcUrlFor } from '@/types/multicam';
+
+/** Save a small crop of the observed face instead of hundreds of full CCTV
+ * frames, avoiding localStorage quota exhaustion and ambiguous thumbnails.
+ */
+function expressionFaceSnapshot(canvas: HTMLCanvasElement, bounds: FaceBounds): string | undefined {
+  try {
+    const margin = 0.22;
+    const left = Math.max(0, Math.floor((bounds.x - bounds.width * margin) * canvas.width));
+    const top = Math.max(0, Math.floor((bounds.y - bounds.height * margin) * canvas.height));
+    const right = Math.min(canvas.width, Math.ceil((bounds.x + bounds.width * (1 + margin)) * canvas.width));
+    const bottom = Math.min(canvas.height, Math.ceil((bounds.y + bounds.height * (1 + margin)) * canvas.height));
+    if (right - left < 10 || bottom - top < 10) return undefined;
+    const thumbnail = document.createElement('canvas');
+    thumbnail.width = 200;
+    thumbnail.height = 200;
+    const ctx = thumbnail.getContext('2d');
+    if (!ctx) return undefined;
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, 200, 200);
+    const scale = Math.min(200 / (right - left), 200 / (bottom - top));
+    const width = (right - left) * scale, height = (bottom - top) * scale;
+    ctx.drawImage(canvas, left, top, right - left, bottom - top,
+      (200 - width) / 2, (200 - height) / 2, width, height);
+    return thumbnail.toDataURL('image/jpeg', 0.55);
+  } catch {
+    return undefined;
+  }
+}
 
 const HUMAN_LABELS = new Set(['person']);
 /** Live CCTV text disappears this long after the last words were heard. */
@@ -160,6 +189,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const fireSpeechAfterFrameRef = useRef(0);
   const analysisRevisionRef = useRef(0);
   const faceAnalysisRevisionRef = useRef<number | null>(null);
+  const expressionTracksRef = useRef(emptyFaceTrackingState());
+  const expressionSessionRef = useRef(crypto.randomUUID());
   const analysisActiveRef = useRef(camera.enabled && camera.aiEnabled);
   analysisActiveRef.current = camera.enabled && camera.aiEnabled;
   const lastAudioRef = useRef<string | undefined>(undefined);
@@ -261,6 +292,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   useEffect(() => {
     analysisRevisionRef.current += 1;
     faceAnalysisRevisionRef.current = null;
+    expressionTracksRef.current = emptyFaceTrackingState();
     if (!camera.enabled || !camera.aiEnabled) {
       prevFrameRef.current = null;
       fireStateRef.current = createFireState();
@@ -718,6 +750,30 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       const analyzedFace = await facePromise;
       if (cancelled()) return;
 
+      // A dedicated informational path tracks EACH detected face from the
+      // SAME frame and emits only stable expression transitions. No audio
+      // validation, emails, or emergency notifications are involved.
+      if (analyzedFace) {
+        const tracked = updateFaceExpressionTracks(
+          expressionTracksRef.current, analyzedFace.faces ?? [], Date.now(),
+        );
+        expressionTracksRef.current = tracked.state;
+        for (const observation of tracked.events) {
+          onEventRef.current?.({
+            cameraId: camera.id,
+            cameraName: camera.name,
+            location: camera.location,
+            type: 'emotion',
+            label: observation.label,
+            confidence: observation.confidence,
+            faceTrackId: `${expressionSessionRef.current}:${observation.trackId}`,
+            faceNumber: observation.trackId,
+            timestamp: new Date().toISOString(),
+            snapshot: expressionFaceSnapshot(canvas, observation.bounds),
+          });
+        }
+      }
+
       // useFaceDistress returns the current frame result directly. Feed it into
       // fusion now instead of waiting for a React state round-trip.
       if (analyzedFace?.hasFace) {
@@ -1076,10 +1132,6 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
           evaluatedAt: new Date().toISOString(),
         },
       });
-    }
-
-    if (d.hasFace && emotion && d.probability >= DISTRESS_FACE_MIN_CONFIDENCE) {
-      emit('emotion', emotion.label, d.probability);
     }
 
     if (fusionExpression && distressFace) {
