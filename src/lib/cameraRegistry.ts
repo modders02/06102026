@@ -170,6 +170,9 @@ export function saveEventHistory(next: CameraEventHistory): CameraEventHistory {
   while (!write(EVENTS_KEY, persistedEvents) && persistedEvents.length > 1) {
     persistedEvents = persistedEvents.slice(0, Math.max(1, Math.floor(persistedEvents.length * 0.85)));
   }
+  // A smaller persisted history may free enough space for the newest active
+  // accepted Camera Alert, which takes priority over older snapshots.
+  write(ALERTS_KEY, retained.alertEvents);
   // Never discard live in-memory history merely because persistent storage
   // failed or required smaller snapshots. New smaller crops reduce recurrence.
   historyCache = { history: retained, ...readHistoryStorage() };
