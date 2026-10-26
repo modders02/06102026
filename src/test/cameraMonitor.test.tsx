@@ -493,6 +493,35 @@ describe('camera snapshots and page-scoped playback', () => {
     }
   });
 
+  it('records two separately tracked facial expressions only after stable camera frames', async () => {
+    mocked.analyzeFace.mockResolvedValue({
+      hasFace: true, expression: 'happy', probability: 0.95,
+      distressScore: 0, distressLevel: 'none',
+      faces: [
+        { bounds: { x: 0.12, y: 0.12, width: 0.20, height: 0.40 }, expression: 'happy', confidence: 0.95 },
+        { bounds: { x: 0.66, y: 0.22, width: 0.18, height: 0.34 }, expression: 'happy', confidence: 0.92 },
+      ],
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    const emotionEvents = () => onEvent.mock.calls
+      .map(([event]) => event).filter(event => event.type === 'emotion');
+    expect(emotionEvents()).toHaveLength(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(emotionEvents()).toHaveLength(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(emotionEvents()).toHaveLength(2);
+    expect(emotionEvents().map(event => event.faceTrackId).every(Boolean)).toBe(true);
+    expect(new Set(emotionEvents().map(event => event.faceTrackId)).size).toBe(2);
+    expect(emotionEvents().map(event => event.label)).toEqual(['Happy', 'Happy']);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(emotionEvents()).toHaveLength(2);
+    expect(emotionEvents().every(event => event.alertValidation === undefined)).toBe(true);
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(0);
+  });
+
   it.each([
     ['angry', 'help me', 'help', 'Angry'],
     ['fearful', 'help me', 'help', 'Frightened'],
