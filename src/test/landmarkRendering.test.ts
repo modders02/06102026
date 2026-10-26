@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { containedVideoRect, toCanvasPoint, drawConnections, drawFaceLandmarkBounds, drawSolidFaceBox, faceLandmarkBounds, imageLandmarks, usableFaceLandmarks, validLandmarkCount, FACE_68_CONNECTIONS, drawQualityConnections, smoothLandmarks, updateTrail, drawTrail } from '@/lib/landmarkRendering';
+import { containedVideoRect, toCanvasPoint, drawConnections, drawFaceLandmarkBounds, drawSolidFaceBox, drawDistinctFaceBoxes, faceLandmarkBounds, imageLandmarks, usableFaceLandmarks, validLandmarkCount, FACE_68_CONNECTIONS, drawQualityConnections, smoothLandmarks, updateTrail, drawTrail } from '@/lib/landmarkRendering';
 
 describe('video-aligned face / pose / hand tracing geometry', () => {
   it('keeps camera geometry inside the actual object-contain video instead of painting letterboxes', () => {
@@ -156,6 +156,27 @@ describe('video-aligned face / pose / hand tracing geometry', () => {
     expect(ctx.fillText).toHaveBeenCalledWith('FACE', expect.any(Number), expect.any(Number));
     expect(drawSolidFaceBox(ctx, [], rect)).toBe(false);
     expect(ctx.strokeRect).toHaveBeenCalledOnce();
+  });
+
+  it('draws separate face boxes for two people, but deduplicates overlapping model outputs', () => {
+    const generate = (baseX: number) => Array.from({ length: 478 }, (_, index) => ({
+      x: baseX + (index % 22) * 0.005,
+      y: 0.2 + Math.floor(index / 22) * 0.009,
+    }));
+    const primary = generate(0.15);
+    const second = generate(0.60);
+    const duplicate = generate(0.153);
+    const ctx = {
+      save: vi.fn(), restore: vi.fn(), setLineDash: vi.fn(),
+      strokeRect: vi.fn(), measureText: vi.fn(() => ({ width: 35 })),
+      fillRect: vi.fn(), fillText: vi.fn(), font: '',
+      strokeStyle: '', fillStyle: '', lineWidth: 0,
+    } as unknown as CanvasRenderingContext2D;
+    const rect = containedVideoRect(960, 540, 1920, 1080);
+    expect(drawDistinctFaceBoxes(ctx, [primary, duplicate, second], rect)).toBe(2);
+    expect(ctx.strokeRect).toHaveBeenCalledTimes(2);
+    expect(ctx.fillText).toHaveBeenCalledTimes(2);
+    expect(drawDistinctFaceBoxes(ctx, [], rect)).toBe(0);
   });
 
 });
