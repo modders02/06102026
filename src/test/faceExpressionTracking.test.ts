@@ -88,7 +88,7 @@ describe('independent CCTV facial expression stability', () => {
   });
   it('reassociates a tilted or moving face even after IoU drops below the old tracker threshold', () => {
     let state = emptyFaceTrackingState();
-    const positions = [0.10, 0.23, 0.29, 0.35, 0.43];
+    const positions = [0.10, 0.25, 0.29, 0.35, 0.43];
     const events: Array<{ trackId: number; label: string; faceNumber: number }> = [];
     positions.forEach((x, index) => {
       const next = advance(state, [face(x, 'happy')], index * 650);
