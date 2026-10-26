@@ -505,7 +505,7 @@ describe('camera alerts and event history', () => {
     }
   });
 
-  it('shows Happy facial-expression history without requiring emergency validation', () => {
+  it('shows all confident facial-expression history without requiring emergency validation', () => {
     mocks.events = [
       { id: 'happy-smile', cameraId: 'slot-1', cameraName: 'Camera 1',
         location: 'Lobby', type: 'emotion', label: 'Happy', confidence: 0.78,
@@ -513,12 +513,19 @@ describe('camera alerts and event history', () => {
       { id: 'neutral', cameraId: 'slot-1', cameraName: 'Camera 1',
         location: 'Lobby', type: 'emotion', label: 'Neutral', confidence: 0.99,
         timestamp: '2026-10-25T17:00:10Z' },
+      ...['Sad', 'Angry', 'Frightened', 'Surprised', 'Disgust'].map((label, index) => ({
+        id: `emotion-${index}`, cameraId: 'slot-1', cameraName: 'Camera 1',
+        location: 'Lobby', type: 'emotion' as const, label, confidence: 0.91,
+        timestamp: `2026-10-25T17:00:1${index}Z`,
+      })),
     ];
     mocks.alertEvents = [];
     render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
     const history = within(screen.getByRole('region', { name: 'Event history' }));
     expect(history.getAllByText(/Happy/).length).toBeGreaterThan(0);
-    expect(history.queryByText('Neutral')).not.toBeInTheDocument();
+    for (const label of ['Neutral', 'Sad', 'Angry', 'Frightened', 'Surprised', 'Disgust']) {
+      expect(history.getByText(new RegExp(label))).toBeInTheDocument();
+    }
     expect(history.getByRole('button', {
       name: 'View snapshot: Happy from Camera 1',
     })).toBeInTheDocument();
@@ -527,7 +534,7 @@ describe('camera alerts and event history', () => {
       .getByText('No camera alerts yet.')).toBeInTheDocument();
   });
 
-  it('hides routine legacy objects and neutral expressions from the visible incident log', () => {
+  it('hides routine legacy objects but keeps neutral expression history', () => {
     mocks.events = [
       { id: 'old-person', cameraId: 'slot-1', cameraName: 'Camera 1', location: 'Lobby',
         type: 'object', label: 'person', confidence: 0.99, timestamp: '2026-10-02T02:40:20Z' },
@@ -538,7 +545,7 @@ describe('camera alerts and event history', () => {
     render(<MemoryRouter initialEntries={['/cameras?camera=slot-1']}><Monitoring /></MemoryRouter>);
     const history = within(screen.getByRole('region', { name: 'Event history' }));
     expect(history.queryByText('person')).not.toBeInTheDocument();
-    expect(history.queryByText('Neutral')).not.toBeInTheDocument();
+    expect(history.getByText(/Neutral/)).toBeInTheDocument();
     expect(history.getByText('Lobby smoke detected')).toBeInTheDocument();
   });
 
