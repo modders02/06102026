@@ -86,4 +86,38 @@ describe('independent CCTV facial expression stability', () => {
     const result = advance(state, [face(0.72, 'sad')], 600);
     expect(result.state.tracks.map(track => track.id).sort()).toEqual([1, 2]);
   });
+  it('reassociates a tilted or moving face even after IoU drops below the old tracker threshold', () => {
+    let state = emptyFaceTrackingState();
+    const positions = [0.10, 0.23, 0.29, 0.35, 0.43];
+    const events: Array<{ trackId: number; label: string; faceNumber: number }> = [];
+    positions.forEach((x, index) => {
+      const next = advance(state, [face(x, 'happy')], index * 650);
+      state = next.state;
+      events.push(...next.events);
+    });
+    expect(state.tracks).toHaveLength(1);
+    expect(state.tracks[0].id).toBe(1);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ trackId: 1, faceNumber: 1, label: 'Happy' });
+  });
+
+  it('uses left-to-right face numbers instead of incrementing historical track IDs', () => {
+    let state = emptyFaceTrackingState();
+    let events: Array<{ trackId: number; faceNumber: number }> = [];
+    for (let i = 0; i < 3; i++) {
+      const output = advance(state, [face(0.64, 'sad'), face(0.15, 'happy')], i * 700);
+      state = output.state;
+      events.push(...output.events);
+    }
+    expect(events.map(e => e.faceNumber)).toEqual([1, 2]);
+    expect(events.every(e => e.trackId === e.faceNumber)).toBe(true);
+    const old = advance(state, [], 9000).state;
+    state = old;
+    for (const now of [9600, 10200, 10800]) {
+      const output = advance(state, [face(0.15, 'happy')], now);
+      state = output.state;
+      if (now === 10800) expect(output.events[0]).toMatchObject({ faceNumber: 1, trackId: 3 });
+    }
+  });
+
 });
