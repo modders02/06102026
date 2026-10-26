@@ -176,6 +176,8 @@ describe('video-aligned face / pose / hand tracing geometry', () => {
     expect(drawDistinctFaceBoxes(ctx, [primary, duplicate, second], rect)).toBe(2);
     expect(ctx.strokeRect).toHaveBeenCalledTimes(2);
     expect(ctx.fillText).toHaveBeenCalledTimes(2);
+    expect(ctx.fillText).toHaveBeenCalledWith('FACE 1', expect.any(Number), expect.any(Number));
+    expect(ctx.fillText).toHaveBeenCalledWith('FACE 2', expect.any(Number), expect.any(Number));
     expect(drawDistinctFaceBoxes(ctx, [], rect)).toBe(0);
   });
 
