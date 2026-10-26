@@ -1,8 +1,8 @@
-export type HistoryEmotion = 'happy' | 'sad' | 'angry' | 'frightened' | 'neutral' | 'disgust';
+export type HistoryEmotion = 'happy' | 'sad' | 'angry' | 'frightened' | 'surprised' | 'neutral' | 'disgust';
 
 export interface HistoryEmotionMeta {
   emotion: HistoryEmotion;
-  label: 'Happy' | 'Sad' | 'Angry' | 'Frightened' | 'Neutral' | 'Disgust';
+  label: 'Happy' | 'Sad' | 'Angry' | 'Frightened' | 'Surprised' | 'Neutral' | 'Disgust';
   icon: string;
   rowClass: string;
   labelClass: string;
@@ -37,6 +37,13 @@ const META: Record<HistoryEmotion, HistoryEmotionMeta> = {
     rowClass: 'border-l-4 border-l-warning bg-warning/10',
     labelClass: 'text-warning',
   },
+  surprised: {
+    emotion: 'surprised',
+    label: 'Surprised',
+    icon: '😮',
+    rowClass: 'border-l-4 border-l-primary bg-primary/10',
+    labelClass: 'text-primary',
+  },
   neutral: {
     emotion: 'neutral',
     label: 'Neutral',
@@ -54,22 +61,18 @@ const META: Record<HistoryEmotion, HistoryEmotionMeta> = {
 };
 
 /**
- * face-api calls this wide-eyed/startle expression "surprised".
- * MSDS presents it as "Frightened" so the UI and multimodal safety rule use
- * one label for fearful/startled distress.
+ * Show face-api's seven supported facial-expression classes distinctly.
+ * In particular, a surprised face is not proof that someone is frightened.
+ * This is history/display labeling only; emergency fusion is unchanged.
  */
 export function historyEmotionMeta(expression: string | null | undefined): HistoryEmotionMeta | null {
   const normalized = (expression ?? '').trim().toLowerCase();
   if (normalized === 'happy') return META.happy;
   if (normalized === 'sad') return META.sad;
   if (normalized === 'angry' || normalized === 'anger') return META.angry;
-  if (
-    normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
-    || normalized === 'surprised' || normalized === 'surprise'
-    || normalized === 'shock' || normalized === 'shocked'
-  ) {
-    return META.frightened;
-  }
+  if (normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened') return META.frightened;
+  if (normalized === 'surprised' || normalized === 'surprise'
+    || normalized === 'shock' || normalized === 'shocked') return META.surprised;
   if (normalized === 'neutral') return META.neutral;
   if (normalized === 'disgusted' || normalized === 'disgust') return META.disgust;
   return null;
