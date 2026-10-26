@@ -772,6 +772,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             confidence: observation.confidence,
             faceTrackId: `${expressionSessionRef.current}:${observation.trackId}`,
             faceNumber: observation.faceNumber,
+            faceBounds: [
+              observation.bounds.x, observation.bounds.y,
+              observation.bounds.width, observation.bounds.height,
+            ],
             timestamp: new Date().toISOString(),
             snapshot: expressionFaceSnapshot(canvas, observation.bounds),
           });
