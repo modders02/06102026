@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  SIGNIFICANT_EVENT_COOLDOWN_MS, HAPPY_EVENT_COOLDOWN_MS, HAPPY_EXPRESSION_MIN_CONFIDENCE, isSignificantHistoryEvent, isIndependentVisualHistoryEvent,
+  SIGNIFICANT_EVENT_COOLDOWN_MS, EMOTION_EVENT_COOLDOWN_MS, EMOTION_MIN_CONFIDENCE, isSignificantHistoryEvent, isIndependentVisualHistoryEvent,
   shouldRecordSignificantEvent,
 } from '@/lib/significantEvents';
 import type { DetectionEvent } from '@/types/multicam';
@@ -26,30 +26,45 @@ const verifiedFire = evt('fire', {
     emotion: 'visual fire', reason: 'Accepted word and camera fire region' },
 });
 
-describe('incident-only Event History significance policy', () => {
-  it('does not log routine footage or emotion labels, regardless of model confidence', () => {
-    for (const type of ['object', 'human', 'emotion', 'saliency', 'attention-alert',
+describe('incident and expression Event History significance policy', () => {
+  it('does not log ordinary objects, saliency or unverified audio', () => {
+    for (const type of ['object', 'human', 'saliency', 'attention-alert',
       'face-distress', 'audio-distress'] as const) {
       expect(isSignificantHistoryEvent(evt(type, { confidence: 1, label: 'Neutral' }))).toBe(false);
     }
     expect(isSignificantHistoryEvent(evt('object', { label: 'person', confidence: 0.99 }))).toBe(false);
     expect(isSignificantHistoryEvent(evt('audio-distress', { label: 'Wake word: "help"' }))).toBe(false);
   });
-  it('records confident Happy but not neutral, weak or other routine facial expressions', () => {
-    expect(isSignificantHistoryEvent(evt('emotion', { label: 'Happy', confidence: 0.93 }))).toBe(true);
-    expect(isSignificantHistoryEvent(evt('emotion', { label: ' happy ', confidence: HAPPY_EXPRESSION_MIN_CONFIDENCE }))).toBe(true);
-    expect(isSignificantHistoryEvent(evt('emotion', { label: 'Happy', confidence: 0.59 }))).toBe(false);
-    expect(isSignificantHistoryEvent(evt('emotion', { label: 'Neutral', confidence: 1 }))).toBe(false);
-    expect(isSignificantHistoryEvent(evt('emotion', { label: 'Sad', confidence: 1 }))).toBe(false);
-    expect(isSignificantHistoryEvent(evt('object', { label: 'Happy', confidence: 1 }))).toBe(false);
+  it.each(['Happy', 'Sad', 'Angry', 'Fearful', 'Surprised', 'Disgusted', 'Neutral'])(
+    'retains the confident %s expression in Event History without speech',
+    label => {
+      expect(isSignificantHistoryEvent(evt('emotion', {
+        label, confidence: EMOTION_MIN_CONFIDENCE,
+      }))).toBe(true);
+      expect(isSignificantHistoryEvent(evt('emotion', {
+        label, confidence: EMOTION_MIN_CONFIDENCE - 0.01,
+      }))).toBe(false);
+    },
+  );
+  it('rejects unknown model outputs and invalid scores', () => {
+    for (const label of ['', 'unknown', 'person', 'no face']) {
+      expect(isSignificantHistoryEvent(evt('emotion', { label, confidence: 0.99 }))).toBe(false);
+    }
+    expect(isSignificantHistoryEvent(evt('emotion', { label: 'Happy', confidence: 1.2 }))).toBe(false);
+    expect(isSignificantHistoryEvent(evt('emotion', { label: 'Happy', confidence: Number.NaN }))).toBe(false);
   });
-  it('deduplicates smiling history for two minutes independently by camera', () => {
-    const history = new Map<string, number>();
+  it('deduplicates each expression separately for each camera', () => {
+    const recorded = new Map<string, number>();
     const happy = evt('emotion', { label: 'Happy', confidence: 0.74 });
-    expect(shouldRecordSignificantEvent(happy, history, 100_000)).toBe(true);
-    expect(shouldRecordSignificantEvent(happy, history, 100_020)).toBe(false);
-    expect(shouldRecordSignificantEvent({ ...happy, cameraId: 'slot-2' }, history, 100_020)).toBe(true);
-    expect(shouldRecordSignificantEvent(happy, history, 100_000 + HAPPY_EVENT_COOLDOWN_MS)).toBe(true);
+    const sad = evt('emotion', { label: 'Sad', confidence: 0.85 });
+    expect(shouldRecordSignificantEvent(happy, recorded, 100_000)).toBe(true);
+    expect(shouldRecordSignificantEvent(happy, recorded, 100_020)).toBe(false);
+    expect(shouldRecordSignificantEvent(sad, recorded, 100_020)).toBe(true);
+    expect(shouldRecordSignificantEvent({ ...happy, cameraId: 'slot-2' }, recorded, 100_020)).toBe(true);
+    expect(shouldRecordSignificantEvent(happy, recorded, 100_000 + EMOTION_EVENT_COOLDOWN_MS)).toBe(true);
+    const surprised = evt('emotion', { label: 'Surprised', confidence: 0.85 });
+    expect(shouldRecordSignificantEvent(surprised, recorded, 200_000)).toBe(true);
+    expect(shouldRecordSignificantEvent({ ...surprised, label: 'Shock' }, recorded, 200_020)).toBe(false);
   });
   it('retains exact accepted audio+visual evidence and archived alert history', () => {
     expect(isSignificantHistoryEvent(verifiedHelp)).toBe(true);
