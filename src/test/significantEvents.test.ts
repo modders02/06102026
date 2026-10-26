@@ -66,6 +66,16 @@ describe('incident and expression Event History significance policy', () => {
     expect(shouldRecordSignificantEvent(surprised, recorded, 200_000)).toBe(true);
     expect(shouldRecordSignificantEvent({ ...surprised, label: 'Shock' }, recorded, 200_020)).toBe(false);
   });
+  it('tracks cooldowns independently for two faces in the same camera', () => {
+    const history = new Map<string, number>();
+    const first = evt('emotion', { label: 'Happy', confidence: 0.96, faceTrackId: 'live:1', faceNumber: 1 });
+    const second = evt('emotion', { label: 'Happy', confidence: 0.96, faceTrackId: 'live:2', faceNumber: 2 });
+    expect(shouldRecordSignificantEvent(first, history, 100_000)).toBe(true);
+    expect(shouldRecordSignificantEvent(second, history, 100_100)).toBe(true);
+    expect(shouldRecordSignificantEvent(first, history, 100_200)).toBe(false);
+    expect(shouldRecordSignificantEvent(second, history, 100_250)).toBe(false);
+  });
+
   it('retains exact accepted audio+visual evidence and archived alert history', () => {
     expect(isSignificantHistoryEvent(verifiedHelp)).toBe(true);
     expect(isSignificantHistoryEvent(verifiedFire)).toBe(true);
