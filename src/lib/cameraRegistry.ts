@@ -11,7 +11,7 @@ const CAMERAS_KEY = 'msd-cameras-v1';
 const SETTINGS_KEY = 'msd-multicam-settings-v1';
 const EVENTS_KEY = 'msd-detection-events-v1';
 const ALERTS_KEY = 'msd-camera-alerts-v1';
-export const CAMERA_HISTORY_LIMIT = 50;
+export const CAMERA_HISTORY_LIMIT = 150;
 export const isCameraAlert = (event: DetectionEvent) => isPriorityCameraAlert(event);
 const isRelevantStoredEvent = (event: DetectionEvent) =>
   event.type !== 'object' || isRelevantIndoorObject(event.label);
@@ -53,10 +53,13 @@ const readArray = <T,>(key: string): T[] => {
   }
 };
 
-const write = (key: string, value: unknown) => {
+const write = (key: string, value: unknown): boolean => {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch { /* quota */ }
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 export const slugify = (s: string) =>
@@ -146,8 +149,13 @@ export function saveEventHistory(next: CameraEventHistory): CameraEventHistory {
     events: normalized.events.slice(0, CAMERA_HISTORY_LIMIT),
     alertEvents: normalized.alertEvents,
   };
-  write(EVENTS_KEY, retained.events);
+  // Browsers impose relatively small per-origin localStorage limits. Keep
+  // accepted alert storage independent, then shed the OLDEST history entries
+  // if earlier full-resolution snapshots exceed the remaining quota.
   write(ALERTS_KEY, retained.alertEvents);
+  while (!write(EVENTS_KEY, retained.events) && retained.events.length > 1) {
+    retained.events = retained.events.slice(0, Math.max(1, Math.floor(retained.events.length * 0.85)));
+  }
   historyCache = { history: retained, ...readHistoryStorage() };
   revokeUnusedEventClips(
     [
