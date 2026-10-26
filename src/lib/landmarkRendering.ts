@@ -264,7 +264,7 @@ export function drawFaceLandmarkBounds(
  */
 export function drawSolidFaceBox(
   ctx: CanvasRenderingContext2D, landmarks: readonly TracePoint[],
-  rect: TraceRect, color = '#22d3ee',
+  rect: TraceRect, color = '#22d3ee', label = 'FACE',
 ): boolean {
   const bounds = faceLandmarkBounds(landmarks, rect);
   if (!bounds) return false;
@@ -273,7 +273,6 @@ export function drawSolidFaceBox(
   ctx.lineWidth = 3;
   ctx.setLineDash([]);
   ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
-  const label = 'FACE';
   ctx.font = 'bold 13px sans-serif';
   const textWidth = ctx.measureText(label).width + 12;
   const labelY = Math.max(rect.y, bounds.y - 23);
@@ -309,7 +308,7 @@ export function drawDistinctFaceBoxes(
       return union > 0 && intersection / union > 0.55;
     });
     if (duplicate) continue;
-    if (drawSolidFaceBox(ctx, face, rect)) drawn.push(bounds);
+    if (drawSolidFaceBox(ctx, face, rect, '#22d3ee', `FACE ${drawn.length + 1}`)) drawn.push(bounds);
   }
   return drawn.length;
 }
