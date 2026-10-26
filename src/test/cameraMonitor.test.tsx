@@ -469,7 +469,7 @@ describe('camera snapshots and page-scoped playback', () => {
     ['sad', 'Sad', true, 'Sad'],
     ['angry', 'Angry', true, 'Angry'],
     ['fearful', 'Frightened', true, 'Frightened'],
-    ['surprised', 'Frightened', true, 'Frightened'],
+    ['surprised', 'Frightened', false, ''],
     ['neutral', 'Neutral', false, ''],
     ['disgusted', 'Disgust', false, ''],
   ] as const)('does not record one-frame %s as a stable emotion event', async (expression, label, distressDetected, distressLabel) => {
@@ -525,8 +525,6 @@ describe('camera snapshots and page-scoped playback', () => {
   it.each([
     ['angry', 'help me', 'help', 'Angry'],
     ['fearful', 'help me', 'help', 'Frightened'],
-    ['surprised', 'help me', 'help', 'Frightened'],
-    ['shock', 'help me', 'help', 'Frightened'],
     ['fearful', 'emergency', 'emergency', 'Frightened'],
     ['angry', 'danger', 'danger', 'Angry'],
     ['fearful', 'danger', 'danger', 'Frightened'],
@@ -742,7 +740,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
   });
 
-  it('treats configured surprised + help as Frightened + help', async () => {
+  it('does not promote surprise + help to a frightened emergency', async () => {
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
     mocked.analyzeFace.mockImplementationOnce(async () => {
       mocked.distress = { hasFace: true, expression: 'surprised', probability: 0.95, distressScore: 90, distressLevel: 'severe' };
@@ -751,9 +749,8 @@ describe('camera snapshots and page-scoped playback', () => {
     const onEvent = vi.fn();
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
-    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'multimodal-distress',
-      label: 'Verified distress: Frightened + "help"',
     }));
   });
 
