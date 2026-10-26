@@ -157,6 +157,19 @@ describe('single active Camera Alert with bounded Event History', () => {
     expect(registry.result.current.events.at(-1)?.id).toBe('event-10');
   });
 
+  it('does not evict important incident history during a wave of face expressions', () => {
+    const incidents = Array.from({ length: 25 }, (_, index) => event(index + 1, 'smoke', {
+      label: 'Smoke detected', smokeConfirmed: true,
+    }));
+    const expressions = Array.from({ length: 200 }, (_, index) => event(index + 1000, 'emotion', {
+      label: 'Happy', confidence: 0.95, faceTrackId: `run:${index}`,
+    }));
+    const saved = saveEventHistory({ events: [...expressions, ...incidents], alertEvents: [] });
+    expect(saved.events).toHaveLength(CAMERA_HISTORY_LIMIT);
+    expect(saved.events.filter(item => item.type === 'smoke')).toHaveLength(25);
+    expect(saved.events.filter(item => item.type === 'emotion')).toHaveLength(CAMERA_HISTORY_LIMIT - 25);
+  });
+
   it('archives the active alert explicitly when live validation is no longer accepted', () => {
     const registry = renderHook(useCameraRegistry);
     act(() => registry.result.current.addEvent(event(1, 'multimodal-distress', {
