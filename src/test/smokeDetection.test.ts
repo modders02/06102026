@@ -1,127 +1,120 @@
 import { describe, expect, it } from 'vitest';
 import { createFireState, detectFire } from '@/lib/fireDetection';
+import type { DetectedObject } from '@/types/dashboard';
 
-function smokeFrame(
-  smokeShare: number,
-  width = 120,
-  height = 80,
+/** The camera sees real edges and texture BEFORE any haze develops. */
+function scene(
+  opacity: number,
+  options: { grayWall?: boolean; exposure?: number; personShare?: number } = {},
+  width = 240,
+  height = 160,
 ): ImageData {
   const data = new Uint8ClampedArray(width * height * 4);
-  const smokeWidth = Math.round(width * smokeShare);
-
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const i = (y * width + x) * 4;
-      if (x < smokeWidth) {
-        // Neutral gray haze: low saturation, mid luminance.
-        data[i] = 145;
-        data[i + 1] = 145;
-        data[i + 2] = 145;
-      } else {
-        // Saturated blue room content provides a clear baseline that is not
-        // classified as smoke.
-        data[i] = 30;
-        data[i + 1] = 80;
-        data[i + 2] = 175;
+      const stripe = (Math.floor(x / 5) + Math.floor(y / 7)) % 2 === 0;
+      const rgb = options.grayWall
+        ? [145, 145, 145]
+        : stripe ? [30, 80, 155] : [55, 137, 225];
+      const personRegion = x < (options.personShare ?? 0) * width;
+      const source = personRegion ? [148, 148, 148] : rgb;
+      const a = personRegion ? 0 : opacity;
+      for (let channel = 0; channel < 3; channel++) {
+        data[i + channel] = Math.min(255, Math.max(0, Math.round(
+          (source[channel] * (1 - a) + 174 * a) * (options.exposure ?? 1),
+        )));
       }
       data[i + 3] = 255;
     }
   }
-
   return { data, width, height } as ImageData;
 }
 
-describe('standalone smoke detection', () => {
-  it('confirms sustained rising smoke only after visibility also degrades', () => {
+describe('smoke verifier using temporal loss of background texture', () => {
+  it('confirms only sustained obscuring haze over a previously visible textured room', () => {
     const state = createFireState();
-    const shares = [0.02, 0.08, 0.18, 0.35, 0.60, 0.88];
-
-    let result = detectFire(smokeFrame(shares[0]), state);
-    for (const share of shares.slice(1)) {
-      result = detectFire(smokeFrame(share), state);
-    }
-    // A sudden shift to a gray room is not sufficient confirmation.
+    let result = detectFire(scene(0), state);
+    for (let i = 0; i < 4; i++) result = detectFire(scene(0), state);
     expect(result.smokeEmergency).toBe(false);
-    // Require sustained low visibility and rising background haze.
-    for (let index = 0; index < 2; index++) {
-      result = detectFire(smokeFrame(shares[shares.length - 1]), state);
-    }
-
     expect(result.fireDetected).toBe(false);
-    expect(result.smokeRatio).toBeGreaterThanOrEqual(0.18);
-    expect(result.visibility).toBeLessThanOrEqual(45);
-    expect(result.smokeCorroborated).toBe(true);
-    expect(result.lowVisibilityCorroborated).toBe(true);
+
+    for (const opacity of [0.15, 0.35, 0.52, 0.62, 0.72, 0.82, 0.88, 0.88, 0.88, 0.88]) {
+      result = detectFire(scene(opacity), state);
+    }
+    expect(result.fireDetected).toBe(false);
+    expect(result.smokeRatio).toBeGreaterThan(0.18);
     expect(result.smokeEmergency).toBe(true);
     expect(result.detected).toBe(true);
+    expect(result.confidence).toBeLessThanOrEqual(0.85);
+    expect(result.confidence).toBeGreaterThanOrEqual(0.60);
   });
 
-
-  it('ignores a moving gray-clothed person that masks a colorful room', () => {
+  it('never confirms a completely gray stationary wall even after many frames', () => {
     const state = createFireState();
-    let result = detectFire(smokeFrame(0.02), state, []);
-    for (const share of [0.12, 0.25, 0.42, 0.60, 0.78, 0.88, 0.88, 0.88]) {
-      const personWidth = Math.round(120 * share);
-      result = detectFire(smokeFrame(share), state, [{
-        label: 'person', confidence: 0.96,
-        bbox: [0, 0, personWidth, 80],
-      }]);
-    }
-    expect(result.smokeRatio).toBeGreaterThan(0.18);
-    expect(result.smokeCorroborated).toBe(false);
+    let result = detectFire(scene(0, { grayWall: true }), state);
+    for (let i = 0; i < 35; i++) result = detectFire(scene(0, { grayWall: true }), state);
+    expect(result.smokeRatio).toBeGreaterThan(0.8);
     expect(result.smokeEmergency).toBe(false);
-    expect(result.detected).toBe(false);
+    expect(result.confidence).toBe(0);
+    expect(result.fireDetected).toBe(false);
   });
 
-  it('does not trigger from one or two gray-coverage transitions', () => {
+  it('does not treat global camera exposure or brightness compensation as smoke', () => {
     const state = createFireState();
-    let result = detectFire(smokeFrame(0.02), state);
-    for (const share of [0.08, 0.18, 0.35, 0.60, 0.88, 0.88]) {
-      result = detectFire(smokeFrame(share), state);
+    for (let i = 0; i < 5; i++) detectFire(scene(0), state);
+    for (const exposure of [1.25, 1.4, 1.2, 1.5, 1.15, 1.45, 1.25, 1.1]) {
+      const result = detectFire(scene(0, { exposure }), state);
       expect(result.smokeEmergency).toBe(false);
     }
-    expect(result.fireDetected).toBe(false);
   });
 
-
-
-  it('holds a confirmed haze until several clear frames, without repeated false edges', () => {
+  it('cannot promote a moving gray person to smoke despite gray pixel coverage', () => {
     const state = createFireState();
-    const shares = [0.02, 0.08, 0.18, 0.35, 0.60, 0.88, 0.88, 0.88];
-    let result = detectFire(smokeFrame(shares[0]), state);
-    for (const share of shares.slice(1)) result = detectFire(smokeFrame(share), state);
+    for (let i = 0; i < 5; i++) detectFire(scene(0), state);
+    for (const share of [0.08, 0.2, 0.35, 0.47, 0.55, 0.6, 0.3, 0.45]) {
+      const objects: DetectedObject[] = [{
+        label: 'person', confidence: 0.96,
+        bbox: [0, 0, Math.floor(240 * share), 160],
+      }];
+      const result = detectFire(scene(0, { personShare: share }), state, objects);
+      expect(result.smokeEmergency).toBe(false);
+    }
+  });
+
+  it('does not confirm haze from a single noisy or blurred transition', () => {
+    const state = createFireState();
+    for (let i = 0; i < 5; i++) detectFire(scene(0), state);
+    expect(detectFire(scene(0.9), state).smokeEmergency).toBe(false);
+    expect(detectFire(scene(0.9), state).smokeEmergency).toBe(false);
+    expect(detectFire(scene(0), state).smokeEmergency).toBe(false);
+  });
+
+  it('keeps confirmed haze stable, and clears it only after background recovery', () => {
+    const state = createFireState();
+    for (let i = 0; i < 5; i++) detectFire(scene(0), state);
+    for (const opacity of [0.2, 0.4, 0.65, 0.75, 0.84, 0.9, 0.9, 0.9, 0.9]) {
+      detectFire(scene(opacity), state);
+    }
+    let result = detectFire(scene(0.9), state);
     expect(result.smokeEmergency).toBe(true);
-    for (let i = 0; i < 12; i++) {
-      result = detectFire(smokeFrame(0.88), state);
+    for (let i = 0; i < 7; i++) {
+      result = detectFire(scene(0.9), state);
       expect(result.smokeEmergency).toBe(true);
     }
-    result = detectFire(smokeFrame(0.02), state);
-    expect(result.smokeEmergency).toBe(true);
-    result = detectFire(smokeFrame(0.02), state);
-    expect(result.smokeEmergency).toBe(true);
-    result = detectFire(smokeFrame(0.02), state);
+    for (let i = 0; i < 10; i++) result = detectFire(scene(0), state);
     expect(result.smokeEmergency).toBe(false);
+    expect(result.confidence).toBe(0);
   });
 
-
-  it('does not confirm a static gray scene as smoke', () => {
+  it('refuses to evaluate reliable smoke when the image has almost no visible background', () => {
     const state = createFireState();
-    let result = detectFire(smokeFrame(0.9), state);
-
-    for (let index = 0; index < 8; index++) {
-      result = detectFire(smokeFrame(0.9), state);
+    for (let i = 0; i < 5; i++) detectFire(scene(0), state);
+    const objects: DetectedObject[] = [{
+      label: 'person', confidence: 0.9, bbox: [0, 0, 235, 155],
+    }];
+    for (let i = 0; i < 10; i++) {
+      expect(detectFire(scene(0.9), state, objects).smokeEmergency).toBe(false);
     }
-
-    expect(result.smokeRatio).toBeGreaterThanOrEqual(0.18);
-    expect(result.smokeCorroborated).toBe(false);
-    expect(result.lowVisibilityCorroborated).toBe(false);
-    expect(result.smokeEmergency).toBe(false);
-  });
-
-  it('does not confirm smoke from one noisy gray frame', () => {
-    const result = detectFire(smokeFrame(0.95), createFireState());
-
-    expect(result.smokeEmergency).toBe(false);
-    expect(result.fireDetected).toBe(false);
   });
 });
