@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { drawConnections, drawSolidFaceBox, drawPoints, drawTrail, containedVideoRect, drawQualityConnections, imageLandmarks, usableFaceLandmarks, updateTrail, type TraceTrail } from '@/lib/landmarkRendering';
-import { detectFallbackFace68 } from '@/lib/faceLandmarkFallback';
+import { drawConnections, drawDistinctFaceBoxes, drawPoints, drawTrail, containedVideoRect, drawQualityConnections, imageLandmarks, usableFaceLandmarks, updateTrail, type TraceTrail } from '@/lib/landmarkRendering';
+import { detectFallbackFaces68 } from '@/lib/faceLandmarkFallback';
 import { classifyFacialMovement, stableFacialMovement, type FacialMovementObservation } from '@/lib/facialMovementCues';
 import type { TracePoint } from '@/lib/landmarkRendering';
 
@@ -52,7 +52,7 @@ async function modelsFor(modes: TracingModes): Promise<{ tasks: VisionTasks; mod
       models.face = await tasks.FaceLandmarker.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: FACE_MODEL, delegate: 'CPU' },
         runningMode: 'VIDEO',
-        numFaces: 1,
+        numFaces: 5,
         outputFaceBlendshapes: true,
         minFaceDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5,
@@ -108,7 +108,7 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh', onMo
     const paths = new Map<string, TraceTrail>();
     let lastTimestamp = 0;
     let lastVideoTime = -1;
-    let latestFallback: TracePoint[] | null = null;
+    let latestFallback: TracePoint[][] = [];
     let latestFallbackAt = 0;
     let fallbackBusy = false;
     let lastFallbackAttemptAt = 0;
@@ -152,7 +152,7 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh', onMo
             || video.paused || !video.videoWidth || !video.videoHeight) {
           clearCanvas();
           paths.clear();
-          latestFallback = null;
+          latestFallback = [];
           movementHistory = [];
           publishMovement(null);
           lastVideoTime = -1;
@@ -186,61 +186,57 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh', onMo
 
         try {
           let faceCount = 0, poseCount = 0, handCount = 0;
-          let poseLines = 0, faceBox = false;
+          let poseLines = 0;
+          let detectedFaces: TracePoint[][] = [];
           if (models.face) {
             const faceResult = models.face.detectForVideo(video, timestamp);
-            const faces = faceResult.faceLandmarks;
-            faceCount = faces.length;
-            const firstBlendshapes = faces.length > 0
+            // Multi-face MediaPipe inference uses the SAME camera video;
+            // facial-expression/movement estimation remains informational.
+            detectedFaces = faceResult.faceLandmarks
+              .map(face => imageLandmarks(face))
+              .filter(usableFaceLandmarks);
+            const firstBlendshapes = faceResult.faceLandmarks.length
               ? faceResult.faceBlendshapes?.[0]?.categories : undefined;
             const rawMovement = classifyFacialMovement(firstBlendshapes);
             const stable = stableFacialMovement(movementHistory, rawMovement);
             movementHistory = stable.history;
             publishMovement(stable.displayed);
-            if (faces.length) {
-              // Important regression fix: draw RAW, current-frame landmarks.
-              // V2 overfiltered/smoothed valid points in some CCTV views.
-              // MediaPipe FaceLandmarker does NOT report the same reliable
-              // visibility scores as PoseLandmarker. A value of zero here
-              // may simply mean "unsupported", not "hidden". The old
-              // renderer rejected every connection and produced Face lines 0.
-              const face = imageLandmarks(faces[0]);
-              if (usableFaceLandmarks(face)) {
-                faceBox = drawSolidFaceBox(ctx, face, rect);
-              }
-            }
           }
-          // Fallback only when MediaPipe has no usable facial contours.
-          // Async face-api inference never blocks the main video loop.
-          // It uses the existing face-api dependency, without any identity
-          // recognition, changes to safety fusion, or persistent storage.
-          let faceSource = faceBox ? 'MediaPipe 478' : 'no usable landmarks';
+
+          // The backup model can recover a second, smaller or partly occluded
+          // face when MediaPipe detects only the primary person. Its results
+          // expire quickly and duplicate boxes are removed before rendering.
+          let faceSource = detectedFaces.length ? 'MediaPipe 478' : 'no usable landmarks';
           const now = Date.now();
-          if (models.face && !faceBox) {
-            if (!fallbackBusy && now - lastFallbackAttemptAt >= 1200) {
+          if (models.face && detectedFaces.length < 2) {
+            if (!fallbackBusy && now - lastFallbackAttemptAt >= 1400) {
               fallbackBusy = true;
               lastFallbackAttemptAt = now;
-              void detectFallbackFace68(video)
-                .then(result => {
+              void detectFallbackFaces68(video)
+                .then(results => {
                   if (disposed) return;
-                  latestFallback = result;
-                  latestFallbackAt = result ? Date.now() : 0;
+                  latestFallback = results;
+                  latestFallbackAt = results.length ? Date.now() : 0;
                   fallbackError = '';
                 })
                 .catch(error => {
                   if (disposed) return;
                   fallbackError = error instanceof Error ? error.message : 'model unavailable';
-                  latestFallback = null;
+                  latestFallback = [];
                   lastFallbackAttemptAt = Date.now() + 8000;
                 })
                 .finally(() => { fallbackBusy = false; });
             }
-            if (latestFallback && now - latestFallbackAt < 1500) {
-              faceBox = drawSolidFaceBox(ctx, latestFallback, rect) || faceBox;
-              if (faceBox) faceSource = 'face-api 68 fallback';
-            }
-          } else if (faceBox) {
-            latestFallback = null;
+          } else {
+            latestFallback = [];
+          }
+          const backupFaces = now - latestFallbackAt < 1700 ? latestFallback : [];
+          faceCount = drawDistinctFaceBoxes(ctx, [...detectedFaces, ...backupFaces], rect);
+          const faceBox = faceCount > 0;
+          if (backupFaces.length && faceCount > detectedFaces.length) {
+            faceSource = 'MediaPipe + face-api 68';
+          } else if (faceCount > 0 && !detectedFaces.length) {
+            faceSource = 'face-api 68 fallback';
           }
 
           if (models.pose) {
