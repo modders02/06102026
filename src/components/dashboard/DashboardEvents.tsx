@@ -126,7 +126,7 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
       <section aria-label="Camera alerts" className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <Bell className="h-4 w-4 text-destructive" />
-          <h3 className="text-sm font-bold">Accepted camera events</h3>
+          <h3 className="text-sm font-bold">Camera alerts</h3>
           <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{alerts.length}</span>
         </div>
         <p className="border-b border-border px-4 py-3 text-xs text-muted-foreground">
