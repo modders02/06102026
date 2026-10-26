@@ -67,7 +67,8 @@ export interface FireDetectorState {
   nightBrightnessHistory: number[];
   /** Reset temporal evidence when switching between color and night analysis. */
   mode: 'color' | 'night' | null;
-  smokeHistory: number[];        // recent smoke ratios (rising smoke trend)
+  smokeHistory: number[];        // recent smoke ratios OUTSIDE detected people (rising haze trend)
+  smokeEvidenceFrames: number;   // consecutive confirmed temporal smoke candidates
   visibilityHistory: number[];   // recent visibility scores (drop trend)
   lastBbox: [number, number, number, number] | null;
   smoothBbox: [number, number, number, number] | null; // EMA-smoothed bbox
@@ -82,6 +83,7 @@ export function createFireState(): FireDetectorState {
     nightBrightnessHistory: [],
     mode: null,
     smokeHistory: [],
+    smokeEvidenceFrames: 0,
     visibilityHistory: [],
     lastBbox: null,
     smoothBbox: null,
@@ -127,7 +129,9 @@ const NIGHT_MIN_RATIO_FLICKER = 0.0000005;
 const NIGHT_MIN_BRIGHTNESS_FLICKER = 0.0002;
 // Legacy smoke-emergency score; the camera pipeline uses smoke as corroboration.
 const SMOKE_COVERAGE_HIGH = 0.18;     // ≥18% of frame
-const VISIBILITY_LOW = 45;            // visibility score (0..100)
+const VISIBILITY_LOW = 45;
+const MIN_SMOKE_CONFIRM_FRAMES = 3; // avoid motion/auto-exposure one-frame spikes
+const MIN_BACKGROUND_SHARE = 0.35; // insufficient unobscured room for reliable smoke estimate            // visibility score (0..100)
 // Poster/wallpaper guard: fire bbox sitting in a very flat, low-edge region.
 const PLANAR_EDGE_DENSITY = 0.03;
 const NIGHT_PLANAR_EDGE_DENSITY = 0.008;
@@ -268,6 +272,8 @@ export function detectFire(
   let nightHotLumSum = 0;
   let darkPixelCount = 0;
   let smokeCount = 0;
+  let backgroundSmokeCount = 0;
+  let backgroundSamples = 0;
   let minX = width, minY = height, maxX = 0, maxY = 0;
   let nightMinX = width, nightMinY = height, nightMaxX = 0, nightMaxY = 0;
 
@@ -315,11 +321,15 @@ export function detectFire(
         if (y > nightMaxY) nightMaxY = y;
       }
 
+      const personPixel = personBboxes.some(person => pointInsideBbox(x, y, person));
+      if (!personPixel) backgroundSamples++;
+
       // SMOKE CANDIDATE: dark, grey, or pale/white low-saturation haze.
       // The palette is intentionally broad because smoke never alarms alone;
       // it must cover a meaningful region and corroborate visual fire.
       if (sat < 0.25 && lum > 0.08 && lum < 0.97 && (max - min) < 50) {
         smokeCount++;
+        if (!personPixel) backgroundSmokeCount++;
       }
 
       // Edge sample: horizontal luminance gradient with neighbour `step` away
@@ -336,6 +346,11 @@ export function detectFire(
   const colorRatio = fireCount / sampledTotal;
   const nightRatio = nightHotCount / sampledTotal;
   const smokeRatio = smokeCount / sampledTotal;
+  // A moving white/gray shirt, hair, or skin can change overall grayscale
+  // coverage without smoke. Compare only unobscured background pixels across
+  // frames, and abstain if most of the frame is occupied by people.
+  const backgroundShare = backgroundSamples / sampledTotal;
+  const backgroundSmokeRatio = backgroundSmokeCount / Math.max(1, backgroundSamples);
 
   const meanLum = lumSum / Math.max(1, lumN);
   const varLum = Math.max(0, lumSqSum / Math.max(1, lumN) - meanLum * meanLum);
@@ -403,7 +418,7 @@ export function detectFire(
   );
 
   // Smoke + visibility temporal trend
-  state.smokeHistory.push(smokeRatio);
+  state.smokeHistory.push(backgroundSmokeRatio);
   if (state.smokeHistory.length > 12) state.smokeHistory.shift();
   state.visibilityHistory.push(visibility);
   if (state.visibilityHistory.length > 12) state.visibilityHistory.shift();
@@ -448,20 +463,27 @@ export function detectFire(
   // Temporal corroboration. A naturally gray room, gray wall, white ceiling,
   // or dark CCTV image can have a large low-saturation area without smoke.
   // Require the scene to actually change before smoke/visibility can verify fire.
+  const enoughBackground = backgroundShare >= MIN_BACKGROUND_SHARE;
   const smokeRising =
+    enoughBackground &&
     state.smokeHistory.length >= 6 &&
-    state.smokeHistory[state.smokeHistory.length - 1] >
-      state.smokeHistory[0] + 0.05;
+    backgroundSmokeRatio > state.smokeHistory[0] + 0.05;
   const visibilityDropping =
     state.visibilityHistory.length >= 6 &&
     state.visibilityHistory[0] - visibility > 15;
-  const smokeCorroborated = smokeRatio >= SMOKE_COVERAGE_HIGH && smokeRising;
-  const lowVisibilityCorroborated = visibility <= VISIBILITY_LOW && visibilityDropping;
-  const smokeEmergency =
-    smokeRatio >= SMOKE_COVERAGE_HIGH &&
-    visibility <= VISIBILITY_LOW &&
-    smokeRising &&
-    visibilityDropping;
+  // Trend alone can spike when somebody passes close to a camera or it
+  // auto-adjusts exposure. Require multiple consecutive qualifying frames.
+  const smokeCandidate = smokeRising
+    && backgroundSmokeRatio >= SMOKE_COVERAGE_HIGH
+    && visibility <= VISIBILITY_LOW
+    && visibilityDropping;
+  state.smokeEvidenceFrames = smokeCandidate
+    ? Math.min(state.smokeEvidenceFrames + 1, MIN_SMOKE_CONFIRM_FRAMES)
+    : 0;
+  const smokeCorroborated = smokeRising && backgroundSmokeRatio >= SMOKE_COVERAGE_HIGH;
+  const lowVisibilityCorroborated = enoughBackground && visibility <= VISIBILITY_LOW && visibilityDropping;
+  const smokeEmergency = smokeCandidate
+    && state.smokeEvidenceFrames >= MIN_SMOKE_CONFIRM_FRAMES;
 
   const baseResult = {
     screenSuppressed: false,
