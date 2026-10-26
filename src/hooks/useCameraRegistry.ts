@@ -10,6 +10,26 @@ import type { CameraConfig, DetectionEvent, MultiCamSettings } from '@/types/mul
 
 const CAMERAS_EVT = 'msd-cameras-changed';
 const EVENTS_EVT = 'msd-events-changed';
+/** A reappearing spatial face can receive a new session-local track ID.
+ * Re-identification is NOT attempted; this merely discards same-expression
+ * duplicate events from near-identical face regions in a short time window.
+ */
+function sameFaceRegion(
+  a?: readonly number[], b?: readonly number[],
+): boolean {
+  if (!a || !b || a.length !== 4 || b.length !== 4) return false;
+  if (![...a, ...b].every(Number.isFinite)
+      || a[2] <= 0 || a[3] <= 0 || b[2] <= 0 || b[3] <= 0) return false;
+  const ix = Math.max(0, Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]));
+  const iy = Math.max(0, Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]));
+  const share = ix * iy / Math.min(a[2] * a[3], b[2] * b[3]);
+  const distanceX = Math.abs(a[0] + a[2] / 2 - b[0] - b[2] / 2);
+  const distanceY = Math.abs(a[1] + a[3] / 2 - b[1] - b[3] / 2);
+  return share >= 0.35
+    && distanceX <= Math.max(a[2], b[2]) * 0.65
+    && distanceY <= Math.max(a[3], b[3]) * 0.65;
+}
+
 
 /** Shared, localStorage-backed camera registry. Safe to use from many pages. */
 export function useCameraRegistry() {
@@ -87,6 +107,7 @@ export function useCameraRegistry() {
         && previous.cameraId === evt.cameraId
         && (evt.faceTrackId
           ? previous.faceTrackId === evt.faceTrackId
+            || sameFaceRegion(previous.faceBounds, evt.faceBounds)
           : !previous.faceTrackId)
         && historyEmotionMeta(previous.label)?.emotion === category
         && Number.isFinite(Date.parse(previous.timestamp))
