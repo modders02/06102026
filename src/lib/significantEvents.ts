@@ -1,34 +1,30 @@
 import type { DetectionEvent } from '@/types/multicam';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
+import { historyEmotionMeta } from '@/lib/emotionEvents';
 
 type EventCandidate = Omit<DetectionEvent, 'id'> | DetectionEvent;
 
 export const SIGNIFICANT_EVENT_COOLDOWN_MS = 45_000;
-export const HAPPY_EVENT_COOLDOWN_MS = 120_000;
-export const HAPPY_EXPRESSION_MIN_CONFIDENCE = 0.60;
+export const EMOTION_EVENT_COOLDOWN_MS = 30_000;
+export const EMOTION_MIN_CONFIDENCE = 0.55;
+/** Compatibility aliases for prior smile-only history tests. */
+export const HAPPY_EVENT_COOLDOWN_MS = EMOTION_EVENT_COOLDOWN_MS;
+export const HAPPY_EXPRESSION_MIN_CONFIDENCE = EMOTION_MIN_CONFIDENCE;
 export const HAPPY_SMILE_MIN_ACTIVATION = 0.60;
 
 /**
- * Event History is an INCIDENT log, not a log of per-frame inference.
- *
- * Camera HISTORY is independent of the audio/facial alert-validation state:
- * detector-confirmed visual fire/smoke and credible collapse can be worth
- * documenting even when the audio validation was rejected, absent or pending.
- * Only a true, separately validated multimodal trigger may use the word
- * "Verified". Routine people, neutral expression, raw speech and saliency
- * are not significant events. A high-confidence Happy/smile observation may
- * be retained as an informational facial-expression event, never an alarm.
- * Existing fusion still exclusively controls
- * Camera Alerts, notifications and emergency recordings.
+ * Event History logs detector-confirmed incidents AND informational estimates
+ * of all seven facial-expression categories. Emotions do not require a matching
+ * voice keyword, and never grant permission to alert or notify.
+ * Per-camera/category cooldown keeps a continuous face from writing every frame.
+ * Facial labels are model observations, not verification of psychological mood.
  */
 export function isSignificantHistoryEvent(event: EventCandidate): boolean {
   if (!event || !Number.isFinite(event.confidence)) return false;
   if (event.type === 'emotion') {
-    // A clearly detected Happy/smile is user-requested history context, not
-    // verified internal mood. Other routine/neutral expression observations
-    // are deliberately excluded to avoid hundreds of passive history entries.
-    return event.label.trim().toLowerCase() === 'happy'
-      && event.confidence >= HAPPY_EXPRESSION_MIN_CONFIDENCE;
+    return event.confidence >= EMOTION_MIN_CONFIDENCE
+      && event.confidence <= 1
+      && historyEmotionMeta(event.label) !== null;
   }
   if (event.type === 'multimodal-distress') {
     // Archived alerts have priorityScenario=false even though their original
@@ -68,7 +64,9 @@ export function significantEventSignature(
   // Group a confirmed fire by episode, including 'night vision' label changes.
   const kind = event.type === 'fire' || event.type === 'smoke'
     ? event.type
-    : event.label.toLowerCase().trim().replace(/\s+/g, ' ');
+    : event.type === 'emotion'
+      ? (historyEmotionMeta(event.label)?.emotion ?? event.label.toLowerCase().trim())
+      : event.label.toLowerCase().trim().replace(/\s+/g, ' ');
   return `${event.cameraId}:${event.type}:${kind}`;
 }
 
@@ -87,7 +85,7 @@ export function shouldRecordSignificantEvent(
   const signature = significantEventSignature(event);
   const last = lastRecorded.get(signature);
   const cooldownMs = event.type === 'emotion'
-    ? HAPPY_EVENT_COOLDOWN_MS : SIGNIFICANT_EVENT_COOLDOWN_MS;
+    ? EMOTION_EVENT_COOLDOWN_MS : SIGNIFICANT_EVENT_COOLDOWN_MS;
   if (last !== undefined && now >= last && now - last < cooldownMs) {
     return false;
   }
