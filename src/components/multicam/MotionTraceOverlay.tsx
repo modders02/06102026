@@ -231,7 +231,7 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh', onMo
             latestFallback = [];
           }
           const backupFaces = now - latestFallbackAt < 1700 ? latestFallback : [];
-          faceCount = drawDistinctFaceBoxes(ctx, [...detectedFaces, ...backupFaces], rect);
+          faceCount = drawDistinctFaceBoxes(ctx, [...detectedFaces, ...backupFaces], rect, detectedFaces.length);
           const faceBox = faceCount > 0;
           if (backupFaces.length && faceCount > detectedFaces.length) {
             faceSource = 'MediaPipe + face-api 68';
