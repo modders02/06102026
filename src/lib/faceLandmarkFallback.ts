@@ -45,7 +45,7 @@ export async function detectFallbackFaces68(video: HTMLVideoElement): Promise<Tr
   const api = await loadFaceApiLandmarks();
   const results = await api
     .detectAllFaces(video, new api.TinyFaceDetectorOptions({
-      inputSize: 320, scoreThreshold: 0.40,
+      inputSize: 320, scoreThreshold: 0.60,
     }))
     .withFaceLandmarks(true);
   return results.slice(0, 5)
