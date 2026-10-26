@@ -84,6 +84,26 @@ describe('standalone smoke detection', () => {
   });
 
 
+
+  it('holds a confirmed haze until several clear frames, without repeated false edges', () => {
+    const state = createFireState();
+    const shares = [0.02, 0.08, 0.18, 0.35, 0.60, 0.88, 0.88, 0.88];
+    let result = detectFire(smokeFrame(shares[0]), state);
+    for (const share of shares.slice(1)) result = detectFire(smokeFrame(share), state);
+    expect(result.smokeEmergency).toBe(true);
+    for (let i = 0; i < 12; i++) {
+      result = detectFire(smokeFrame(0.88), state);
+      expect(result.smokeEmergency).toBe(true);
+    }
+    result = detectFire(smokeFrame(0.02), state);
+    expect(result.smokeEmergency).toBe(true);
+    result = detectFire(smokeFrame(0.02), state);
+    expect(result.smokeEmergency).toBe(true);
+    result = detectFire(smokeFrame(0.02), state);
+    expect(result.smokeEmergency).toBe(false);
+  });
+
+
   it('does not confirm a static gray scene as smoke', () => {
     const state = createFireState();
     let result = detectFire(smokeFrame(0.9), state);
