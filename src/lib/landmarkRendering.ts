@@ -257,3 +257,30 @@ export function drawFaceLandmarkBounds(
   ctx.restore();
   return true;
 }
+
+/** Persistent, solid face-localization overlay for an online CCTV camera.
+ * Coordinates come from the current frame only; this is not face identity
+ * recognition and it does not influence emergency validation.
+ */
+export function drawSolidFaceBox(
+  ctx: CanvasRenderingContext2D, landmarks: readonly TracePoint[],
+  rect: TraceRect, color = '#22d3ee',
+): boolean {
+  const bounds = faceLandmarkBounds(landmarks, rect);
+  if (!bounds) return false;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.setLineDash([]);
+  ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+  const label = 'FACE';
+  ctx.font = 'bold 13px sans-serif';
+  const textWidth = ctx.measureText(label).width + 12;
+  const labelY = Math.max(rect.y, bounds.y - 23);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.78)';
+  ctx.fillRect(bounds.x, labelY, textWidth, 21);
+  ctx.fillStyle = color;
+  ctx.fillText(label, bounds.x + 6, labelY + 15);
+  ctx.restore();
+  return true;
+}
