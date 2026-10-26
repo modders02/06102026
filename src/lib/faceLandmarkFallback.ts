@@ -37,14 +37,23 @@ export function normalizedFace68(
   return result.length === 68 && usableFaceLandmarks(result) ? result : null;
 }
 
-export async function detectFallbackFace68(video: HTMLVideoElement): Promise<TracePoint[] | null> {
-  if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return null;
+/** Backup detector for several simultaneous faces when MediaPipe misses one.
+ * Output is volatile current-video geometry only, never an identity record.
+ */
+export async function detectFallbackFaces68(video: HTMLVideoElement): Promise<TracePoint[][]> {
+  if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return [];
   const api = await loadFaceApiLandmarks();
-  const result = await api
-    .detectSingleFace(video, new api.TinyFaceDetectorOptions({
-      inputSize: 224, scoreThreshold: 0.45,
+  const results = await api
+    .detectAllFaces(video, new api.TinyFaceDetectorOptions({
+      inputSize: 320, scoreThreshold: 0.40,
     }))
     .withFaceLandmarks(true);
-  if (!result) return null;
-  return normalizedFace68(result.landmarks.positions, video.videoWidth, video.videoHeight);
+  return results.slice(0, 5)
+    .map(result => normalizedFace68(result.landmarks.positions, video.videoWidth, video.videoHeight))
+    .filter((face): face is TracePoint[] => face !== null);
+}
+
+// Kept for compatibility with older imports that only expect one face.
+export async function detectFallbackFace68(video: HTMLVideoElement): Promise<TracePoint[] | null> {
+  return (await detectFallbackFaces68(video))[0] ?? null;
 }
