@@ -284,31 +284,48 @@ export function drawSolidFaceBox(
   return true;
 }
 
-/** Draw one box per distinct visible face. The MediaPipe and fallback models
- * can both return the same face; collapse only strongly overlapping boxes.
- * Separate nearby/partly occluded people remain independent detections.
+/** Duplicate boxes from different landmark models often have low IoU
+ * because one includes the forehead/hair while the other captures a cheek.
+ * Compare intersection over the SMALLER box as well as IoU.
+ * When matching a fallback against MediaPipe, we deliberately favor the
+ * primary detector instead of drawing a ghost second face.
+ */
+export function isDuplicateFaceBounds(a: TraceRect, b: TraceRect, fallback = false): boolean {
+  const sharedWidth = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const sharedHeight = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+  if (sharedWidth <= 0 || sharedHeight <= 0) return false;
+  const area = sharedWidth * sharedHeight;
+  const small = Math.min(a.width * a.height, b.width * b.height);
+  const union = a.width * a.height + b.width * b.height - area;
+  const iou = area / union;
+  const smallerCoverage = area / small;
+  const verticalCoverage = sharedHeight / Math.min(a.height, b.height);
+  return iou >= 0.50
+    || (fallback && smallerCoverage >= 0.29 && verticalCoverage >= 0.62);
+}
+
+/** MediaPipe detections come first. Fallback detections are only accepted
+ * when they represent a spatially separate face, not the same person.
  */
 export function drawDistinctFaceBoxes(
   ctx: CanvasRenderingContext2D,
   faces: readonly (readonly TracePoint[])[],
   rect: TraceRect,
+  primaryFaceCount = faces.length,
 ): number {
-  const drawn: TraceRect[] = [];
-  for (const face of faces) {
+  const drawn: Array<{ bounds: TraceRect; fromPrimary: boolean }> = [];
+  for (const [index, face] of faces.entries()) {
     if (!usableFaceLandmarks(face)) continue;
     const bounds = faceLandmarkBounds(face, rect);
     if (!bounds) continue;
-    const duplicate = drawn.some(other => {
-      const w = Math.max(0, Math.min(bounds.x + bounds.width, other.x + other.width)
-        - Math.max(bounds.x, other.x));
-      const h = Math.max(0, Math.min(bounds.y + bounds.height, other.y + other.height)
-        - Math.max(bounds.y, other.y));
-      const intersection = w * h;
-      const union = bounds.width * bounds.height + other.width * other.height - intersection;
-      return union > 0 && intersection / union > 0.55;
-    });
+    const fromPrimary = index < primaryFaceCount;
+    const duplicate = drawn.some(other => isDuplicateFaceBounds(
+      bounds, other.bounds, !fromPrimary || !other.fromPrimary,
+    ));
     if (duplicate) continue;
-    if (drawSolidFaceBox(ctx, face, rect, '#22d3ee', `FACE ${drawn.length + 1}`)) drawn.push(bounds);
+    if (drawSolidFaceBox(ctx, face, rect, '#22d3ee', `FACE ${drawn.length + 1}`)) {
+      drawn.push({ bounds, fromPrimary });
+    }
   }
   return drawn.length;
 }
