@@ -549,6 +549,28 @@ describe('validation gate for Camera Alert', () => {
     expect(registry.result.current.alertEvents).toEqual([]);
   });
 
+  it('ignores rediscovered same-face expression despite a different transient track ID', () => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => {
+      registry.result.current.addEvent(event(600, 'emotion', {
+        label: 'Happy', confidence: 0.93, faceTrackId: 'session:1',
+        faceBounds: [0.24, 0.2, 0.23, 0.36], faceNumber: 1,
+      }));
+      registry.result.current.addEvent(event(601, 'emotion', {
+        label: 'Happy', confidence: 0.91, faceTrackId: 'session:14',
+        faceBounds: [0.29, 0.21, 0.22, 0.35], faceNumber: 1,
+      }));
+      registry.result.current.addEvent(event(602, 'emotion', {
+        label: 'Happy', confidence: 0.92, faceTrackId: 'session:2',
+        faceBounds: [0.72, 0.2, 0.2, 0.35], faceNumber: 2,
+      }));
+    });
+    const emotions = registry.result.current.events.filter(item => item.type === 'emotion');
+    expect(emotions).toHaveLength(2);
+    expect(emotions.map(item => item.faceTrackId).sort()).toEqual(['session:1', 'session:2']);
+    expect(registry.result.current.alertEvents).toEqual([]);
+  });
+
   it('deduplicates an expression emitted by two face detectors but allows other expressions', () => {
     const registry = renderHook(useCameraRegistry);
     const first = event(300, 'emotion', { label: 'Happy', confidence: 0.91 });
