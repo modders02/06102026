@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { drawConnections, drawFaceLandmarkBounds, drawPoints, drawTrail, containedVideoRect, drawQualityConnections, imageLandmarks, usableFaceLandmarks, FACE_68_CONNECTIONS, updateTrail, type TraceTrail } from '@/lib/landmarkRendering';
+import { drawConnections, drawSolidFaceBox, drawPoints, drawTrail, containedVideoRect, drawQualityConnections, imageLandmarks, usableFaceLandmarks, FACE_68_CONNECTIONS, updateTrail, type TraceTrail } from '@/lib/landmarkRendering';
 import { detectFallbackFace68 } from '@/lib/faceLandmarkFallback';
 import { classifyFacialMovement, stableFacialMovement, type FacialMovementObservation } from '@/lib/facialMovementCues';
 import type { TracePoint } from '@/lib/landmarkRendering';
@@ -205,19 +205,8 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh', onMo
               // may simply mean "unsupported", not "hidden". The old
               // renderer rejected every connection and produced Face lines 0.
               const face = imageLandmarks(faces[0]);
-              if (usableFaceLandmarks(face) && detail === 'mesh') {
-                faceLines += drawConnections(ctx, face,
-                  tasks.FaceLandmarker.FACE_LANDMARKS_TESSELATION,
-                  rect, '#67e8f9', 0.45, 1.0);
-              }
-              // Restore MediaPipe's COMPLETE contour topology from V1:
-              // includes cheeks, brows, nose, eyes and lips. Drawing only
-              // specialized face-oval/iris topology hid most features.
               if (usableFaceLandmarks(face)) {
-                faceLines += drawConnections(ctx, face,
-                  tasks.FaceLandmarker.FACE_LANDMARKS_CONTOURS,
-                  rect, '#22d3ee', 1, 2.3);
-                faceBox = drawFaceLandmarkBounds(ctx, face, rect);
+                faceBox = drawSolidFaceBox(ctx, face, rect);
               }
             }
           }
@@ -225,9 +214,9 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh', onMo
           // Async face-api inference never blocks the main video loop.
           // It uses the existing face-api dependency, without any identity
           // recognition, changes to safety fusion, or persistent storage.
-          let faceSource = faceLines > 0 ? 'MediaPipe 478' : 'no usable landmarks';
+          let faceSource = faceBox ? 'MediaPipe 478' : 'no usable landmarks';
           const now = Date.now();
-          if (models.face && faceLines < 16) {
+          if (models.face && !faceBox) {
             if (!fallbackBusy && now - lastFallbackAttemptAt >= 1200) {
               fallbackBusy = true;
               lastFallbackAttemptAt = now;
@@ -247,12 +236,10 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh', onMo
                 .finally(() => { fallbackBusy = false; });
             }
             if (latestFallback && now - latestFallbackAt < 1500) {
-              faceLines += drawConnections(ctx, latestFallback, FACE_68_CONNECTIONS,
-                rect, '#22d3ee', 1, 2.7);
-              faceBox = drawFaceLandmarkBounds(ctx, latestFallback, rect) || faceBox;
-              if (faceLines > 0) faceSource = 'face-api 68 fallback';
+              faceBox = drawSolidFaceBox(ctx, latestFallback, rect) || faceBox;
+              if (faceBox) faceSource = 'face-api 68 fallback';
             }
-          } else if (faceLines >= 16) {
+          } else if (faceBox) {
             latestFallback = null;
           }
 
@@ -317,12 +304,12 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh', onMo
           }
           setMessage(current => {
             const next = showCount(faceCount, poseCount, handCount)
-              + (modes.face ? ` · Face lines ${faceLines}${faceBox ? ' + box' : ''} (${faceSource})` : '')
+              + (modes.face ? ` · Face box ${faceBox ? 'visible' : 'unavailable'} (${faceSource})` : '')
               + (modes.body ? ` · Pose bones ${poseLines}` : '')
               + (models.hand && handCount === 0 ? ' · Raise hands into view' : '')
               + (modes.body && poseCount > 0 && poseLines === 0
                 ? ' · Body partly occluded / unreliable' : '')
-              + (modes.face && fallbackError && faceLines < 16
+              + (modes.face && fallbackError && !faceBox
                 ? ' · fallback failed (see console)' : '');
             return next === current ? current : next;
           });
