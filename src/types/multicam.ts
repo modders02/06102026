@@ -67,6 +67,10 @@ export interface DetectionEvent {
   location: string;
   type: DetectionType;
   label: string;
+  /** Random, session-local spatial track for an expression; NOT identity recognition. */
+  faceTrackId?: string;
+  /** Display-only track number within the monitoring session. */
+  faceNumber?: number;
   confidence: number;    // 0..1
   /** True only when the event passed the priority-scenario alert gate. */
   priorityScenario?: boolean;
