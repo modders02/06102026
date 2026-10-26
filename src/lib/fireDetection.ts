@@ -15,6 +15,11 @@
 // coverage rises while scene visibility meaningfully degrades.
 
 import type { DetectedObject } from '@/types/dashboard';
+import {
+  createHazeVerificationState,
+  verifyTemporalSmokeHaze,
+  type HazeVerificationState,
+} from '@/lib/smokeHazeVerification';
 
 export interface SaliencyBreakdown {
   fireColor: number;        // points from fire-colored pixel coverage
@@ -71,6 +76,8 @@ export interface FireDetectorState {
   smokeEvidenceFrames: number;   // consecutive confirmed temporal smoke candidates
   smokeActive: boolean;          // confirmed haze until visibility recovers
   smokeClearFrames: number;      // debounce smoke clearing to prevent toggles
+  /** Spatially registered, person-masked background texture reference. */
+  haze: HazeVerificationState;
   visibilityHistory: number[];   // recent visibility scores (drop trend)
   lastBbox: [number, number, number, number] | null;
   smoothBbox: [number, number, number, number] | null; // EMA-smoothed bbox
@@ -88,6 +95,7 @@ export function createFireState(): FireDetectorState {
     smokeEvidenceFrames: 0,
     smokeActive: false,
     smokeClearFrames: 0,
+    haze: createHazeVerificationState(),
     visibilityHistory: [],
     lastBbox: null,
     smoothBbox: null,
@@ -134,7 +142,7 @@ const NIGHT_MIN_BRIGHTNESS_FLICKER = 0.0002;
 // Legacy smoke-emergency score; the camera pipeline uses smoke as corroboration.
 const SMOKE_COVERAGE_HIGH = 0.18;     // ≥18% of frame
 const VISIBILITY_LOW = 45;
-const MIN_SMOKE_CONFIRM_FRAMES = 3; // avoid motion/auto-exposure one-frame spikes
+const MIN_SMOKE_CONFIRM_FRAMES = 2; // AFTER the separate five-frame texture verifier
 const MIN_BACKGROUND_SHARE = 0.35; // insufficient unobscured room for reliable smoke estimate            // visibility score (0..100)
 // Poster/wallpaper guard: fire bbox sitting in a very flat, low-edge region.
 const PLANAR_EDGE_DENSITY = 0.03;
@@ -488,45 +496,45 @@ export function detectFire(
   const minimumRatio = useNightHotspot ? NIGHT_MIN_FIRE_RATIO : 0;
   const fireCandidate = ratio > minimumRatio && !!bbox && nightTemporalVerified;
 
-  // Temporal corroboration. A naturally gray room, gray wall, white ceiling,
-  // or dark CCTV image can have a large low-saturation area without smoke.
-  // Require the scene to actually change before smoke/visibility can verify fire.
+  // Grayscale coverage is diagnostics ONLY. A normal white/gray wall or
+  // change in exposure can produce a 90% palette ratio with zero actual haze.
+  // We now also require loss of registered background edges/texture in many
+  // UNOBSTRUCTED scene tiles over repeated frames. A visual smoke event is
+  // never emitted from color and scene brightness alone.
+  const haze = verifyTemporalSmokeHaze(frame, personBboxes, state.haze);
   const enoughBackground = backgroundShare >= MIN_BACKGROUND_SHARE;
-  const smokeRising =
-    enoughBackground &&
-    state.smokeHistory.length >= 6 &&
-    backgroundSmokeRatio > state.smokeHistory[0] + 0.05;
-  const visibilityDropping =
-    state.visibilityHistory.length >= 6 &&
-    state.visibilityHistory[0] - backgroundVisibility > 15;
-  // Trend alone can spike when somebody passes close to a camera or it
-  // auto-adjusts exposure. Require multiple consecutive qualifying frames.
-  const smokeCandidate = smokeRising
+  const smokeCandidate = haze.verified
+    && enoughBackground
     && backgroundSmokeRatio >= SMOKE_COVERAGE_HIGH
-    && backgroundVisibility <= VISIBILITY_LOW
-    && visibilityDropping;
+    && backgroundVisibility <= 60;
   state.smokeEvidenceFrames = smokeCandidate
     ? Math.min(state.smokeEvidenceFrames + 1, MIN_SMOKE_CONFIRM_FRAMES)
     : 0;
-  const smokeCorroborated = smokeRising && backgroundSmokeRatio >= SMOKE_COVERAGE_HIGH;
-  const lowVisibilityCorroborated = enoughBackground && backgroundVisibility <= VISIBILITY_LOW && visibilityDropping;
+  const smokeCorroborated = haze.verified
+    && enoughBackground && backgroundSmokeRatio >= SMOKE_COVERAGE_HIGH;
+  const lowVisibilityCorroborated = haze.verified
+    && enoughBackground && backgroundVisibility <= VISIBILITY_LOW;
   if (smokeCandidate && state.smokeEvidenceFrames >= MIN_SMOKE_CONFIRM_FRAMES) {
     state.smokeActive = true;
     state.smokeClearFrames = 0;
   } else if (state.smokeActive) {
-    // Once a cloud stabilizes, the rising-trend window eventually forgets
-    // the original clear frame. Keep confirmed smoke active while haze remains
-    // rather than repeatedly reporting new smoke incidents.
-    const stillHazy = enoughBackground
+    // Clear only after the independent verifier recovers and the room stops
+    // matching dense haze. Do not retrigger on a momentary camera exposure.
+    const stillHazy = haze.verified && enoughBackground
       && backgroundSmokeRatio >= SMOKE_COVERAGE_HIGH
-      && backgroundVisibility <= VISIBILITY_LOW;
+      && backgroundVisibility <= 60;
     state.smokeClearFrames = stillHazy ? 0 : state.smokeClearFrames + 1;
-    if (state.smokeClearFrames >= 3) {
+    if (state.smokeClearFrames >= 4) {
       state.smokeActive = false;
       state.smokeClearFrames = 0;
     }
   }
-  const smokeEmergency = state.smokeActive;
+  const smokeEmergency = state.smokeActive && enoughBackground;
+  // This score describes observed visual evidence. It is not a calibrated
+  // probability of real smoke and must not be inflated by gray pixel coverage.
+  const smokeConfidence = smokeEmergency
+    ? Math.min(0.85, 0.60 + Math.max(0, haze.textureLossRatio - 0.55) * 0.50)
+    : 0;
 
   const baseResult = {
     screenSuppressed: false,
@@ -665,9 +673,9 @@ export function detectFire(
       detected: smokeEmergency,
       fireDetected: false,
       smokeEmergency,
-      confidence: smokeEmergency ? 0.6 + Math.min(0.3, smokeRatio) : 0,
+      confidence: smokeConfidence,
       rejectedReason: smokeEmergency
-        ? `heavy smoke (${Math.round(smokeRatio * 100)}%) — visibility ${visibility}/100`
+        ? `persistent suspected haze: ${haze.matchingTiles} reference regions, ${Math.round(haze.textureLossRatio * 100)}% losing texture`
         : ratio === 0 ? undefined : 'too small (lighter/candle)',
       saliency: makeSaliency(0, smokeEmergency ? 0 : firePts + flickerPts, smokeEmergency ? undefined : 'sub-threshold fire pixels'),
     };
@@ -681,7 +689,7 @@ export function detectFire(
         detected: smokeEmergency,
         fireDetected: false,
         smokeEmergency,
-        confidence: smokeEmergency ? 0.6 : 0.2,
+        confidence: smokeEmergency ? smokeConfidence : 0.2,
         rejectedReason: 'flame too small (likely lighter/candle)',
         saliency: makeSaliency(0, firePts + flickerPts, 'flame too small (lighter/candle)'),
       };
