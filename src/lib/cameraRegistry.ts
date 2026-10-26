@@ -12,6 +12,7 @@ const SETTINGS_KEY = 'msd-multicam-settings-v1';
 const EVENTS_KEY = 'msd-detection-events-v1';
 const ALERTS_KEY = 'msd-camera-alerts-v1';
 export const CAMERA_HISTORY_LIMIT = 150;
+export const CAMERA_HISTORY_INCIDENT_RESERVE = 50;
 export const isCameraAlert = (event: DetectionEvent) => isPriorityCameraAlert(event);
 const isRelevantStoredEvent = (event: DetectionEvent) =>
   event.type !== 'object' || isRelevantIndoorObject(event.label);
@@ -145,8 +146,20 @@ export function saveEventHistory(next: CameraEventHistory): CameraEventHistory {
   const previous = readEventHistory();
   const source = readHistoryStorage();
   const normalized = normalizeEventHistory(next);
+  // Retain up to 50 recent non-expression incidents even when ordinary
+  // facial-expression transitions are more frequent. Then fill the remaining
+  // capacity with the newest events of either kind.
+  const reservedIncidents = normalized.events
+    .filter(event => event.type !== 'emotion')
+    .slice(0, CAMERA_HISTORY_INCIDENT_RESERVE);
+  const reservedIds = new Set(reservedIncidents.map(event => event.id));
+  const retainedEvents = newestUniqueEvents([
+    ...reservedIncidents,
+    ...normalized.events.filter(event => !reservedIds.has(event.id))
+      .slice(0, CAMERA_HISTORY_LIMIT - reservedIncidents.length),
+  ]);
   const retained = {
-    events: normalized.events.slice(0, CAMERA_HISTORY_LIMIT),
+    events: retainedEvents,
     alertEvents: normalized.alertEvents,
   };
   // Browsers impose relatively small per-origin localStorage limits. Keep
