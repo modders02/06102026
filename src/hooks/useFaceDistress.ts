@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as faceapi from '@vladmandic/face-api';
+import type { FaceExpressionSample } from '@/lib/faceExpressionTracking';
 
 // Loads pretrained face detection + expression models from a CDN.
 // Models are trained on a massive FER+ / AffectNet-style dataset.
@@ -13,6 +14,8 @@ export type FaceDistress = {
   probability: number;           // 0..1
   distressScore: number;         // 0..100, how distressed the person is
   distressLevel: 'none' | 'mild' | 'severe';
+  /** Current frame only, never identity or long-term face recognition. */
+  faces: FaceExpressionSample[];
 };
 
 const EMPTY: FaceDistress = {
@@ -21,6 +24,7 @@ const EMPTY: FaceDistress = {
   probability: 0,
   distressScore: 0,
   distressLevel: 'none',
+  faces: [],
 };
 
 let modelLoadPromise: Promise<void> | null = null;
@@ -61,7 +65,7 @@ export function useFaceDistress(active: boolean) {
     busyRef.current = true;
     try {
       const detections = await faceapi
-        .detectAllFaces(source, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+        .detectAllFaces(source, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 }))
         .withFaceExpressions();
 
       if (!detections.length) {
@@ -69,6 +73,27 @@ export function useFaceDistress(active: boolean) {
         setDistress(EMPTY);
         return EMPTY;
       }
+
+      // Retain separate expression scores for every detected face. The
+      // original largest-face result remains unchanged for safety fusion.
+      const sourceWidth = source instanceof HTMLVideoElement ? source.videoWidth : source.width;
+      const sourceHeight = source instanceof HTMLVideoElement ? source.videoHeight : source.height;
+      const faces: FaceExpressionSample[] = detections.slice(0, 5).map(detection => {
+        const probabilities = detection.expressions as unknown as Record<string, number>;
+        const [expression, confidence] = Object.entries(probabilities)
+          .reduce<[string, number]>((best, item) => item[1] > best[1] ? item : best, ['neutral', 0]);
+        const box = detection.detection.box;
+        return {
+          bounds: {
+            x: box.x / Math.max(1, sourceWidth),
+            y: box.y / Math.max(1, sourceHeight),
+            width: box.width / Math.max(1, sourceWidth),
+            height: box.height / Math.max(1, sourceHeight),
+          },
+          expression,
+          confidence,
+        };
+      });
 
       // Pick the largest face
       const main = detections.reduce((biggest, d) => {
@@ -111,6 +136,7 @@ export function useFaceDistress(active: boolean) {
         probability: dominantProb,
         distressScore,
         distressLevel: distressScore > 55 ? 'severe' : distressScore > 25 ? 'mild' : 'none',
+        faces,
       };
       setDistress(result);
       return result;
