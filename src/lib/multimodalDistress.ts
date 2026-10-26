@@ -62,11 +62,10 @@ export function normalizeDistressFaceLabel(
   const normalized = (expression ?? '').trim().toLowerCase();
   if (normalized === 'angry' || normalized === 'anger') return 'Angry';
   if (normalized === 'sad' || normalized === 'sadness') return 'Sad';
-  if (
-    normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
-    || normalized === 'surprised' || normalized === 'surprise'
-    || normalized === 'shock' || normalized === 'shocked'
-  ) return 'Frightened';
+  // Surprise/shock is a distinct facial-expression class, not evidence
+  // that the person is frightened. History may show it, but safety fusion
+  // must not turn it into an accepted distress alert.
+  if (normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened') return 'Frightened';
   return null;
 }
 
