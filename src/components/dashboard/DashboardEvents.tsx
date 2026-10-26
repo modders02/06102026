@@ -23,6 +23,7 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedFilter = searchParams.get('events') || initialFilter || 'all';
   const [filter, setFilter] = useState(requestedFilter);
+  const [historyKind, setHistoryKind] = useState<'all' | 'incident' | 'emotion'>('all');
   const [showSettings, setShowSettings] = useState(false);
   const [folder, setFolder] = useState(getClipFolderLabel);
   const [seconds, setSeconds] = useState(getClipSeconds);
@@ -48,8 +49,11 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
   }, [activeSlots, events, alertEvents, filter]);
   const filtered = useMemo(
     () => events.filter(event =>
-      isSignificantHistoryEvent(event) && (filter === 'all' || event.cameraId === filter)),
-    [events, filter],
+      isSignificantHistoryEvent(event)
+      && (filter === 'all' || event.cameraId === filter)
+      && (historyKind === 'all'
+        || (historyKind === 'emotion' ? event.type === 'emotion' : event.type !== 'emotion'))),
+    [events, filter, historyKind],
   );
   const alerts = useMemo(
     () => (alertEvents ?? [])
@@ -208,8 +212,25 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
       </section>
 
       <section aria-label="Event history" className="overflow-hidden rounded-xl border border-border bg-card">
-        <div className="flex items-center gap-2 border-b border-border px-4 py-3"><Film className="h-4 w-4 text-primary" /><h3 className="text-sm font-bold">Event history</h3><span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{filtered.length}</span></div>
-        <p className="px-4 py-3 text-xs text-muted-foreground">Event History records confirmed incidents and all seven supported facial-expression estimates (Happy, Sad, Angry, Frightened, Surprised, Disgust, and Neutral). Facial observations do not require speech validation and never create emergency alerts by themselves. Repeated readings are rate-limited; expressions do not establish a person’s actual mood.</p>
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+          <Film className="h-4 w-4 text-primary" />
+          <h3 className="text-sm font-bold">Event history</h3>
+          <select
+            aria-label="Filter event history by category"
+            value={historyKind}
+            onChange={event => setHistoryKind(event.target.value as typeof historyKind)}
+            className="ml-auto rounded-lg border border-border bg-background px-2 py-1 text-xs"
+          >
+            <option value="all">All activity</option>
+            <option value="incident">Incidents</option>
+            <option value="emotion">Expressions</option>
+          </select>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{filtered.length}</span>
+        </div>
+        <p className="px-4 py-2 text-xs text-muted-foreground">
+          Confirmed incidents and stable facial-expression estimates from each visible face.
+          Expressions are not verified moods and never trigger alerts by themselves.
+        </p>
         <div tabIndex={0} className="max-h-96 divide-y divide-border overflow-y-auto overscroll-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary">
           {filtered.length === 0 && <p className="p-4 text-sm text-muted-foreground">No significant events recorded for {filter === 'all' ? 'your cameras' : 'this camera'}.</p>}
           {filtered.slice(0, CAMERA_HISTORY_LIMIT).map(event => {
@@ -227,7 +248,10 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
                 <p className={`truncate text-sm font-semibold ${emotion?.labelClass ?? ''}`}>
                   {emotion ? `${emotion.icon} ${emotion.label}` : event.label}
                 </p>
-                <p className="truncate text-xs text-muted-foreground">{event.cameraName}{event.location ? ` · ${event.location}` : ''} · {(event.confidence * 100).toFixed(0)}%</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {event.cameraName}{event.type === 'emotion' && event.faceNumber ? ` · Face track ${event.faceNumber}` : ''}
+                  {event.location ? ` · ${event.location}` : ''} · {(event.confidence * 100).toFixed(0)}%
+                </p>
                 <p className="text-xs text-muted-foreground">{new Date(event.timestamp).toLocaleString()}</p>
                 {event.clipFile && <p className="flex items-center gap-1 truncate text-xs text-primary"><Film className="h-3.5 w-3.5 shrink-0" /> {event.clipFile}</p>}
                 {event.clipError && <p className="text-xs text-destructive">{event.clipError}</p>}
