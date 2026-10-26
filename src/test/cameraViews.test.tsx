@@ -534,6 +534,29 @@ describe('camera alerts and event history', () => {
       .getByText('No camera alerts yet.')).toBeInTheDocument();
   });
 
+  it('filters stable face observations independently of verified incidents', () => {
+    mocks.events = [
+      { id: 'face-track-1', cameraId: 'slot-1', cameraName: 'Camera 1',
+        location: 'Lobby', type: 'emotion', label: 'Happy', confidence: 0.95,
+        timestamp: '2026-10-25T17:00:00Z', faceNumber: 1, faceTrackId: 'session:1' },
+      { id: 'face-track-2', cameraId: 'slot-1', cameraName: 'Camera 1',
+        location: 'Lobby', type: 'emotion', label: 'Happy', confidence: 0.90,
+        timestamp: '2026-10-25T17:00:00Z', faceNumber: 2, faceTrackId: 'session:2' },
+      ...mocks.events,
+    ];
+    render(<MemoryRouter initialEntries={['/cameras']}><Monitoring /></MemoryRouter>);
+    const history = within(screen.getByRole('region', { name: 'Event history' }));
+    const category = history.getByRole('combobox', { name: 'Filter event history by category' });
+    fireEvent.change(category, { target: { value: 'emotion' } });
+    expect(history.getAllByText('😊 Happy')).toHaveLength(2);
+    expect(history.getByText(/Face track 1/)).toBeInTheDocument();
+    expect(history.getByText(/Face track 2/)).toBeInTheDocument();
+    expect(history.queryByText('Lobby smoke detected')).not.toBeInTheDocument();
+    fireEvent.change(category, { target: { value: 'incident' } });
+    expect(history.queryByText('😊 Happy')).not.toBeInTheDocument();
+    expect(history.getByText('Lobby smoke detected')).toBeInTheDocument();
+  });
+
   it('hides routine legacy objects but keeps neutral expression history', () => {
     mocks.events = [
       { id: 'old-person', cameraId: 'slot-1', cameraName: 'Camera 1', location: 'Lobby',
