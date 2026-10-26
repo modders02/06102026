@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { containedVideoRect, toCanvasPoint, drawConnections, drawFaceLandmarkBounds, faceLandmarkBounds, imageLandmarks, usableFaceLandmarks, validLandmarkCount, FACE_68_CONNECTIONS, drawQualityConnections, smoothLandmarks, updateTrail, drawTrail } from '@/lib/landmarkRendering';
+import { containedVideoRect, toCanvasPoint, drawConnections, drawFaceLandmarkBounds, drawSolidFaceBox, faceLandmarkBounds, imageLandmarks, usableFaceLandmarks, validLandmarkCount, FACE_68_CONNECTIONS, drawQualityConnections, smoothLandmarks, updateTrail, drawTrail } from '@/lib/landmarkRendering';
 
 describe('video-aligned face / pose / hand tracing geometry', () => {
   it('keeps camera geometry inside the actual object-contain video instead of painting letterboxes', () => {
@@ -137,6 +137,25 @@ describe('video-aligned face / pose / hand tracing geometry', () => {
     expect(FACE_68_CONNECTIONS.some(edge => edge.start === 67 && edge.end === 60)).toBe(true);
     expect(FACE_68_CONNECTIONS.some(edge => edge.start === 0 && edge.end === 1)).toBe(true);
     expect(usableFaceLandmarks(Array.from({ length: 68 }, () => ({ x: 0.5, y: 0.5 })))).toBe(false);
+  });
+
+  it('renders a solid labelled face box and avoids boxes with invalid geometry', () => {
+    const face = Array.from({ length: 478 }, (_, index) => ({
+      x: 0.25 + (index % 22) * 0.008,
+      y: 0.22 + Math.floor(index / 22) * 0.011,
+    }));
+    const ctx = {
+      save: vi.fn(), restore: vi.fn(), setLineDash: vi.fn(), strokeRect: vi.fn(),
+      measureText: vi.fn(() => ({ width: 40 })), fillRect: vi.fn(), fillText: vi.fn(),
+      strokeStyle: '', fillStyle: '', font: '', lineWidth: 0,
+    } as unknown as CanvasRenderingContext2D;
+    const rect = containedVideoRect(960, 540, 1920, 1080);
+    expect(drawSolidFaceBox(ctx, face, rect)).toBe(true);
+    expect(ctx.setLineDash).toHaveBeenCalledWith([]);
+    expect(ctx.strokeRect).toHaveBeenCalledOnce();
+    expect(ctx.fillText).toHaveBeenCalledWith('FACE', expect.any(Number), expect.any(Number));
+    expect(drawSolidFaceBox(ctx, [], rect)).toBe(false);
+    expect(ctx.strokeRect).toHaveBeenCalledOnce();
   });
 
 });
