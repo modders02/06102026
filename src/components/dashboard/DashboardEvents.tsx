@@ -126,11 +126,12 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
       <section aria-label="Camera alerts" className="overflow-hidden rounded-xl border border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <Bell className="h-4 w-4 text-destructive" />
-          <h3 className="text-sm font-bold">Camera alerts</h3>
+          <h3 className="text-sm font-bold">Accepted camera events</h3>
           <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{alerts.length}</span>
         </div>
         <p className="border-b border-border px-4 py-3 text-xs text-muted-foreground">
-          Alerts require accepted audio and matching camera evidence. The accepted trigger stays here; recording updates appear in Event history.
+          Last accepted trigger (historical unless newly detected). Live wake-word status below each camera can be different.
+          Alerts require accepted audio and matching camera evidence; they are not refreshed by rejected keyword candidates.
         </p>
         <div className="divide-y divide-border">
           {alerts.length === 0 && <p className="p-4 text-sm text-muted-foreground">No camera alerts yet.</p>}
@@ -173,6 +174,12 @@ export default function DashboardEvents({ initialFilter }: { initialFilter?: str
 
                 <div className="min-w-0 space-y-2">
                   <p className="break-words text-sm font-semibold">{typeIcon[alert.type]} {alert.label}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {Number.isFinite(Date.parse(alert.timestamp))
+                      && Date.now() - Date.parse(alert.timestamp) > 90_000
+                      ? 'Previously accepted event — historical evidence, not the current live validation.'
+                      : 'Accepted event at the recorded trigger time, not a prediction of current status.'}
+                  </p>
 
                   {(facialExpression || cameraEvidence || triggerWord) && (
                     <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 rounded-lg bg-muted/50 px-3 py-2 text-xs">
