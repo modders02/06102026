@@ -968,7 +968,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     } finally {
       busyRef.current = false;
     }
-  }, [camera.enabled, camera.aiEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.saliencyMode, settings.attentionThreshold, settings.priorityObjects, analyzeFace, drawWorkFrame, patch, emit, maybeEmitVerifiedDistress]);
+  }, [camera.id, camera.name, camera.location, camera.enabled, camera.aiEnabled, settings.objectThreshold, settings.fireThreshold, settings.saliencyThreshold, settings.saliencyMode, settings.attentionThreshold, settings.priorityObjects, analyzeFace, drawWorkFrame, patch, emit, maybeEmitVerifiedDistress]);
   const analyzeFrameRef = useRef(analyzeFrame);
   analyzeFrameRef.current = analyzeFrame;
 
