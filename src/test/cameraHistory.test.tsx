@@ -143,7 +143,7 @@ describe('single active Camera Alert with bounded Event History', () => {
   it('keeps Event History bounded while Camera Alert remains a single current record', () => {
     const registry = renderHook(useCameraRegistry);
     act(() => {
-      for (let index = 1; index <= 60; index++) {
+      for (let index = 1; index <= CAMERA_HISTORY_LIMIT + 10; index++) {
         registry.result.current.addEvent(event(index, 'fire', {
           snapshot: `data:image/jpeg;base64,fire-${index}`,
         }));
@@ -151,9 +151,9 @@ describe('single active Camera Alert with bounded Event History', () => {
     });
 
     expect(registry.result.current.alertEvents).toHaveLength(1);
-    expect(registry.result.current.alertEvents[0].id).toBe('event-60');
+    expect(registry.result.current.alertEvents[0].id).toBe(`event-${CAMERA_HISTORY_LIMIT + 10}`);
     expect(registry.result.current.events).toHaveLength(CAMERA_HISTORY_LIMIT);
-    expect(registry.result.current.events[0].id).toBe('event-59');
+    expect(registry.result.current.events[0].id).toBe(`event-${CAMERA_HISTORY_LIMIT + 9}`);
     expect(registry.result.current.events.at(-1)?.id).toBe('event-10');
   });
 
@@ -380,7 +380,7 @@ describe('single active Camera Alert with bounded Event History', () => {
 
     expect(registry.result.current.alertEvents).toHaveLength(1);
     expect(registry.result.current.alertEvents[0].id).toBe('event-2');
-    expect(registry.result.current.events).toHaveLength(CAMERA_HISTORY_LIMIT);
+    expect(registry.result.current.events).toHaveLength(51);
     expect(subscriber.result.current.events).toEqual(registry.result.current.events);
     expect(subscriber.result.current.alertEvents).toEqual(registry.result.current.alertEvents);
   });
@@ -515,6 +515,25 @@ describe('validation gate for Camera Alert', () => {
       .map(e => e.label).sort()).toEqual([...labels].sort());
     expect(registry.result.current.alertEvents).toEqual([]);
     expect(loadEventHistory().events.filter(e => e.type === 'emotion')).toHaveLength(7);
+  });
+
+  it('keeps same-expression observations from two different face tracks', () => {
+    const registry = renderHook(useCameraRegistry);
+    act(() => {
+      registry.result.current.addEvent(event(500, 'emotion', {
+        label: 'Happy', confidence: 0.94, faceTrackId: 'session:1', faceNumber: 1,
+      }));
+      registry.result.current.addEvent(event(501, 'emotion', {
+        label: 'Happy', confidence: 0.93, faceTrackId: 'session:2', faceNumber: 2,
+      }));
+      registry.result.current.addEvent(event(502, 'emotion', {
+        label: 'Happy', confidence: 0.94, faceTrackId: 'session:1', faceNumber: 1,
+      }));
+    });
+    const faces = registry.result.current.events.filter(event => event.type === 'emotion');
+    expect(faces).toHaveLength(2);
+    expect(faces.map(face => face.faceNumber).sort()).toEqual([1, 2]);
+    expect(registry.result.current.alertEvents).toEqual([]);
   });
 
   it('deduplicates an expression emitted by two face detectors but allows other expressions', () => {
