@@ -8,7 +8,6 @@ import { HAPPY_SMILE_MIN_ACTIVATION, shouldRecordSignificantEvent } from '@/lib/
 import ValidationLayer from '@/components/dashboard/ValidationLayer';
 import MotionTraceOverlay from '@/components/multicam/MotionTraceOverlay';
 import { formatWakeWordDecision } from '@/lib/wakeWordValidation';
-import type { FacialMovementObservation } from '@/lib/facialMovementCues';
 import type { CameraConfig, DetectionEvent, MultiCamSettings } from '@/types/multicam';
 
 function statusIsOnline(runtime: { status?: string } | null) {
@@ -30,14 +29,11 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const [speaker, setSpeaker] = useState(false);
-  const [faceMovement, setFaceMovement] = useState<FacialMovementObservation | null>(null);
   // Smile geometry is supporting visual HISTORY context, never emergency
   // validation. Face-api's separate classifier can still read "Neutral" when
   // MediaPipe sees clear bilateral mouth-corner movement, so record this cue
   // independently instead of relying on the old face-api emotion label.
-  const onFaceMovement = useCallback((observation: FacialMovementObservation | null) => {
-    setFaceMovement(old => old?.kind === observation?.kind
-      && old?.activation === observation?.activation ? old : observation);
+  const onFaceMovement = useCallback((observation: import('@/lib/facialMovementCues').FacialMovementObservation | null) => {
     if (!camera.aiEnabled || observation?.kind !== 'smile'
         || observation.activation < HAPPY_SMILE_MIN_ACTIVATION) return;
     const event: Omit<DetectionEvent, 'id'> = {
