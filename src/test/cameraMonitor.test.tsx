@@ -472,7 +472,7 @@ describe('camera snapshots and page-scoped playback', () => {
     ['surprised', 'Frightened', true, 'Frightened'],
     ['neutral', 'Neutral', false, ''],
     ['disgusted', 'Disgust', false, ''],
-  ] as const)('records %s as a non-alert emotion event', async (expression, label, distressDetected, distressLabel) => {
+  ] as const)('does not record one-frame %s as a stable emotion event', async (expression, label, distressDetected, distressLabel) => {
     mocked.analyzeFace.mockImplementationOnce(async () => {
       const severeCarryover = ['sad', 'neutral', 'disgusted'].includes(expression);
       mocked.distress = { hasFace: true, expression, probability: 0.94, distressScore: severeCarryover ? 94 : 0, distressLevel: severeCarryover ? 'severe' : 'none' };
@@ -482,11 +482,9 @@ describe('camera snapshots and page-scoped playback', () => {
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
 
-    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'emotion',
       label,
-      confidence: 0.94,
-      cameraId: 'slot-1',
     }));
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'face-distress' }));
     expect(getCameraSession('slot-1').runtime?.faceDistress.detected).toBe(distressDetected);
@@ -1371,10 +1369,9 @@ describe('camera snapshots and page-scoped playback', () => {
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
     await act(async () => {});
 
-    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'emotion',
       label: 'Sad',
-      confidence: 0.94,
     }));
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
