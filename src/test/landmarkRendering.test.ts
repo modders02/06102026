@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { containedVideoRect, toCanvasPoint, drawConnections, drawFaceLandmarkBounds, drawSolidFaceBox, drawDistinctFaceBoxes, faceLandmarkBounds, imageLandmarks, usableFaceLandmarks, validLandmarkCount, FACE_68_CONNECTIONS, drawQualityConnections, smoothLandmarks, updateTrail, drawTrail } from '@/lib/landmarkRendering';
+import { containedVideoRect, toCanvasPoint, drawConnections, drawFaceLandmarkBounds, drawSolidFaceBox, drawDistinctFaceBoxes, isDuplicateFaceBounds, faceLandmarkBounds, imageLandmarks, usableFaceLandmarks, validLandmarkCount, FACE_68_CONNECTIONS, drawQualityConnections, smoothLandmarks, updateTrail, drawTrail } from '@/lib/landmarkRendering';
 
 describe('video-aligned face / pose / hand tracing geometry', () => {
   it('keeps camera geometry inside the actual object-contain video instead of painting letterboxes', () => {
@@ -179,6 +179,38 @@ describe('video-aligned face / pose / hand tracing geometry', () => {
     expect(ctx.fillText).toHaveBeenCalledWith('FACE 1', expect.any(Number), expect.any(Number));
     expect(ctx.fillText).toHaveBeenCalledWith('FACE 2', expect.any(Number), expect.any(Number));
     expect(drawDistinctFaceBoxes(ctx, [], rect)).toBe(0);
+  });
+
+  it('eliminates displaced fallback face covering the same person but keeps real two-person boxes', () => {
+    // Real CCTV regression: the primary face was at x≈275..550 while the
+    // backup added a ghost x≈90..365 on the same face.
+    const primary = { x: 275, y: 250, width: 275, height: 298 };
+    const ghost = { x: 90, y: 246, width: 275, height: 288 };
+    const secondPerson = { x: 750, y: 260, width: 235, height: 290 };
+    expect(isDuplicateFaceBounds(primary, ghost, true)).toBe(true);
+    expect(isDuplicateFaceBounds(primary, ghost, false)).toBe(false);
+    expect(isDuplicateFaceBounds(primary, secondPerson, true)).toBe(false);
+  });
+
+  it('draws one box when offset 68-point fallback overlaps the primary MediaPipe face', () => {
+    const face = (x: number, y: number, width: number, height: number, count: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        x: x + ((i % 17) / 16) * width,
+        y: y + (Math.floor(i / 17) / Math.ceil(count / 17)) * height,
+      }));
+    const primary = face(0.29, 0.23, 0.28, 0.37, 478);
+    const shifted = face(0.095, 0.23, 0.28, 0.37, 68);
+    const distinct = face(0.75, 0.25, 0.19, 0.32, 478);
+    const ctx = {
+      save: vi.fn(), restore: vi.fn(), setLineDash: vi.fn(),
+      strokeRect: vi.fn(), measureText: vi.fn(() => ({ width: 40 })),
+      fillRect: vi.fn(), fillText: vi.fn(), font: '', strokeStyle: '',
+      fillStyle: '', lineWidth: 0,
+    } as unknown as CanvasRenderingContext2D;
+    const rect = containedVideoRect(1000, 700, 1000, 700);
+    expect(drawDistinctFaceBoxes(ctx, [primary, shifted], rect, 1)).toBe(1);
+    expect(ctx.strokeRect).toHaveBeenCalledOnce();
+    expect(drawDistinctFaceBoxes(ctx, [primary, distinct, shifted], rect, 2)).toBe(2);
   });
 
 });
