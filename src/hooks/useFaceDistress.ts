@@ -14,6 +14,8 @@ export type FaceDistress = {
   /** Corrected display-only expression, never safety fusion evidence. */
   historyExpression?: string;
   historyConfidence?: number;
+  /** Geometry correction must be repeated on fresh frames before alarm fusion. */
+  historyGeometryCorrected?: boolean;
   probability: number;           // 0..1
   distressScore: number;         // 0..100, how distressed the person is
   distressLevel: 'none' | 'mild' | 'severe';
@@ -125,6 +127,7 @@ export function useFaceDistress(active: boolean) {
         probability: dominantProb,
         historyExpression: historyEstimate.label,
         historyConfidence: historyEstimate.confidence,
+        historyGeometryCorrected: historyEstimate.geometryCorrected,
         distressScore,
         distressLevel: distressScore > 55 ? 'severe' : distressScore > 25 ? 'mild' : 'none',
       };
