@@ -1049,8 +1049,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   // Fire keywords use their separate visual fire validator, not face checks.
   useEffect(() => {
     if (!camera.enabled || !camera.aiEnabled
-        || runtime.alertValidation.status !== 'pending'
-        || !makeDistressSpeechSignal(runtime.alertValidation.keyword)) return;
+        || runtime.alertValidation?.status !== 'pending'
+        || !makeDistressSpeechSignal(runtime.alertValidation?.keyword ?? '')) return;
 
     let cancelled = false;
     const checkFace = () => {
@@ -1081,8 +1081,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       window.clearInterval(interval);
     };
   }, [camera.enabled, camera.aiEnabled, playbackEnabled,
-    runtime.alertValidation.status, runtime.alertValidation.keyword,
-    runtime.alertValidation.startedAt]);
+    runtime.alertValidation?.status, runtime.alertValidation?.keyword,
+    runtime.alertValidation?.startedAt]);
 
   // Facial expression tracking.
   // Expressions alone never alert. Each accepted word must match its configured
