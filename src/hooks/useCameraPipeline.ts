@@ -1127,9 +1127,14 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       const currentLabel = d.hasFace
         ? (emotion?.label || d.expression || 'unrecognized expression')
         : '';
-      const reason = d.hasFace
-        ? `Accepted "${activeValidation.keyword}"; current expression ${currentLabel} (${(d.probability * 100).toFixed(0)}%) does not yet satisfy ${required} validation.`
-        : `Accepted "${activeValidation.keyword}"; no face is currently detected, waiting for ${required} facial evidence.`;
+      const geometryOnly = d.historyGeometryCorrected === true
+        && emotion?.emotion === 'frightened'
+        && !distressFace?.label?.includes('Frightened');
+      const reason = geometryOnly
+        ? `Accepted "${activeValidation.keyword}"; Frightened is a geometry estimate, waiting for repeated fresh-frame confirmation.`
+        : d.hasFace
+          ? `Accepted "${activeValidation.keyword}"; current expression ${currentLabel} (${(d.probability * 100).toFixed(0)}%) does not yet satisfy ${required} validation.`
+          : `Accepted "${activeValidation.keyword}"; no face is currently detected, waiting for ${required} facial evidence.`;
       patch({
         alertValidation: {
           ...activeValidation,
@@ -1478,9 +1483,11 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
                       confidence: trackedSpeech.confidence,
                       emotion: faceState.label,
                       emotionConfidence: faceState.confidence,
-                      reason: faceState.label
-                        ? `Accepted "${trackedSpeech.keyword}", but current facial evidence (${faceState.label}, ${(faceState.confidence * 100).toFixed(0)}%) did not satisfy ${required} within the fusion window.`
-                        : `Accepted "${trackedSpeech.keyword}" but no usable ${required} face was detected within the fusion window.`,
+                      reason: runtimeRef.current.alertValidation?.reason?.includes('geometry estimate')
+                        ? `Accepted "${trackedSpeech.keyword}", but the estimated Frightened expression was not consistently corroborated by fresh camera frames within the fusion window.`
+                        : faceState.label
+                          ? `Accepted "${trackedSpeech.keyword}", but current facial evidence (${faceState.label}, ${(faceState.confidence * 100).toFixed(0)}%) did not satisfy ${required} within the fusion window.`
+                          : `Accepted "${trackedSpeech.keyword}" but no usable ${required} face was detected within the fusion window.`,
                       evaluatedAt: new Date().toISOString(),
                       sourceDecision: 'accepted',
                     },
