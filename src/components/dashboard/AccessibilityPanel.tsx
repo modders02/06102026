@@ -114,9 +114,6 @@ export default function AccessibilityPanel() {
                 </span>
                 <span className="text-base font-bold">{highContrast ? 'ON' : 'OFF'}</span>
               </button>
-              <p className="text-base text-muted-foreground font-semibold">
-                Boosts contrast on buttons, alerts and the camera bounding-box overlays.
-              </p>
             </div>
 
             {/* Talking accessibility — screen-reader style voice for blind users */}
@@ -135,10 +132,7 @@ export default function AccessibilityPanel() {
                 </span>
                 <span className="text-base font-bold">{voiceGuide ? 'ON' : 'OFF'}</span>
               </button>
-              <p className="text-base text-muted-foreground font-semibold">
-                MSDS reads every button, slider and alert out loud as you move with Tab or the mouse.
-                Press Escape any time to stop the voice.
-              </p>
+              <p className="text-sm text-muted-foreground">Press Escape to stop speech.</p>
               <button
                 onClick={() =>
                   speak(
