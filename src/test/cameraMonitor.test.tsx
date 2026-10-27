@@ -469,7 +469,8 @@ describe('camera snapshots and page-scoped playback', () => {
     ['sad', 'Sad', true, 'Sad'],
     ['angry', 'Angry', true, 'Angry'],
     ['fearful', 'Frightened', true, 'Frightened'],
-    ['surprised', 'Frightened', true, 'Frightened'],
+    // History preserves the expression class; safety fusion maps separately.
+    ['surprised', 'Surprised', true, 'Frightened'],
     ['neutral', 'Neutral', false, ''],
     ['disgusted', 'Disgust', false, ''],
   ] as const)('records %s as a non-alert emotion event', async (expression, label, distressDetected, distressLabel) => {
