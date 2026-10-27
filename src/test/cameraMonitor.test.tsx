@@ -495,6 +495,34 @@ describe('camera snapshots and page-scoped playback', () => {
     }
   });
 
+  it('records frightened-style display correction without promoting raw Sad into a help alert', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({
+      events: [{ timestamp: '2026-10-02T00:00:01Z', transcript: 'help me',
+        keyword: 'help', confidence: 0.96 }],
+      status: null,
+    });
+    mocked.analyzeFace.mockImplementationOnce(async () => {
+      mocked.distress = Object.assign({
+        hasFace: true, expression: 'sad', probability: 0.99,
+        distressScore: 98, distressLevel: 'severe' as const,
+      }, {
+        historyExpression: 'fearful', historyConfidence: 0.65,
+      });
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'emotion', label: 'Frightened', confidence: 0.65,
+    }));
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'multimodal-distress',
+      label: 'Verified distress: Frightened + "help"',
+    }));
+  });
+
   it.each([
     ['angry', 'help me', 'help', 'Angry'],
     ['fearful', 'help me', 'help', 'Frightened'],
