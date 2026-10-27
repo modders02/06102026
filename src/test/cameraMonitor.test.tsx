@@ -316,6 +316,40 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('requests a new facial-analysis frame after one second of pending keyword validation', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} />);
+    await act(async () => {});
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
+      status: 'pending', keyword: 'help',
+    });
+    const before = mocked.analyzeFace.mock.calls.length;
+    expect(before).toBeGreaterThan(0);
+    // Background camera stills normally run every 1500 ms. The new pending
+    // keyword cadence must refresh expression evidence at the 1000 ms mark.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1050); });
+    expect(mocked.analyzeFace.mock.calls.length).toBeGreaterThan(before);
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('pending');
+    await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('rejected');
+  });
+
+  it('does not start the one-second face-only validation cadence for a fire keyword', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} />);
+    await act(async () => {});
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
+      status: 'pending', keyword: 'fire',
+    });
+    const before = mocked.analyzeFace.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1050); });
+    // There is no routine 1500ms snapshot during the first second, and
+    // the facial scheduler must not run for a fire-only countdown.
+    expect(mocked.analyzeFace.mock.calls.length).toBe(before);
+  });
+
   it('validates finalized local help when matching facial evidence arrives later without polling the backend', async () => {
     const stream = { getVideoTracks: () => [{ readyState: 'live' }] } as unknown as MediaStream;
     vi.stubGlobal('ImageCapture', class { grabFrame = async () => ({ width: 1920, height: 1080, close: closeBitmap }); });
