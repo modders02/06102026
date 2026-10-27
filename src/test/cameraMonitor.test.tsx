@@ -621,6 +621,79 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'audio-distress' }));
   });
 
+  it('accepts a matching fresh frightened face when KWS completes several seconds after audio capture', async () => {
+    vi.setSystemTime(new Date('2026-10-02T00:00:10Z'));
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [{
+      timestamp: '2026-10-02T00:00:06Z',
+      transcript: 'help me', keyword: 'help', confidence: 0.95,
+    }], status: null });
+    mocked.analyzeFace.mockResolvedValue({
+      hasFace: true, expression: 'fearful', probability: 0.92,
+      distressScore: 90, distressLevel: 'severe',
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
+      status: 'accepted', keyword: 'help', emotion: 'Frightened',
+    });
+    const alerts = onEvent.mock.calls.map(([event]) => event)
+      .filter(event => event.type === 'multimodal-distress');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({
+      label: 'Verified distress: Frightened + "help"',
+      alertValidation: { status: 'accepted', keyword: 'help', emotion: 'Frightened' },
+    });
+  });
+
+  it('accepts repeated corrected fear-like cues with help but not a single history estimate', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
+    const correctedFace = {
+      hasFace: true, expression: 'sad', probability: 0.99,
+      historyExpression: 'fearful', historyConfidence: 0.64,
+      historyGeometryCorrected: true,
+      distressScore: 90, distressLevel: 'severe' as const,
+    };
+    mocked.analyzeFace.mockResolvedValue(correctedFace);
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'multimodal-distress',
+    }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'multimodal-distress',
+      label: 'Verified distress: Frightened + "help"',
+      confidence: 0.64,
+    }));
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('accepted');
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(onEvent.mock.calls.filter(([event]) => event.type === 'multimodal-distress')).toHaveLength(1);
+  });
+
+  it('does not verify replayed KWS results with a current face', async () => {
+    vi.setSystemTime(new Date('2026-10-02T00:00:10Z'));
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [{
+      timestamp: '2026-10-02T00:00:00Z', transcript: 'help', keyword: 'help', confidence: 0.98,
+    }], status: null });
+    mocked.analyzeFace.mockResolvedValue({
+      hasFace: true, expression: 'fearful', probability: 0.99,
+      distressScore: 90, distressLevel: 'severe',
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
+      status: 'rejected', keyword: 'help',
+    });
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
+  });
+
   it('does not treat transcript-only "help" as accepted KWS evidence', async () => {
     mocked.getAudioEvents.mockResolvedValueOnce({
       events: [{
