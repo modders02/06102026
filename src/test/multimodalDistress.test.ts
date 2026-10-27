@@ -9,9 +9,30 @@ import {
   multimodalDistressLabel,
   KEYWORD_FACE_PAIRINGS,
   isKeywordFaceCompatible,
+  acceptedDistressReceiptTime,
+  MAX_ACCEPTED_KWS_DELIVERY_LAG_MS,
 } from '@/lib/multimodalDistress';
 
 describe('multimodal distress fusion', () => {
+  it('uses accepted keyword receipt for the live countdown after bounded ASR processing latency', () => {
+    const receivedAt = Date.parse('2026-10-27T02:14:02Z');
+    expect(acceptedDistressReceiptTime('2026-10-27T02:13:58Z', receivedAt)).toBe(receivedAt);
+    const face = makeDistressFaceSignal('fearful', 0.85, receivedAt + 1800);
+    const speech = makeDistressSpeechSignal('help', 0.94,
+      acceptedDistressReceiptTime('2026-10-27T02:13:58Z', receivedAt)!);
+    expect(fuseDistressSignals(face, speech)).toMatchObject({ confidence: 0.85 });
+  });
+
+  it('rejects stale/replayed, far-future, and invalid KWS timestamps', () => {
+    const receivedAt = Date.parse('2026-10-27T02:14:02Z');
+    expect(acceptedDistressReceiptTime(
+      new Date(receivedAt - MAX_ACCEPTED_KWS_DELIVERY_LAG_MS - 1).toISOString(),
+      receivedAt,
+    )).toBeNull();
+    expect(acceptedDistressReceiptTime(new Date(receivedAt + 5000).toISOString(), receivedAt)).toBeNull();
+    expect(acceptedDistressReceiptTime('garbled', receivedAt)).toBeNull();
+  });
+
   it.each([
     ['angry', 'Angry'],
     ['anger', 'Angry'],
