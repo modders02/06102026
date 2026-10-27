@@ -496,9 +496,6 @@ export const MultiCameraConnect = ({ selectedSlot }: Props) => {
     <div className="space-y-4">
       <div>
         <label className="text-[16px] font-bold">Cameras</label>
-        <p className="text-[15px] text-muted-foreground">
-          Add up to 4 cameras. Enter a camera name and IP address, then press Connect.
-        </p>
       </div>
 
       <div className="space-y-1">
