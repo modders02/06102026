@@ -1,4 +1,5 @@
-export const MULTIMODAL_FUSION_WINDOW_MS = 4_000;
+/** Five seconds for face validation after KWS acceptance (not history logging). */
+export const MULTIMODAL_FUSION_WINDOW_MS = 5_000;
 export const DISTRESS_FACE_MIN_CONFIDENCE = 0.55;
 export const DISTRESS_FACE_FRESHNESS_MS = 2500;
 /**
