@@ -14,6 +14,15 @@ import {
 } from '@/lib/multimodalDistress';
 
 describe('multimodal distress fusion', () => {
+  it('allows facial confirmation throughout the five-second validation window', () => {
+    expect(MULTIMODAL_FUSION_WINDOW_MS).toBe(5_000);
+    const speech = makeDistressSpeechSignal('help', 0.97, 10_000);
+    const inside = makeDistressFaceSignal('fearful', 0.92, 14_999);
+    const outside = makeDistressFaceSignal('fearful', 0.92, 15_001);
+    expect(fuseDistressSignals(inside, speech)).not.toBeNull();
+    expect(fuseDistressSignals(outside, speech)).toBeNull();
+  });
+
   it('uses accepted keyword receipt for the live countdown after bounded ASR processing latency', () => {
     const receivedAt = Date.parse('2026-10-27T02:14:02Z');
     expect(acceptedDistressReceiptTime('2026-10-27T02:13:58Z', receivedAt)).toBe(receivedAt);
