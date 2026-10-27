@@ -62,7 +62,7 @@ export default function Monitoring() {
           {focused ? (
             <button onClick={() => selectCamera(null)} className="flex items-center gap-2 text-sm font-semibold text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /> All live cameras</button>
           ) : (
-            <p className="text-sm text-muted-foreground">Select a camera to open its live feed, alerts, and event history.</p>
+            <span className="text-sm text-muted-foreground">All cameras</span>
           )}
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
             View
