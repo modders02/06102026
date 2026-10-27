@@ -1043,7 +1043,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   useEffect(() => {
     if (!camera.enabled || !camera.aiEnabled || faceAnalysisRevisionRef.current !== analysisRevisionRef.current) return;
     const d = face.distress;
-    const emotion = historyEmotionMeta(d.expression);
+    const emotion = historyEmotionMeta(d.historyExpression ?? d.expression);
+    const emotionConfidence = d.historyConfidence ?? d.probability;
     const fusionExpression = d.hasFace && isMultimodalDistressExpression(d.expression);
     const distressFace = d.hasFace ? makeDistressFaceSignal(d.expression, d.probability) : null;
     const detected = !!distressFace;
@@ -1078,8 +1079,9 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       });
     }
 
-    if (d.hasFace && emotion && d.probability >= DISTRESS_FACE_MIN_CONFIDENCE) {
-      emit('emotion', emotion.label, d.probability);
+    if (d.hasFace && emotion && emotionConfidence >= DISTRESS_FACE_MIN_CONFIDENCE) {
+      // Display-only geometry correction is excluded from emergency fusion.
+      emit('emotion', emotion.label, emotionConfidence);
     }
 
     if (fusionExpression && distressFace) {
