@@ -488,9 +488,6 @@ export default function HouseholdPage() {
                 </div>
               </div>
 
-              <p className="text-xs text-muted-foreground">
-                Each phrase triggers a specific action when detected in real-time audio transcription.
-              </p>
 
               {/* Wake Word List */}
               <div className="space-y-2">
