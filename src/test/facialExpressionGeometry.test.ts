@@ -15,6 +15,9 @@ function landmarkFrame(mouthGap: number, eyeGap: number, browGap: number) {
   points[42] = { x: 60, y: 36 };
   points[45] = { x: 80, y: 36 };
   points[43] = { x: 70, y: 36 - eyeGap / 2 };
+  // Landmark 44 anchors the same upper-right eyelid used by brow elevation.
+  // Leaving it at the fixture's (50, 50) default introduces diagonal distance.
+  points[44] = { x: 70, y: 36 - eyeGap / 2 };
   points[47] = { x: 70, y: 36 + eyeGap / 2 };
   points[19] = { x: 40, y: points[37].y - browGap };
   points[24] = { x: 70, y: points[43].y - browGap };
