@@ -37,7 +37,10 @@ describe('fire false-positive filtering on people', () => {
     const result = detectFire(roomWithOrangeShirt(), state, [person]);
 
     expect(result.smokeRatio).toBeGreaterThan(0.5);
-    expect(result.firePixelRatio).toBeGreaterThan(0);
+    // Heat-colored clothing is removed from the flame evidence denominator.
+    expect(result.firePixelRatio).toBe(0);
+    expect(result.personFirePixelShare).toBeGreaterThan(0.9);
+    expect(result.outsidePersonFirePixelRatio).toBe(0);
     expect(result.fireCandidate).toBe(false);
     expect(result.fireDetected).toBe(false);
     expect(result.detected).toBe(false);
