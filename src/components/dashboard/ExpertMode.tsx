@@ -113,7 +113,6 @@ export default function ExpertMode({ open, onClose, onSelectAlgorithm }: ExpertM
               <h2 id="expert-mode-title" className="flex items-center gap-2 text-2xl font-bold text-foreground">
                 Expert Mode <Sparkles className="h-5 w-5 text-primary" />
               </h2>
-              <p className="mt-1 text-base text-muted-foreground">Choose an algorithm. The dashboard will open a guided tutorial where that code works.</p>
             </div>
           </div>
           <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Close Expert Mode">
@@ -125,7 +124,6 @@ export default function ExpertMode({ open, onClose, onSelectAlgorithm }: ExpertM
           <section aria-labelledby="core-algorithms-title">
             <div className="mb-3">
               <h3 id="core-algorithms-title" className="text-lg font-bold text-foreground">Our algorithms</h3>
-              <p className="text-sm text-muted-foreground">Each one studies a different safety signal.</p>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
               {CORE_ALGORITHMS.map(algorithm => (
@@ -137,7 +135,6 @@ export default function ExpertMode({ open, onClose, onSelectAlgorithm }: ExpertM
           <section aria-labelledby="hybrid-algorithm-title">
             <div className="mb-3">
               <h3 id="hybrid-algorithm-title" className="text-lg font-bold text-foreground">Our hybrid algorithm</h3>
-              <p className="text-sm text-muted-foreground">This is where the separate safety signals work together.</p>
             </div>
             <AlgorithmButton algorithm={HYBRID_ALGORITHM} onSelect={onSelectAlgorithm} />
           </section>
