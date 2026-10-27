@@ -1,6 +1,27 @@
 export const MULTIMODAL_FUSION_WINDOW_MS = 4_000;
 export const DISTRESS_FACE_MIN_CONFIDENCE = 0.55;
 export const DISTRESS_FACE_FRESHNESS_MS = 2500;
+/**
+ * Backends timestamp the audio segment before transcription/KWS completes.
+ * Fusion validation starts when an ACCEPTED result reaches this camera, not
+ * at the segment's earlier start; otherwise its 4s window can already have
+ * expired on arrival. Very old or future-dated results still fail closed.
+ */
+export const MAX_ACCEPTED_KWS_DELIVERY_LAG_MS = 6_000;
+export const MAX_ACCEPTED_KWS_FUTURE_SKEW_MS = 2_000;
+
+export function acceptedDistressReceiptTime(
+  segmentTimestamp: string | null | undefined,
+  receivedAt = Date.now(),
+): number | null {
+  const segmentAt = Date.parse(segmentTimestamp ?? '');
+  if (!Number.isFinite(segmentAt)) return null;
+  const delay = receivedAt - segmentAt;
+  if (delay > MAX_ACCEPTED_KWS_DELIVERY_LAG_MS
+      || delay < -MAX_ACCEPTED_KWS_FUTURE_SKEW_MS) return null;
+  return receivedAt;
+}
+
 
 export type DistressFaceLabel = 'Angry' | 'Frightened' | 'Sad';
 
