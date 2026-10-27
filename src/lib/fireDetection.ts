@@ -507,8 +507,7 @@ export function detectFire(
     suppressionLabel,
   });
 
-  const minimumRatio = useNightHotspot ? NIGHT_MIN_FIRE_RATIO : 0;
-  const fireCandidate = ratio > minimumRatio && !!bbox && nightTemporalVerified;
+  const fireCandidate = ratio >= minimumIndependentRatio && !!bbox && nightTemporalVerified;
 
   // Temporal corroboration. A naturally gray room, gray wall, white ceiling,
   // or dark CCTV image can have a large low-saturation area without smoke.
