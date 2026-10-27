@@ -252,9 +252,6 @@ export default function ValidationLayer({ cameraId, cameraName }: ValidationLaye
           <p className="text-muted-foreground">Last checked: <time dateTime={checkedAt}>{new Date(checkedAt).toLocaleString()}</time></p>
         )}
 
-        <p className="text-muted-foreground">
-          Checks the wake word against camera evidence before creating an alert.
-        </p>
       </div>
     </section>
   );
