@@ -32,6 +32,7 @@ import {
 import {
   DISTRESS_FACE_FRESHNESS_MS,
   DISTRESS_FACE_MIN_CONFIDENCE,
+  acceptedDistressReceiptTime,
   MULTIMODAL_FUSION_WINDOW_MS,
   fuseDistressSignals,
   facialValidationRequirement,
@@ -1382,7 +1383,28 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
               snapshotAnalysisKickRef.current?.();
             }
 
-            const distressSpeech = makeDistressSpeechSignal(sourceText, confidence, spokenAt);
+            // KWS segment timestamps reflect when audio was captured, BEFORE
+            // ASR/keyword verification finishes. Start the live face window
+            // from receipt of the validated word, but never resurrect replayed
+            // or excessively delayed historical audio.
+            const distressCandidate = makeDistressSpeechSignal(sourceText, confidence);
+            const receiptAt = distressCandidate
+              ? acceptedDistressReceiptTime(e.timestamp, Date.now()) : null;
+            if (distressCandidate && receiptAt === null) {
+              patch({ alertValidation: {
+                status: 'rejected',
+                keyword: distressCandidate.keyword,
+                confidence: distressCandidate.confidence,
+                emotion: runtimeRef.current.faceDistress.label,
+                emotionConfidence: runtimeRef.current.faceDistress.confidence,
+                reason: `Accepted "${distressCandidate.keyword}" arrived too late or with an invalid timestamp for live facial validation. Repeat the keyword while facing the camera.`,
+                evaluatedAt: new Date().toISOString(),
+                sourceDecision: 'accepted',
+              } });
+              continue;
+            }
+            const distressSpeech = distressCandidate && receiptAt !== null
+              ? { ...distressCandidate, at: receiptAt } : null;
             if (distressSpeech) {
               const required = facialValidationRequirement(distressSpeech.keyword);
               reservedForFusion = true;
