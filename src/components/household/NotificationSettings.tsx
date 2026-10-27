@@ -136,10 +136,6 @@ export default function NotificationSettings({ householdId }: { householdId: str
         {saved && <span className="text-sm text-primary flex items-center gap-1"><Check className="w-4 h-4" /> Saved</span>}
       </div>
 
-      <p className="text-sm text-muted-foreground">
-        SMS notifications have been removed. Alerts are delivered <strong>in-app</strong> and by <strong>email</strong>.
-      </p>
-
       <div className="grid gap-2 sm:grid-cols-2">
         <Toggle on={settings.in_app_enabled} label="In-App Alerts" icon={Bell} onClick={() => save({ in_app_enabled: !settings.in_app_enabled })} />
         <Toggle on={settings.sound_enabled} label="Alert Sound" icon={Bell} onClick={() => save({ sound_enabled: !settings.sound_enabled })} />
@@ -210,13 +206,7 @@ export default function NotificationSettings({ householdId }: { householdId: str
         >
           Send test email + image
         </button>
-        <p className="text-xs text-muted-foreground">Sends a generated MSDS verification image so the attachment path is tested end to end.</p>
         {testResult && <p role="status" className="text-sm text-foreground break-words">{testResult}</p>}
-      </div>
-
-      <div className="flex items-start gap-2 text-sm text-muted-foreground border-t border-border pt-4">
-        <ShieldCheck className="w-4 h-4 mt-0.5 text-primary shrink-0" />
-        <span>Email is delivered by <strong>Brevo</strong> from the secure backend. The API key is stored as a server secret and is never available to this app.</span>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
