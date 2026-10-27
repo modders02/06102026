@@ -59,6 +59,24 @@ describe('fire person/clothing suppression', () => {
     expect(result.rejectedReason).toContain('person/clothing');
   });
 
+  it('does not promote a large moving orange shirt to 100% fire even when the person detector briefly misses', () => {
+    const state = createFireState();
+    const human = person([18, 2, 132, 112]);
+    const widths = [82, 94, 109, 78, 115, 104, 90, 117, 83, 102];
+    for (let index = 0; index < widths.length; index++) {
+      const result = detectFire(
+        makeFrame(160, 120, [32 + (index % 3) * 3, 40, widths[index], 75]),
+        state,
+        // Simulate two COCO frame misses; retained human box must mask clothing.
+        index === 4 || index === 5 ? [] : [human],
+      );
+      expect(result.fireDetected).toBe(false);
+      expect(result.fireCandidate).toBe(false);
+      expect(result.confidence).toBe(0);
+      expect(result.outsidePersonFirePixelRatio).toBeLessThan(0.009);
+    }
+  });
+
   it('does not apply clothing suppression to an independent fire-colored region beside a person', () => {
     const state = createFireState();
     const objects = [person([0, 0, 42, 100])];
