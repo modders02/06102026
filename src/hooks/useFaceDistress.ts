@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as faceapi from '@vladmandic/face-api';
+import { estimateHistoryExpression, measureExpressionGeometry } from '@/lib/facialExpressionGeometry';
 
 // Loads pretrained face detection + expression models from a CDN.
 // Models are trained on a massive FER+ / AffectNet-style dataset.
@@ -9,7 +10,10 @@ const MODEL_URL = 'https://cdn.jsdelivr.net/gh/vladmandic/face-api/model';
 
 export type FaceDistress = {
   hasFace: boolean;
-  expression: string | null;     // dominant expression
+  expression: string | null;     // raw dominant expression used ONLY by existing emergency fusion
+  /** Corrected display-only expression, never safety fusion evidence. */
+  historyExpression?: string;
+  historyConfidence?: number;
   probability: number;           // 0..1
   distressScore: number;         // 0..100, how distressed the person is
   distressLevel: 'none' | 'mild' | 'severe';
@@ -29,6 +33,8 @@ function loadModels(): Promise<void> {
   modelLoadPromise = (async () => {
     await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
     await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+    // Optional local geometry: if unavailable, retain original classifier.
+    await faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL).catch(() => undefined);
   })();
   return modelLoadPromise;
 }
@@ -60,9 +66,16 @@ export function useFaceDistress(active: boolean) {
     if (!ready || !source || busyRef.current) return null;
     busyRef.current = true;
     try {
-      const detections = await faceapi
-        .detectAllFaces(source, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
-        .withFaceExpressions();
+      const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
+      // Landmark inference supplements the existing 7-class probability model
+      // for Event History only; any model-loading failure preserves the old path.
+      const detections: Array<{
+        detection: { box: { area: number } };
+        expressions: Record<string, number>;
+        landmarks?: { positions: { x: number; y: number }[] };
+      }> = faceapi.nets.faceLandmark68TinyNet.isLoaded
+        ? await faceapi.detectAllFaces(source, options).withFaceLandmarks(true).withFaceExpressions()
+        : await faceapi.detectAllFaces(source, options).withFaceExpressions();
 
       if (!detections.length) {
         historyRef.current = [];
@@ -77,9 +90,8 @@ export function useFaceDistress(active: boolean) {
       });
 
       const expr = main.expressions as unknown as Record<string, number>;
-      // Safety distress score keeps the original sadness/fear/anger signal and
-      // treats face-api's "surprised" expression as the UI's Frightened state.
-      // Disgust and neutral remain non-distress signals.
+      // The original classifier's score is retained for existing fusion.
+      // Event History gets separate, conservative geometric corrections.
       const sad = expr.sad ?? 0;
       const fearful = expr.fearful ?? 0;
       const surprised = expr.surprised ?? 0;
@@ -105,10 +117,14 @@ export function useFaceDistress(active: boolean) {
         if (v > dominantProb) { dominantProb = v; dominant = k; }
       }
 
+      const geometry = measureExpressionGeometry(main.landmarks?.positions);
+      const historyEstimate = estimateHistoryExpression(expr, geometry);
       const result: FaceDistress = {
         hasFace: true,
         expression: dominant,
         probability: dominantProb,
+        historyExpression: historyEstimate.label,
+        historyConfidence: historyEstimate.confidence,
         distressScore,
         distressLevel: distressScore > 55 ? 'severe' : distressScore > 25 ? 'mild' : 'none',
       };
