@@ -55,9 +55,12 @@ const HUMAN_LABELS = new Set(['person']);
 const TRANSCRIPT_CLEAR_MS = 5000;
 const AUDIO_POLL_TICK_MS = 350;
 const AUDIO_POLL_BACKGROUND_MIN_MS = 700;
-const SNAPSHOT_INTERVAL_MS = 1500;
+/** A fresh background CCTV snapshot/face-analysis opportunity every second. */
+const SNAPSHOT_INTERVAL_MS = 1000;
 /** While an accepted safety word is awaiting a face, try a fresh face check each second. */
 export const KEYWORD_FACE_CHECK_INTERVAL_MS = 1000;
+/** Poll the due time more often so a missed 1s tick does not become 2s. */
+const KEYWORD_FACE_CHECK_POLL_MS = 250;
 const PLAYBACK_STALL_MS = 8000;
 
 type FrameCapture = { grabFrame: () => Promise<ImageBitmap> };
@@ -1057,8 +1060,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   }, [camera.enabled, camera.aiEnabled, playbackEnabled]);
 
   // An accepted distress keyword starts a four-second facial validation
-  // countdown. Background stills normally refresh every 1.5 seconds, so ask
-  // the EXISTING analyzer for a fresh frame at least once per second while
+  // countdown. Background stills refresh every second; request an additional
+  // check from the EXISTING analyzer if a frame is overdue while
   // the countdown is active. The live view already ticks every 350 ms;
   // the timestamp and busy guards avoid duplicate or concurrent inferences.
   // Fire keywords use their separate visual fire validator, not face checks.
@@ -1090,7 +1093,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       }
     };
 
-    const interval = window.setInterval(checkFace, KEYWORD_FACE_CHECK_INTERVAL_MS);
+    const interval = window.setInterval(checkFace, KEYWORD_FACE_CHECK_POLL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
