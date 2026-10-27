@@ -54,6 +54,8 @@ const TRANSCRIPT_CLEAR_MS = 5000;
 const AUDIO_POLL_TICK_MS = 350;
 const AUDIO_POLL_BACKGROUND_MIN_MS = 700;
 const SNAPSHOT_INTERVAL_MS = 1500;
+/** While an accepted safety word is awaiting a face, try a fresh face check each second. */
+export const KEYWORD_FACE_CHECK_INTERVAL_MS = 1000;
 const PLAYBACK_STALL_MS = 8000;
 
 type FrameCapture = { grabFrame: () => Promise<ImageBitmap> };
@@ -160,6 +162,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const fireSpeechAfterFrameRef = useRef(0);
   const analysisRevisionRef = useRef(0);
   const faceAnalysisRevisionRef = useRef<number | null>(null);
+  const lastFaceAnalysisStartedAtRef = useRef(0);
   const analysisActiveRef = useRef(camera.enabled && camera.aiEnabled);
   analysisActiveRef.current = camera.enabled && camera.aiEnabled;
   const lastAudioRef = useRef<string | undefined>(undefined);
@@ -633,6 +636,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       // frame. Start both immediately so facial validation is not serialized
       // behind COCO-SSD latency.
       faceAnalysisRevisionRef.current = revision;
+      lastFaceAnalysisStartedAtRef.current = Date.now();
       const facePromise = analyzeFace(canvas);
       const objects = await detectObjects(canvas, settings.objectThreshold);
       if (cancelled()) return;
@@ -1036,6 +1040,49 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     const id = window.setInterval(tick, 350);
     return () => { stopped = true; window.clearInterval(id); };
   }, [camera.enabled, camera.aiEnabled, playbackEnabled]);
+
+  // An accepted distress keyword starts a four-second facial validation
+  // countdown. Background stills normally refresh every 1.5 seconds, so ask
+  // the EXISTING analyzer for a fresh frame at least once per second while
+  // the countdown is active. The live view already ticks every 350 ms;
+  // the timestamp and busy guards avoid duplicate or concurrent inferences.
+  // Fire keywords use their separate visual fire validator, not face checks.
+  useEffect(() => {
+    if (!camera.enabled || !camera.aiEnabled
+        || runtime.alertValidation.status !== 'pending'
+        || !makeDistressSpeechSignal(runtime.alertValidation.keyword)) return;
+
+    let cancelled = false;
+    const checkFace = () => {
+      if (cancelled || busyRef.current || !analysisActiveRef.current) return;
+      const current = runtimeRef.current.alertValidation;
+      if (current?.status !== 'pending'
+          || !makeDistressSpeechSignal(current.keyword)) return;
+      const deadline = current.deadlineAt ? Date.parse(current.deadlineAt) : Number.NaN;
+      if (Number.isFinite(deadline) && Date.now() >= deadline) return;
+      if (Date.now() - lastFaceAnalysisStartedAtRef.current
+          < KEYWORD_FACE_CHECK_INTERVAL_MS - 100) return;
+
+      if (playbackEnabled) {
+        const video = videoRef.current;
+        if (video && video.readyState >= 2 && video.videoWidth > 0) {
+          void analyzeFrameRef.current(
+            video, video.videoWidth, video.videoHeight, () => cancelled,
+          );
+        }
+      } else {
+        snapshotAnalysisKickRef.current?.();
+      }
+    };
+
+    const interval = window.setInterval(checkFace, KEYWORD_FACE_CHECK_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [camera.enabled, camera.aiEnabled, playbackEnabled,
+    runtime.alertValidation.status, runtime.alertValidation.keyword,
+    runtime.alertValidation.startedAt]);
 
   // Facial expression tracking.
   // Expressions alone never alert. Each accepted word must match its configured
