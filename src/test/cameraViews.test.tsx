@@ -327,6 +327,19 @@ describe('camera alerts and event history', () => {
     ];
   });
 
+  it('keeps Event History and Camera Alerts compact without repeated explanatory paragraphs', () => {
+    mocks.events = [];
+    mocks.alertEvents = [];
+    render(<MemoryRouter initialEntries={['/cameras?camera=slot-1']}><Monitoring /></MemoryRouter>);
+    const history = screen.getByRole('region', { name: 'Event history' });
+    const alerts = screen.getByRole('region', { name: 'Camera alerts' });
+    expect(within(history).getByText('No events yet.')).toBeInTheDocument();
+    expect(within(alerts).getByText('No camera alerts yet.')).toBeInTheDocument();
+    expect(history).not.toHaveTextContent('Event History records confirmed incidents');
+    expect(history).not.toHaveTextContent('Repeated readings are rate-limited');
+    expect(alerts).not.toHaveTextContent('Alerts require accepted audio');
+  });
+
   it('shows the exact facial expression, trigger image, and accepted word for a distress emergency', () => {
     mocks.alertEvents = [{
       id: 'distress-alert',
