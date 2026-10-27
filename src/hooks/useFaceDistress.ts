@@ -69,13 +69,13 @@ export function useFaceDistress(active: boolean) {
       const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
       // Landmark inference supplements the existing 7-class probability model
       // for Event History only; any model-loading failure preserves the old path.
-      const detections: Array<{
-        detection: { box: { area: number } };
-        expressions: Record<string, number>;
-        landmarks?: { positions: { x: number; y: number }[] };
-      }> = faceapi.nets.faceLandmark68TinyNet.isLoaded
+      const detections = (faceapi.nets.faceLandmark68TinyNet.isLoaded
         ? await faceapi.detectAllFaces(source, options).withFaceLandmarks(true).withFaceExpressions()
-        : await faceapi.detectAllFaces(source, options).withFaceExpressions();
+        : await faceapi.detectAllFaces(source, options).withFaceExpressions()) as unknown as Array<{
+          detection: { box: { area: number } };
+          expressions: Record<string, number>;
+          landmarks?: { positions: { x: number; y: number }[] };
+        }>;
 
       if (!detections.length) {
         historyRef.current = [];
