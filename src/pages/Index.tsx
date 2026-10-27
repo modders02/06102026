@@ -563,7 +563,7 @@ export default function Index() {
         <main className="flex min-h-[calc(100vh-65px)] flex-col lg:h-[calc(100vh-65px)] lg:flex-row">
           <div className="min-w-0 flex-1 space-y-4 p-3 lg:overflow-y-auto">
             <div className="flex flex-wrap items-end justify-between gap-3 py-2">
-              <div><h2 className="text-2xl font-bold tracking-tight">Dashboard</h2><p className="mt-1 text-sm text-muted-foreground">Last-seen images. Open a camera for realtime video.</p></div>
+              <h2 className="text-2xl font-bold tracking-tight">Dashboard</h2>
               <button onClick={() => openConnection(1)} className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground">Manage cameras</button>
             </div>
             <div id="tour-cams"><div id="tour-fused-view" className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -606,7 +606,6 @@ export default function Index() {
             <button onClick={() => setSidebarOpen(false)} aria-label="Close controls" className="ml-auto block rounded-lg p-2 lg:hidden"><X className="h-4 w-4" /></button>
             <div id="tour-start" className="rounded-xl border border-border bg-card p-3">
               <button onClick={running ? handleStop : handleStart} className={`w-full rounded-lg px-3 py-2.5 text-sm ${running ? 'bg-destructive text-destructive-foreground' : 'bg-primary text-primary-foreground'}`}>{running ? 'Stop Monitoring' : 'Start Monitoring'}</button>
-              <p className="mt-2 text-center text-sm text-muted-foreground">{running ? 'Snapshot detection and audio triggers are active.' : 'Connect a camera, then start monitoring.'}</p>
             </div>
             <AttentionGauge score={attention} />
             <ControlsPanel snapshotMode running={running} threshold={settings.saliencyThreshold ?? 40} showBoundingBoxes={showBoundingBoxes} showHeatmap={showHeatmap}
@@ -627,7 +626,6 @@ export default function Index() {
         <div role="dialog" aria-modal="true" aria-labelledby="camera-connect-title" className="max-h-[92vh] w-full max-w-5xl space-y-5 overflow-y-auto rounded-xl border border-border bg-card p-6" onClick={event => event.stopPropagation()}>
           <div className="flex items-center justify-between gap-3"><h3 id="camera-connect-title" className="flex items-center gap-2 text-xl"><Wifi className="h-5 w-5 text-primary" />Connect CCTV / IP Camera</h3><button onClick={closeConnection} aria-label="Close camera connection panel" className="rounded-lg p-2 hover:bg-muted"><X className="h-5 w-5" /></button></div>
           <MultiCameraConnect selectedSlot={selectedCamera} />
-          <p className="text-sm text-muted-foreground">Open a connected camera on the Cameras page to view realtime video.</p>
           {devices.length > 0 && <p className="text-sm text-muted-foreground">{devices.length} local webcam{devices.length === 1 ? '' : 's'} available through Start Monitoring.</p>}
           <button onClick={closeConnection} className="w-full rounded-lg border border-border px-4 py-2 hover:bg-muted">Close</button>
         </div>
