@@ -675,6 +675,30 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent.mock.calls.filter(([event]) => event.type === 'multimodal-distress')).toHaveLength(1);
   });
 
+  it('does not accept a single corrected Frightened history observation as an emergency', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
+    mocked.analyzeFace
+      .mockResolvedValueOnce({
+        hasFace: true, expression: 'sad', probability: 0.99,
+        historyExpression: 'fearful', historyConfidence: 0.65,
+        historyGeometryCorrected: true,
+        distressScore: 90, distressLevel: 'severe',
+      })
+      .mockResolvedValue({
+        hasFace: true, expression: 'neutral', probability: 0.98,
+        distressScore: 0, distressLevel: 'none',
+      });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(4200); });
+    expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'multimodal-distress',
+    }));
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('rejected');
+  });
+
   it('does not verify replayed KWS results with a current face', async () => {
     vi.setSystemTime(new Date('2026-10-02T00:00:10Z'));
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [{
