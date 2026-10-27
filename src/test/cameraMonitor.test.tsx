@@ -693,6 +693,8 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'multimodal-distress',
     }));
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('pending');
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
     expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('rejected');
   });
 
