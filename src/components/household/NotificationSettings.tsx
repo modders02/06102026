@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { emailFailureMessage, emailSkipMessage } from '@/lib/emailFeedback';
 import { createEmailTestImage } from '@/lib/emailTestImage';
-import { Bell, Mail, Plus, X, Check, ShieldCheck } from 'lucide-react';
+import { Bell, Mail, Plus, X, Check } from 'lucide-react';
 
 interface Settings {
   in_app_enabled: boolean;
