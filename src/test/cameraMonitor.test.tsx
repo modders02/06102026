@@ -333,6 +333,12 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('pending');
     await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
     expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('rejected');
+    // The countdown has ended. A normal snapshot occurs at 4500 ms; after
+    // that, no additional one-second facial checks should run.
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    const afterCountdown = mocked.analyzeFace.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(mocked.analyzeFace.mock.calls.length).toBe(afterCountdown);
   });
 
   it('does not start the one-second face-only validation cadence for a fire keyword', async () => {
