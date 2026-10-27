@@ -62,7 +62,7 @@ export interface FireDetectionResult {
 }
 
 export interface FireDetectorState {
-  history: number[];             // recent effective fire-pixel ratios (flicker)
+  history: number[];             // recent fire-pixel ratios outside people (flicker)
   /** Mean brightness of night-vision hotspot pixels for temporal flicker. */
   nightBrightnessHistory: number[];
   /** Reset temporal evidence when switching between color and night analysis. */
@@ -74,6 +74,8 @@ export interface FireDetectorState {
   missFrames: number;            // frames since last raw bbox (hold before clearing)
   /** Recently observed display devices; survives brief COCO-SSD misses. */
   recentScreens: { label: string; bbox: [number, number, number, number]; expiresAt: number }[];
+  /** Short-lived human positions mitigate intermittent COCO-SSD dropouts. */
+  recentPeople: { bbox: [number, number, number, number]; expiresAt: number }[];
 }
 
 export function createFireState(): FireDetectorState {
@@ -87,6 +89,7 @@ export function createFireState(): FireDetectorState {
     smoothBbox: null,
     missFrames: 0,
     recentScreens: [],
+    recentPeople: [],
   };
 }
 
@@ -106,6 +109,14 @@ const PERSON_FIRE_MIN_HISTORY = 3;
  * suppress the candidate regardless of temporal variance.
  */
 const PERSON_FIRE_PIXEL_DOMINANCE = 0.70;
+/** Conservative life-safety policy: color and temporal movement inside a
+ * human's bounding box can never independently confirm flames.
+ */
+const PERSON_MEMORY_MS = 2500;
+const PERSON_MIN_CONFIDENCE = 0.48;
+const PERSON_PADDING_X = 0.14;
+const PERSON_PADDING_Y = 0.13;
+const NEAR_PERSON_MIN_OUTSIDE_FIRE_RATIO = 0.009;
 
 const MIN_FIRE_RATIO = 0.004;
 const NIGHT_MIN_FIRE_RATIO = 0.003;
@@ -229,6 +240,36 @@ function updateRecentScreens(
   state.recentScreens = remembered;
 }
 
+/** COCO bounding boxes often end before a sleeve or shirt edge. Pad the
+ * region and hold it briefly through dropped person detections. */
+function updateRecentPeople(
+  state: FireDetectorState, objects: DetectedObject[],
+  width: number, height: number,
+): [number, number, number, number][] {
+  const now = Date.now();
+  const remembered = state.recentPeople.filter(p => p.expiresAt > now);
+  for (const object of objects) {
+    if (!PERSON_LABELS.has(object.label) || object.confidence < PERSON_MIN_CONFIDENCE) continue;
+    const [x, y, w, h] = object.bbox;
+    if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) continue;
+    const px = w * PERSON_PADDING_X, py = h * PERSON_PADDING_Y;
+    const left = Math.max(0, x - px), top = Math.max(0, y - py);
+    const right = Math.min(width, x + w + px);
+    const bottom = Math.min(height, y + h + py);
+    const bbox: [number, number, number, number] = [
+      left, top, Math.max(0, right - left), Math.max(0, bottom - top),
+    ];
+    const previous = remembered.find(p =>
+      bboxOverlap(p.bbox, bbox) > 0.45 || bboxOverlap(bbox, p.bbox) > 0.45);
+    if (previous) {
+      previous.bbox = bbox;
+      previous.expiresAt = now + PERSON_MEMORY_MS;
+    } else remembered.push({ bbox, expiresAt: now + PERSON_MEMORY_MS });
+  }
+  state.recentPeople = remembered.slice(-5);
+  return state.recentPeople.map(p => p.bbox);
+}
+
 function fireLooksLikeClothing(
   bbox: [number, number, number, number],
   objects: DetectedObject[],
@@ -256,15 +297,15 @@ export function detectFire(
   const { data, width, height } = frame;
   const step = 4;
   updateRecentScreens(state, objects);
-  const personBboxes = objects
-    .filter(object => PERSON_LABELS.has(object.label) && object.confidence >= 0.5)
-    .map(object => [...object.bbox] as [number, number, number, number]);
+  const personBboxes = updateRecentPeople(state, objects, width, height);
 
   // Single pass: fire pixels, smoke pixels, luminance stats, simple edge count.
   let fireCount = 0;
   let fireCountInsidePerson = 0;
+  let minOutsideX = width, minOutsideY = height, maxOutsideX = 0, maxOutsideY = 0;
   let nightHotCount = 0;
   let nightHotInsidePerson = 0;
+  let nightOutsideMinX = width, nightOutsideMinY = height, nightOutsideMaxX = 0, nightOutsideMaxY = 0;
   let nightHotLumSum = 0;
   let darkPixelCount = 0;
   let smokeCount = 0;
@@ -292,6 +333,11 @@ export function detectFire(
         fireCount++;
         if (personBboxes.some(person => pointInsideBbox(x, y, person))) {
           fireCountInsidePerson++;
+        } else {
+          minOutsideX = Math.min(minOutsideX, x);
+          minOutsideY = Math.min(minOutsideY, y);
+          maxOutsideX = Math.max(maxOutsideX, x);
+          maxOutsideY = Math.max(maxOutsideY, y);
         }
         if (x < minX) minX = x;
         if (y < minY) minY = y;
@@ -308,6 +354,11 @@ export function detectFire(
         nightHotLumSum += lum;
         if (personBboxes.some(person => pointInsideBbox(x, y, person))) {
           nightHotInsidePerson++;
+        } else {
+          nightOutsideMinX = Math.min(nightOutsideMinX, x);
+          nightOutsideMinY = Math.min(nightOutsideMinY, y);
+          nightOutsideMaxX = Math.max(nightOutsideMaxX, x);
+          nightOutsideMaxY = Math.max(nightOutsideMaxY, y);
         }
         if (x < nightMinX) nightMinX = x;
         if (y < nightMinY) nightMinY = y;
@@ -348,7 +399,7 @@ export function detectFire(
     && meanSat <= 0.45;
   const useNightHotspot = nightVisionMode && nightRatio > colorRatio;
   const detectorMode: 'color' | 'night' = useNightHotspot ? 'night' : 'color';
-  const ratio = useNightHotspot ? nightRatio : colorRatio;
+  const rawRatio = useNightHotspot ? nightRatio : colorRatio;
   const effectiveFireCount = useNightHotspot ? nightHotCount : fireCount;
   const effectiveFireInsidePerson = useNightHotspot ? nightHotInsidePerson : fireCountInsidePerson;
   const personFirePixelShare = effectiveFireCount > 0
@@ -356,6 +407,13 @@ export function detectFire(
     : 0;
   const outsidePersonFirePixelRatio = Math.max(0, effectiveFireCount - effectiveFireInsidePerson)
     / sampledTotal;
+  const personPresent = personBboxes.length > 0;
+  // The final fire score and flicker history may use only independent regions
+  // when a person is present. An orange garment must never boost confidence.
+  const ratio = personPresent ? outsidePersonFirePixelRatio : rawRatio;
+  const minimumIndependentRatio = personPresent
+    ? NEAR_PERSON_MIN_OUTSIDE_FIRE_RATIO
+    : useNightHotspot ? NIGHT_MIN_FIRE_RATIO : MIN_FIRE_RATIO;
 
   // Visibility heuristic: high contrast + edges + saturation => clear (100).
   // Low contrast + few edges + desaturated + bright haze => smoke-blinded (0).
@@ -409,13 +467,20 @@ export function detectFire(
   if (state.visibilityHistory.length > 12) state.visibilityHistory.shift();
 
   let bbox: [number, number, number, number] | undefined;
-  if (useNightHotspot && nightHotCount > 0 && nightMaxX > nightMinX && nightMaxY > nightMinY) {
-    bbox = [nightMinX, nightMinY, nightMaxX - nightMinX, nightMaxY - nightMinY];
-    state.lastBbox = bbox;
-  } else if (fireCount > 0 && maxX > minX && maxY > minY) {
-    bbox = [minX, minY, maxX - minX, maxY - minY];
-    state.lastBbox = bbox;
+  if (useNightHotspot && nightHotCount > 0) {
+    if (personPresent && nightOutsideMaxX > nightOutsideMinX && nightOutsideMaxY > nightOutsideMinY) {
+      bbox = [nightOutsideMinX, nightOutsideMinY, nightOutsideMaxX - nightOutsideMinX, nightOutsideMaxY - nightOutsideMinY];
+    } else if (!personPresent && nightMaxX > nightMinX && nightMaxY > nightMinY) {
+      bbox = [nightMinX, nightMinY, nightMaxX - nightMinX, nightMaxY - nightMinY];
+    }
+  } else if (fireCount > 0) {
+    if (personPresent && maxOutsideX > minOutsideX && maxOutsideY > minOutsideY) {
+      bbox = [minOutsideX, minOutsideY, maxOutsideX - minOutsideX, maxOutsideY - minOutsideY];
+    } else if (!personPresent && maxX > minX && maxY > minY) {
+      bbox = [minX, minY, maxX - minX, maxY - minY];
+    }
   }
+  if (bbox) state.lastBbox = bbox;
 
   const smoothedBbox = smoothBbox(state, bbox);
 
@@ -509,6 +574,23 @@ export function detectFire(
     }
   }
 
+  // If the only warm-colored region belongs to a detected person, discard it
+  // even if clothing motion produced a strong global flicker signal.
+  if (personPresent && rawRatio > 0 && ratio < minimumIndependentRatio) {
+    return {
+      ...baseResult,
+      detected: false,
+      fireCandidate: false,
+      fireDetected: false,
+      smokeEmergency: false,
+      smokeCorroborated: false,
+      lowVisibilityCorroborated: false,
+      confidence: 0,
+      rejectedReason: 'person/clothing fire-color artifact — no separate independent flame region',
+      saliency: makeSaliency(0, positive, 'person/clothing independently masked'),
+    };
+  }
+
   // Strong person/clothing suppression. Motion in an orange/red shirt can
   // generate enough frame-to-frame variation to look like flame flicker.
   // Do not let temporal variance bypass clothing suppression when the actual
@@ -593,7 +675,7 @@ export function detectFire(
   }
 
   // ---- Fire rejection ladder ----
-  const activeMinFireRatio = useNightHotspot ? NIGHT_MIN_FIRE_RATIO : MIN_FIRE_RATIO;
+  const activeMinFireRatio = minimumIndependentRatio;
   if (ratio < activeMinFireRatio) {
     return {
       ...baseResult,
@@ -655,7 +737,7 @@ export function detectFire(
   // Vanishing visibility while flames present -> boost.
   if (visibility < 60) conf = Math.min(1, conf + 0.1);
 
-  const fireDetected = conf > 0.3;
+  const fireDetected = ratio >= minimumIndependentRatio && conf > 0.3;
   return {
     ...baseResult,
     detected: fireDetected || smokeEmergency,
