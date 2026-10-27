@@ -19,6 +19,7 @@ import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/mu
 import { useFaceDistress } from '@/hooks/useFaceDistress';
 import type { FinalSpeechResult } from '@/hooks/useSpeechRecognition';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
+import { corroborateGeometryFear, emptyGeometryEvidenceState } from '@/lib/corroboratedFaceEvidence';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
 import {
   FIRE_FUSION_WINDOW_MS,
@@ -178,6 +179,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const fireValidationTimerRef = useRef<number | undefined>(undefined);
   const snapshotAnalysisKickRef = useRef<(() => void) | null>(null);
   const recentDistressFaceRef = useRef<DistressFaceSignal | null>(null);
+  const geometryEvidenceRef = useRef(emptyGeometryEvidenceState());
   const recentDistressSpeechRef = useRef<DistressSpeechSignal | null>(null);
   const recentFireVisualRef = useRef<FireVisualSignal | null>(null);
   const recentFireSpeechRef = useRef<FireSpeechSignal | null>(null);
@@ -265,6 +267,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   useEffect(() => {
     analysisRevisionRef.current += 1;
     faceAnalysisRevisionRef.current = null;
+    geometryEvidenceRef.current = emptyGeometryEvidenceState();
     if (!camera.enabled || !camera.aiEnabled) {
       prevFrameRef.current = null;
       fireStateRef.current = createFireState();
@@ -723,20 +726,31 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       const analyzedFace = await facePromise;
       if (cancelled()) return;
 
-      // useFaceDistress returns the current frame result directly. Feed it into
-      // fusion now instead of waiting for a React state round-trip.
-      if (analyzedFace?.hasFace) {
-        const immediateFace = makeDistressFaceSignal(
-          analyzedFace.expression,
-          analyzedFace.probability,
-          Date.now(),
+      // Use the detector's RETURNED current-frame result, not delayed React
+      // state, so the four-second validation can accept a matching fresh face.
+      // Geometry-corrected fear labels require multiple corroborating frames;
+      // historical expression entries alone never create Camera Alerts.
+      if (analyzedFace) {
+        const observedAt = Date.now();
+        const geometryResult = corroborateGeometryFear(
+          analyzedFace, geometryEvidenceRef.current, observedAt,
         );
-        if (immediateFace) {
-          recentDistressFaceRef.current = immediateFace;
+        geometryEvidenceRef.current = geometryResult.state;
+        const rawFace = analyzedFace.hasFace
+          ? makeDistressFaceSignal(analyzedFace.expression, analyzedFace.probability, observedAt)
+          : null;
+        const activeSpeech = recentDistressSpeechRef.current;
+        const corroborated = activeSpeech && geometryResult.signal
+          && isKeywordFaceCompatible(activeSpeech.keyword, geometryResult.signal.label)
+          ? geometryResult.signal : null;
+        const currentFace = rawFace
+          && (!activeSpeech || isKeywordFaceCompatible(activeSpeech.keyword, rawFace.label))
+          ? rawFace : corroborated ?? rawFace;
+        if (currentFace) {
+          recentDistressFaceRef.current = currentFace;
           maybeEmitVerifiedDistress();
-        } else if (analyzedFace.probability >= DISTRESS_FACE_MIN_CONFIDENCE) {
-          // A newer confident Happy/Neutral/Sad/Disgusted/etc. frame proves the
-          // previous Angry/Frightened sample is no longer the active scene.
+        } else {
+          // A fresh non-matching face invalidates older compatible evidence.
           recentDistressFaceRef.current = null;
         }
       } else {
