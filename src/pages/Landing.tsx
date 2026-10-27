@@ -9,32 +9,32 @@ const features = [
   {
     icon: Eye,
     title: 'Real-Time Object Detection',
-    description: 'COCO-SSD powered detection identifies 80+ object types with adjustable sensitivity for precise monitoring.',
+    description: 'Detects objects in camera footage.',
   },
   {
     icon: Cpu,
     title: 'Multimodal Saliency Engine',
-    description: 'Fuses visual saliency, audio analysis, and object detection into a unified attention score.',
+    description: 'Combines visual and audio signals.',
   },
   {
     icon: Bell,
     title: 'Smart Alert System',
-    description: 'Instant alerts for detected activities, speech events, and custom wake words with household notifications.',
+    description: 'Safety alerts and event history.',
   },
   {
     icon: Users,
     title: 'Household Management',
-    description: 'Invite family members, manage permissions, and share real-time monitoring across your household.',
+    description: 'Shared monitoring and access.',
   },
   {
     icon: Shield,
     title: 'Activity Recognition',
-    description: 'AI-powered inference identifies what people are doing — eating, working, playing — in real time.',
+    description: 'Recognition of activity patterns.',
   },
   {
     icon: MonitorSmartphone,
     title: 'Live Speech Transcription',
-    description: 'Built-in speech-to-text captures conversations and voice commands directly on the camera feed.',
+    description: 'Live transcription from camera audio.',
   },
 ];
 
@@ -148,8 +148,7 @@ export default function Landing() {
             className="text-xl md:text-2xl text-muted-foreground max-w-3xl mx-auto mb-12 leading-relaxed"
             initial="hidden" animate="visible" variants={fadeIn} custom={2}
           >
-            Advanced real-time monitoring that combines object detection, audio analysis, and visual saliency
-            into one unified attention system — built for household safety and awareness.
+            Live camera monitoring and safety alerts.
           </motion.p>
           <motion.div
             className="flex items-center justify-center gap-4"
@@ -194,9 +193,6 @@ export default function Landing() {
             Everything You Need for
             <span className="text-primary"> Smart Monitoring</span>
           </h2>
-          <p className="text-muted-foreground text-xl max-w-2xl mx-auto">
-            A comprehensive suite of detection and analysis tools working together in real time.
-          </p>
         </div>
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {features.map((feature, i) => (
@@ -254,9 +250,6 @@ export default function Landing() {
           <h2 className="text-4xl font-extrabold text-foreground mb-5">
             Ready to Secure Your Home?
           </h2>
-          <p className="text-muted-foreground text-xl mb-10 max-w-2xl mx-auto">
-            Start monitoring in minutes with our intelligent multimodal detection system.
-          </p>
           <div className="relative inline-block">
             <IdleHint message={user ? 'Open your dashboard to start monitoring' : 'Create your free account here'} />
             <button
