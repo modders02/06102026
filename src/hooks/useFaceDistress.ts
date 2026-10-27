@@ -14,6 +14,8 @@ export type FaceDistress = {
   /** Corrected display-only expression, never safety fusion evidence. */
   historyExpression?: string;
   historyConfidence?: number;
+  /** Top-vs-runner-up separation; low margins are not reliable history labels. */
+  historyClassMargin?: number;
   /** Geometry correction must be repeated on fresh frames before alarm fusion. */
   historyGeometryCorrected?: boolean;
   probability: number;           // 0..1
@@ -121,12 +123,17 @@ export function useFaceDistress(active: boolean) {
 
       const geometry = measureExpressionGeometry(main.landmarks?.positions);
       const historyEstimate = estimateHistoryExpression(expr, geometry);
+      const modelScores = Object.values(expr)
+        .filter((value): value is number => Number.isFinite(value) && value >= 0 && value <= 1)
+        .sort((a, b) => b - a);
+      const historyClassMargin = (modelScores[0] ?? 0) - (modelScores[1] ?? 0);
       const result: FaceDistress = {
         hasFace: true,
         expression: dominant,
         probability: dominantProb,
         historyExpression: historyEstimate.label,
         historyConfidence: historyEstimate.confidence,
+        historyClassMargin,
         historyGeometryCorrected: historyEstimate.geometryCorrected,
         distressScore,
         distressLevel: distressScore > 55 ? 'severe' : distressScore > 25 ? 'mild' : 'none',
