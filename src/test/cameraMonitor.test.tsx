@@ -350,10 +350,20 @@ describe('camera snapshots and page-scoped playback', () => {
       status: 'pending', keyword: 'fire',
     });
     const before = mocked.analyzeFace.mock.calls.length;
-    await act(async () => { await vi.advanceTimersByTimeAsync(1050); });
-    // There is no routine 1500ms snapshot during the first second, and
-    // the facial scheduler must not run for a fire-only countdown.
-    expect(mocked.analyzeFace.mock.calls.length).toBe(before);
+    // Fire validation deliberately requests one immediate fresh snapshot.
+    // That shared snapshot also runs the normal face model, so it may add
+    // a face-analysis call even though the face-only timer is NOT active.
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    const afterFireSnapshot = mocked.analyzeFace.mock.calls.length;
+    expect(afterFireSnapshot).toBeGreaterThan(before);
+
+    // Before the normal 1500ms snapshot, crossing the 1000ms mark must not
+    // start a separate keyword-specific face check for fire.
+    await act(async () => { await vi.advanceTimersByTimeAsync(550); });
+    expect(mocked.analyzeFace.mock.calls.length).toBe(afterFireSnapshot);
+    expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
+      status: 'pending', keyword: 'fire',
+    });
   });
 
   it('validates finalized local help when matching facial evidence arrives later without polling the backend', async () => {
