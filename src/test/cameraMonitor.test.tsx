@@ -133,10 +133,14 @@ describe('camera snapshots and page-scoped playback', () => {
     }));
     expect(getCameraSession(`slot-${index}`).runtime?.audioListening).toBe(true);
     expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(2);
-    await act(async () => { await vi.advanceTimersByTimeAsync(1499); });
+    // Background camera stills now refresh every second, rather than 1500ms.
+    // From t=1500ms, the next regular frame arrives precisely at t=2000ms.
+    await act(async () => { await vi.advanceTimersByTimeAsync(499); });
     expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(2);
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
     expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(3);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(4);
     expect(getCameraSession(`slot-${index}`).previewTimestamp).toBe(firstSeenAt);
     expect(mocked.players).toHaveLength(0);
     expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
@@ -1620,7 +1624,8 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(getCameraSession('slot-1').eventPreview).toBe('data:image/jpeg;base64,first');
     expect(write).toHaveBeenCalledOnce();
     await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
-    expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(7);
+    // One initial still plus nine one-second background refreshes.
+    expect(mocked.getCameraSnapshot).toHaveBeenCalledTimes(10);
     expect(getCameraSession('slot-1').preview).toBe('data:image/jpeg;base64,first');
     expect(getCameraSession('slot-1').previewTimestamp).toBe(firstSeenAt);
     expect(getCameraSession('slot-1').eventPreview).toBe('data:image/jpeg;base64,last');
