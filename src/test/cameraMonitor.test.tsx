@@ -6,6 +6,7 @@ import { getCameraSession, publishCameraSession } from '@/lib/cameraSessions';
 import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
 import { DEFAULT_SETTINGS } from '@/types/multicam';
 import { FIRE_FUSION_WINDOW_MS } from '@/lib/fireFusion';
+import { MULTIMODAL_FUSION_WINDOW_MS } from '@/lib/multimodalDistress';
 import type { FaceDistress } from '@/hooks/useFaceDistress';
 
 interface MockPlayer {
@@ -316,7 +317,7 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('requests a new facial-analysis frame after one second of pending keyword validation', async () => {
+  it('checks a pending facial keyword every second for a full five-second countdown', async () => {
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} />);
@@ -324,24 +325,23 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
       status: 'pending', keyword: 'help',
     });
-    const before = mocked.analyzeFace.mock.calls.length;
-    expect(before).toBeGreaterThan(0);
-    // Background camera stills normally run every 1500 ms. The new pending
-    // keyword cadence must refresh expression evidence at the 1000 ms mark.
-    await act(async () => { await vi.advanceTimersByTimeAsync(1050); });
-    expect(mocked.analyzeFace.mock.calls.length).toBeGreaterThan(before);
-    expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('pending');
-    await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
-    expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('rejected');
-    // The countdown has ended. A normal snapshot occurs at 4500 ms; after
-    // that, no additional one-second facial checks should run.
-    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
-    const afterCountdown = mocked.analyzeFace.mock.calls.length;
+    expect(MULTIMODAL_FUSION_WINDOW_MS).toBe(5000);
+    const start = Date.parse(getCameraSession('slot-1').runtime!.alertValidation!.startedAt!);
+    const deadline = Date.parse(getCameraSession('slot-1').runtime!.alertValidation!.deadlineAt!);
+    expect(deadline - start).toBe(5000);
+    const originalCalls = mocked.analyzeFace.mock.calls.length;
+    for (let second = 1; second <= 4; second++) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('pending');
+      expect(mocked.analyzeFace.mock.calls.length).toBeGreaterThanOrEqual(originalCalls + second);
+    }
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(mocked.analyzeFace.mock.calls.length).toBe(afterCountdown);
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('rejected');
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.reason)
+      .toMatch(/fusion window|facial evidence/i);
   });
 
-  it('does not start the one-second face-only validation cadence for a fire keyword', async () => {
+  it('uses normal camera snapshots for a fire keyword without the face-only countdown', async () => {
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
     render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} />);
@@ -350,17 +350,14 @@ describe('camera snapshots and page-scoped playback', () => {
       status: 'pending', keyword: 'fire',
     });
     const before = mocked.analyzeFace.mock.calls.length;
-    // Fire validation deliberately requests one immediate fresh snapshot.
-    // That shared snapshot also runs the normal face model, so it may add
-    // a face-analysis call even though the face-only timer is NOT active.
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
     const afterFireSnapshot = mocked.analyzeFace.mock.calls.length;
     expect(afterFireSnapshot).toBeGreaterThan(before);
-
-    // Before the normal 1500ms snapshot, crossing the 1000ms mark must not
-    // start a separate keyword-specific face check for fire.
     await act(async () => { await vi.advanceTimersByTimeAsync(550); });
-    expect(mocked.analyzeFace.mock.calls.length).toBe(afterFireSnapshot);
+    // Fire visual validation uses the same normal snapshots. No additional
+    // face-specific checks are scheduled for fire on top of those snapshots.
+    expect(mocked.analyzeFace.mock.calls.length)
+      .toBe(mocked.getCameraSnapshot.mock.calls.length);
     expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
       status: 'pending', keyword: 'fire',
     });
@@ -949,7 +946,9 @@ describe('camera snapshots and page-scoped playback', () => {
     });
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(MULTIMODAL_FUSION_WINDOW_MS - 100); });
+    expect(getCameraSession('slot-1').runtime?.alertValidation?.status).toBe('pending');
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(getCameraSession('slot-1').runtime?.alertValidation).toMatchObject({
       status: 'rejected',
       keyword,
