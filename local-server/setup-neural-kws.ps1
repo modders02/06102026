@@ -37,13 +37,13 @@ try {
     # On Windows deepfilterlib 0.5.6 is source-distributed. It cannot build
     # without rustc/Cargo and the Microsoft MSVC/Windows SDK linker.
     # Do NOT retry the pip install until its native prerequisites are present.
-    # PowerShell 5.1 + ErrorActionPreference=Stop treats pip's expected
-    # "WARNING: Package(s) not found" stderr as a terminating error.
-    # Use a silent Python metadata query instead; exit 1 means not installed,
-    # NOT a setup failure. Check both packages because the native extension
-    # is the dependency that previously failed mid-install.
-    & $venvPython -c "import sys, importlib.metadata as m; found={str(d.metadata.get('Name','')).lower() for d in m.distributions()}; sys.exit(0 if {'deepfilternet','deepfilterlib'} <= found else 1)"
-    $deepFilterInstalled = ($LASTEXITCODE -eq 0)
+    # pip show writes "WARNING: Package(s) not found" to stderr, which
+    # PowerShell can promote to a terminating exception under Stop.
+    # Return a normal zero-exit textual result for either condition instead.
+    # Check both wheels: DeepFilterLib's native extension was the failure.
+    $packageState = & $venvPython -c "import importlib.metadata as m; names={str(d.metadata.get('Name','')).lower() for d in m.distributions()}; print('installed' if {'deepfilternet','deepfilterlib'} <= names else 'missing')"
+    if ($LASTEXITCODE -ne 0) { throw "Could not inspect the active Python environment." }
+    $deepFilterInstalled = ($packageState -eq "installed")
     if (-not $deepFilterInstalled) {
       Write-Host "[MSDS] Preparing Rust/Cargo and Microsoft C++ build tools for DeepFilterLib." -ForegroundColor Yellow
       . (Join-Path $PSScriptRoot "ensure-neural-build-tools.ps1")
