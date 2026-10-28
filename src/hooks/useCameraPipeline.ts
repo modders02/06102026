@@ -1160,10 +1160,12 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       return;
     }
 
-    if (d.hasFace && d.probability >= DISTRESS_FACE_MIN_CONFIDENCE) {
-      // Keep alert evidence synchronized with what the camera currently sees.
-      // This prevents a previous Angry frame from combining with later "help"
-      // while the displayed expression has already changed to Happy/Neutral/etc.
+    if (d.hasFace) {
+      // Any freshly observed non-qualifying face invalidates an earlier
+      // Angry/Frightened signal, even if the new Surprised/Neutral/Happy
+      // prediction has low confidence. Otherwise a stale fear reading can
+      // combine with a later accepted keyword after the face has changed.
+      // A real next Angry/Fearful frame may qualify again independently.
       recentDistressFaceRef.current = null;
       return;
     }
