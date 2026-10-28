@@ -14,6 +14,11 @@ PROFILES = {
     # Candidate for stationary room noise (~ -30 dBFS in prior CCTV logs).
     # Must be validated against recorded speech: stronger is not always better.
     "strong": "afftdn=nr=24:nf=-30:tn=1",
+    # Explicit maximum FFmpeg FFT attenuation (97 dB is the filter's upper
+    # configured bound, NOT a guaranteed acoustic-noise reduction). May
+    # attenuate quiet consonants and decrease emergency-word recall.
+    # Keep only on experimental / measured recordings.
+    "maximum": "afftdn=nr=97:nf=-30:tn=1",
 }
 
 
@@ -24,7 +29,7 @@ def robust_mode() -> str:
     WebRTC VAD; neither changes stored enrollment templates or thresholds.
     """
     value = os.environ.get("MSDS_KWS_ROBUST_MODE", "off").strip().lower()
-    return value if value in ("off", "standard", "strong") else "off"
+    return value if value in ("off", "standard", "strong", "maximum") else "off"
 
 
 def webrtc_requested() -> bool:
