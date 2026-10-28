@@ -65,6 +65,39 @@ class RobustModeTests(unittest.TestCase):
                       audio_cmd[audio_cmd.index("-af") + 1])
         self.assertNotIn("afftdn", " ".join(video_cmd))
 
+    def test_maximum_profile_uses_ffmpeg_highest_fft_reduction_and_webrtc(self):
+        camera = Camera(id="slot-1", path="cam1", name="trial", rtsp="rtsp://example/live")
+        with patch.dict(os.environ, {
+            "MSDS_KWS_ROBUST_MODE": "maximum",
+            "MSDS_KWS_AUDIO_DENOISE": "0",
+            "MSDS_KWS_WEBRTC_VAD": "0",
+            "MSDS_KWS_WEBRTC_MODE": "3",
+        }):
+            self.assertEqual(robust_mode(), "maximum")
+            self.assertEqual(selected_profile(), "maximum")
+            self.assertTrue(denoise_enabled())
+            self.assertTrue(webrtc_requested())
+            filter_chain = pcm_audio_filter()
+            audio_cmd = camera._audio_pcm_cmd(
+                "ffmpeg", {"transport": "tcp", "url": camera.rtsp}
+            )
+            with patch.object(kws_engine, "webrtcvad") as fake:
+                vad = kws_engine.StreamingSpeechSegmenter()
+                self.assertEqual(vad.vad_backend, "webrtc-3")
+                fake.Vad.assert_called_once_with(3)
+        self.assertIn("afftdn=nr=97:nf=-30:tn=1", filter_chain)
+        self.assertEqual(audio_cmd[audio_cmd.index("-af") + 1], filter_chain)
+        self.assertIn("aresample=16000", filter_chain)
+
+    def test_maximum_profile_does_not_modify_original_training_templates(self):
+        # This experiment must remain pure configuration: never enroll,
+        # write template files, lower UNKNOWN vetoes or change KWS confidence.
+        with patch.dict(os.environ, {"MSDS_KWS_ROBUST_MODE": "maximum"}):
+            self.assertIn("afftdn=nr=97", pcm_audio_filter())
+            from msds.kws_audio_filters import PROFILES
+            self.assertEqual(PROFILES["standard"], "afftdn=nr=12:nf=-40:tn=1")
+            self.assertEqual(PROFILES["strong"], "afftdn=nr=24:nf=-30:tn=1")
+
     def test_legacy_switches_remain_supported_without_new_mode(self):
         with patch.dict(os.environ, {
             "MSDS_KWS_ROBUST_MODE": "off", "MSDS_KWS_AUDIO_DENOISE": "1",
