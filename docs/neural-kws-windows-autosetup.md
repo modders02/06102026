@@ -71,8 +71,13 @@ installation, persistent Windows Startup task or service is created.
 ### Automatically installed resources
 
 1. The project Python virtual environment and existing MSDS dependencies.
-2. PyTorch/torchaudio **CPU** wheels, DeepFilterNet, sherpa-onnx,
-   SciPy, **SentencePiece** and **pypinyin**. Sherpa-onnx's English
+2. Matched **CPU torch 2.5.1 / torchaudio 2.5.1** wheels, DeepFilterNet,
+   sherpa-onnx, SciPy, **SentencePiece** and **pypinyin**.
+   The 2.5.1 pin is intentional: DeepFilterNet 0.5.6 still imports
+   `torchaudio.backend.common.AudioMetaData`, which was removed in newer
+   torchaudio releases. Both matching 2.5.1 Windows Python 3.12 CPU
+   wheels are published by PyTorch.
+   Sherpa-onnx's English
    BPE `text2token` helper imports both of the latter libraries, even
    when no Chinese words are being tokenized; both must be installed
    before generating keyword files.
@@ -206,6 +211,16 @@ real recorded holdout evaluation.
   followed by `.\\start-neural-kws.cmd -SkipInstall`.
   The generated tokens now include their explicit original-word labels,
   e.g. `@HELP`, which sherpa-onnx preserves.
+- **`ModuleNotFoundError: No module named 'torchaudio.backend'`**:
+  DeepFilterNet 0.5.6 imports the legacy torchaudio backend API, but
+  the unpinned launcher previously installed newer torchaudio 2.11.0
+  (and torch 2.14.1), which no longer supplies that module.
+  Update this branch and run `.\\start-neural-kws.cmd` **without**
+  `-SkipInstall`. The launcher installs the official, matching CPU
+  `torch==2.5.1 torchaudio==2.5.1` builds and checks the old import
+  before model initialization. This will replace the newer PyTorch
+  packages in the *experimental* Python virtual environment and may
+  download a large wheel. Do not attempt to mix incompatible versions.
 - **DeepFilterNet `too many values to unpack` on model preflight**: The
   current Python `init_df()` returns four values, whereas older examples
   returned three. This branch now accepts both.
