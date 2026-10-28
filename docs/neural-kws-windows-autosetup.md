@@ -71,7 +71,9 @@ installation, persistent Windows Startup task or service is created.
 ### Automatically installed resources
 
 1. The project Python virtual environment and existing MSDS dependencies.
-2. PyTorch/torchaudio **CPU** wheels, DeepFilterNet, sherpa-onnx and SciPy.
+2. PyTorch/torchaudio **CPU** wheels, DeepFilterNet, sherpa-onnx,
+   SciPy, and **SentencePiece**, which sherpa-onnx's English BPE
+   `text2token` helper imports but does not install automatically.
 3. Official **English** GigaSpeech Zipformer KWS model from
    `k2-fsa/sherpa-onnx` release `kws-models`:
    `sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01`.
@@ -185,6 +187,17 @@ real recorded holdout evaluation.
   disable neural mode. Do not claim the model is installed.
 - **Model download failed**: Check internet and the official GitHub
   release URL. Do not use arbitrary third-party executables.
+- **`ModuleNotFoundError: No module named 'sentencepiece'`**: The original
+  installer did not install the BPE tokenizer dependency. Update this branch
+  and rerun `.\\start-neural-kws.cmd`. Already installed Rust, DeepFilterNet,
+  sherpa-onnx, and the extracted GigaSpeech model are reused. To repair
+  without repeating all installation checks, install the missing wheel in
+  the *same* MSDS virtual environment first:
+  `& ".\\local-server\\.venv\\Scripts\\python.exe" -m pip install sentencepiece`
+  and then run `.\\start-neural-kws.cmd -SkipInstall`.
+- **DeepFilterNet `too many values to unpack` on model preflight**: The
+  current Python `init_df()` returns four values, whereas older examples
+  returned three. This branch now accepts both.
 - **No `sherpa-onnx-cli.exe`**: Confirm the package installed in
   `local-server/.venv` and rerun the setup.
 - **`neural_last_error`**: Neural worker failed. Shadow mode leaves
