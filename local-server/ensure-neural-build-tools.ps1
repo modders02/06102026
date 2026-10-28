@@ -88,10 +88,17 @@ function Install-Rust {
   if (Test-Path $cargoPath) { $env:Path = "$cargoPath;$env:Path" }
   if (-not (Get-Command cargo.exe -ErrorAction SilentlyContinue)) {
     Write-Host "[MSDS] Installing official 64-bit Rust/Cargo MSVC toolchain." -ForegroundColor Yellow
-    $rustup = Join-Path $env:TEMP "msds-rustup-init.exe"
+    # rustup is a multi-call executable: it dispatches according to its
+    # OWN filename. It MUST run as "rustup-init.exe", not a prefixed name
+    # such as "msds-rustup-init.exe" (which triggers "unknown proxy name").
+    # Keep the authentic filename inside a dedicated MSDS temp directory.
+    $rustupDir = Join-Path $env:TEMP "msds-neural-rustup"
+    New-Item -ItemType Directory -Force -Path $rustupDir | Out-Null
+    $rustup = Join-Path $rustupDir "rustup-init.exe"
     Invoke-WebRequest `
       "https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe" `
       -OutFile $rustup -UseBasicParsing
+    if (-not (Test-Path $rustup)) { throw "Official rustup-init.exe was not downloaded." }
     # rustup distributions are not necessarily Authenticode signed.
     # Only download from the official Rust distribution over HTTPS.
     & $rustup -y --profile minimal --default-toolchain stable `
