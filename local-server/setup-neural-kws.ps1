@@ -4,10 +4,12 @@
 param(
   [ValidateSet("shadow", "verify")][string]$Mode = "shadow",
   # This explicit experimental launcher defaults to maximum noise filtering.
-  # For less aggressive KWS behavior, run -NoiseProfile strong/standard/off.
-  [ValidateSet("off", "standard", "strong", "maximum")][string]$NoiseProfile = "maximum",
+  # For speech-preserving KWS behavior, run -NoiseProfile voice.
+  [ValidateSet("off", "standard", "strong", "maximum", "voice")][string]$NoiseProfile = "maximum",
   # Far hearing is a VAD sensitivity change; it does not lower KWS matches.
   [ValidateSet("normal", "far")][string]$HearingProfile = "far",
+  # Additional HELP re-evaluation: default shadow never changes alert outcomes.
+  [ValidateSet("off", "shadow", "strict")][string]$FarRecheck = "shadow",
   [switch]$SkipInstall,
   [switch]$NoLaunch
 )
@@ -151,12 +153,13 @@ try {
   $env:MSDS_KWS_ROBUST_MODE = $NoiseProfile
   $env:MSDS_KWS_AUDIO_DENOISE = "0" # robust_mode enables denoise when not off
   $env:MSDS_KWS_NOISE_PROFILE = $NoiseProfile
-  # Also clean the AUDIO HEARD from the CCTV/WebRTC stream in Maximum mode.
+  # Also clean the AUDIO HEARD from the CCTV/WebRTC stream in Maximum/voice mode.
   # If KWS uses that MediaMTX relay, skip repeat FFT in its PCM decoder.
   # This switch is optional so strong/standard/off retain the old playback.
-  $env:MSDS_RTSP_AUDIO_DENOISE_PLAYBACK = $(if ($NoiseProfile -eq "maximum") { "1" } else { "0" })
+  $env:MSDS_RTSP_AUDIO_DENOISE_PLAYBACK = $(if ($NoiseProfile -in @("maximum", "voice")) { "1" } else { "0" })
   $env:MSDS_KWS_WEBRTC_VAD = "1"
   $env:MSDS_KWS_HEARING_PROFILE = $HearingProfile
+  $env:MSDS_KWS_FAR_RECHECK = $FarRecheck
   # WebRTC mode 1 listens more readily for quiet/far voices than mode 3.
   # Retain the prior strict mode 3 for maximum + normal, with a one-command rollback.
   $env:MSDS_KWS_WEBRTC_MODE = $(if ($HearingProfile -eq "far") { "1" } elseif ($NoiseProfile -eq "maximum") { "3" } else { "2" })
@@ -167,10 +170,14 @@ try {
   if ($HearingProfile -eq "far") {
     Write-Host "[MSDS] Far hearing: detects softer VAD onsets with added pre-roll; KWS confidence/UNKNOWN safety checks remain unchanged." -ForegroundColor Cyan
   }
+  if ($NoiseProfile -eq "voice") {
+    Write-Host "[MSDS] Voice profile: reduced spectral attenuation and wider speech band for far-field capture; verify on actual CCTV audio." -ForegroundColor Cyan
+  }
   if ($NoiseProfile -eq "maximum") {
     Write-Host "[MSDS] Maximum also denoises audible RTSP/WebRTC audio (no duplicate FFT for MediaMTX KWS)." -ForegroundColor Cyan
     Write-Host "[MSDS] WARNING: Maximum FFT/VAD filtering can discard quiet emergency words and add A/V delay. Validate help/fire recall and lip-sync before relying on it." -ForegroundColor Yellow
   }
+  Write-Host "[MSDS] Far-field keyword recheck=$FarRecheck (shadow is diagnostic-only; strict is experimental and needs holdout validation)." -ForegroundColor Cyan
   Write-Host "[MSDS] Stable DTW enrollment and source branch unchanged." -ForegroundColor Green
   if (-not $NoLaunch) {
     if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {

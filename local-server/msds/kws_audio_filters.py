@@ -14,6 +14,9 @@ PROFILES = {
     # Candidate for stationary room noise (~ -30 dBFS in prior CCTV logs).
     # Must be validated against recorded speech: stronger is not always better.
     "strong": "afftdn=nr=24:nf=-30:tn=1",
+    # Speech-preserving experimental profile: lighter stationary-noise suppression
+    # to retain low-energy consonants in distant emergency keywords.
+    "voice": "afftdn=nr=16:nf=-35:tn=1",
     # Explicit maximum FFmpeg FFT attenuation (97 dB is the filter's upper
     # configured bound, NOT a guaranteed acoustic-noise reduction). May
     # attenuate quiet consonants and decrease emergency-word recall.
@@ -29,7 +32,7 @@ def robust_mode() -> str:
     WebRTC VAD; neither changes stored enrollment templates or thresholds.
     """
     value = os.environ.get("MSDS_KWS_ROBUST_MODE", "off").strip().lower()
-    return value if value in ("off", "standard", "strong", "maximum") else "off"
+    return value if value in ("off", "standard", "strong", "maximum", "voice") else "off"
 
 
 def hearing_profile() -> str:
@@ -86,8 +89,10 @@ def publisher_audio_filter(*, retime: bool = True) -> str:
     """
     filters = []
     if publisher_audio_denoise_enabled():
+        voice = selected_profile() == "voice"
         filters.extend([
-            "highpass=f=120", "lowpass=f=4200", PROFILES[selected_profile()],
+            "highpass=f=90" if voice else "highpass=f=120",
+            "lowpass=f=5000" if voice else "lowpass=f=4200", PROFILES[selected_profile()],
             "aresample=48000",
         ])
     if retime:
@@ -105,6 +110,8 @@ def pcm_audio_filter(*, enabled: bool | None = None, profile: str | None = None)
         raise ValueError(f"Unknown noise profile: {profile}")
     filters = []
     if enabled:
-        filters.extend(["highpass=f=120", "lowpass=f=4200", PROFILES[profile]])
+        voice = profile == "voice"
+        filters.extend(["highpass=f=90" if voice else "highpass=f=120",
+                        "lowpass=f=5000" if voice else "lowpass=f=4200", PROFILES[profile]])
     filters.extend(["aresample=16000:async=1:first_pts=0", "asetpts=N/SR/TB"])
     return ",".join(filters)
