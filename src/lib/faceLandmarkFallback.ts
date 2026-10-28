@@ -144,17 +144,18 @@ async function detectOnSource(
     inputSize: FAR_FACE_INPUT_SIZE, scoreThreshold: FACE_SEARCH_THRESHOLD,
   });
   let result: DetectionResult | undefined;
+  let landmarkInferenceFailed = !landmarksLoaded;
   if (landmarksLoaded) {
     try {
       result = (await api.detectSingleFace(source, options)
         .withFaceLandmarks(true)) as unknown as DetectionResult | undefined;
     } catch {
-      // Landmark inference sometimes fails on downward/side-facing subjects.
-      // The detector-only result can still draw an explicitly labelled box,
-      // but only above the stricter box-only confidence threshold.
+      // Retry detector-only only if the landmark inference *failed*.
+      // If no face was found, avoid running a second expensive detector pass.
+      landmarkInferenceFailed = true;
     }
   }
-  if (!result) {
+  if (landmarkInferenceFailed) {
     result = (await api.detectSingleFace(source, options)) as unknown as DetectionResult | undefined;
   }
   return normalizeDetectedFace(result, video.videoWidth, video.videoHeight, crop, search);
