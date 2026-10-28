@@ -17,13 +17,32 @@ PROFILES = {
 }
 
 
+def robust_mode() -> str:
+    """Experimental bundled preset. Off preserves the stable engine defaults.
+
+    A single flag selects the existing FFmpeg spectral filter and requests
+    WebRTC VAD; neither changes stored enrollment templates or thresholds.
+    """
+    value = os.environ.get("MSDS_KWS_ROBUST_MODE", "off").strip().lower()
+    return value if value in ("off", "standard", "strong") else "off"
+
+
+def webrtc_requested() -> bool:
+    return robust_mode() != "off" or os.environ.get(
+        "MSDS_KWS_WEBRTC_VAD", "0"
+    ).strip().lower() in ("1", "true", "yes", "on")
+
+
 def denoise_enabled() -> bool:
-    return os.environ.get("MSDS_KWS_AUDIO_DENOISE", "0").strip().lower() in (
-        "1", "true", "yes", "on"
-    )
+    return robust_mode() != "off" or os.environ.get(
+        "MSDS_KWS_AUDIO_DENOISE", "0"
+    ).strip().lower() in ("1", "true", "yes", "on")
 
 
 def selected_profile() -> str:
+    mode = robust_mode()
+    if mode != "off":
+        return mode
     value = os.environ.get("MSDS_KWS_NOISE_PROFILE", "standard").strip().lower()
     if value not in PROFILES:
         # Invalid configuration fails safely to the established profile.
