@@ -1351,6 +1351,40 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(getCameraSession('slot-1').runtime?.fire.detected).toBe(false);
   });
 
+  it('does not create the night-vision fire popup/history snapshot for visual-only IR hotspots', async () => {
+    mocked.detectFire.mockReturnValue({
+      ...confirmedFire, confidence: 1, nightVisionMode: true,
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+    await act(async () => { await vi.advanceTimersByTimeAsync(4500); });
+
+    expect(onEvent.mock.calls.map(([event]) => event).filter(event => event.type === 'fire')).toHaveLength(0);
+    expect(getCameraSession('slot-1').runtime?.alerts).toBe(0);
+    // IR visual evidence can still be shown in the live camera diagnostics.
+    expect(getCameraSession('slot-1').runtime?.fire.detected).toBe(true);
+  });
+
+  it('still publishes a verified nighttime fire when the accepted fire word matches visual evidence', async () => {
+    mocked.getAudioEvents.mockResolvedValueOnce({ events: [fireAudioEvent], status: null });
+    mocked.detectFire.mockReturnValue({
+      ...confirmedFire, nightVisionMode: true,
+    });
+    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+    const onEvent = vi.fn();
+    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+    await act(async () => {});
+
+    const fires = onEvent.mock.calls.map(([event]) => event).filter(event => event.type === 'fire');
+    expect(fires).toHaveLength(1);
+    expect(fires[0]).toMatchObject({
+      label: 'Verified fire: visual fire + "fire"',
+      alertValidation: { status: 'accepted', keyword: 'fire' },
+    });
+  });
+
   it('records continuous visual-only fire in Event History without accepting a Camera Alert', async () => {
     const activeFire = {
       fireCandidate: true,
