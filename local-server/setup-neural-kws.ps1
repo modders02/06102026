@@ -91,8 +91,12 @@ try {
 
   $keywordsRaw = Join-Path $modelDir "msds_keywords_raw.txt"
   $keywordsFile = Join-Path $modelDir "msds_keywords.txt"
-  # The model's BPE encoder expects uppercase English phrases.
-  @("HELP", "FIRE", "EMERGENCY", "DANGER", "INTRUDER", "POLICE", "AMBULANCE") |
+  # Use explicit @WORD labels so the neural recognizer can return the
+  # original emergency word rather than an internal BPE token sequence.
+  # sherpa-onnx text2token preserves @labels in the output.
+  @("HELP @HELP", "FIRE @FIRE", "EMERGENCY @EMERGENCY",
+    "DANGER @DANGER", "INTRUDER @INTRUDER", "POLICE @POLICE",
+    "AMBULANCE @AMBULANCE") |
     Set-Content -Path $keywordsRaw -Encoding ASCII
   $cli = Join-Path $PSScriptRoot ".venv\Scripts\sherpa-onnx-cli.exe"
   if (-not (Test-Path $cli)) {
