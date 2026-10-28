@@ -8,29 +8,65 @@ if (-not [Environment]::Is64BitOperatingSystem) {
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
 $vcComponent = "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
 
+function Get-VisualStudioInstance {
+  # Query any installed instance first, not only instances that already have
+  # C++ tools. The user's installed Build Tools might be missing that workload.
+  if (Test-Path $vswhere) {
+    $paths = @(& $vswhere -latest -products "*" -property installationPath 2>$null)
+    foreach ($path in $paths) {
+      if ($path -and (Test-Path $path.Trim())) { return $path.Trim() }
+    }
+  }
+  # Some installations don't include vswhere on PATH/expected location.
+  $candidate = Join-Path $env:ProgramFiles "Microsoft Visual Studio\2022\BuildTools"
+  if (Test-Path $candidate) { return $candidate }
+  return $null
+}
+
 function Find-WorkingMsvc {
   if (-not (Test-Path $vswhere)) { return $null }
-  $install = & $vswhere -latest -products "*" -requires $vcComponent -property installationPath 2>$null
-  if ($LASTEXITCODE -eq 0 -and $install) { return ($install | Select-Object -First 1) }
+  $paths = @(& $vswhere -latest -products "*" -requires $vcComponent -property installationPath 2>$null)
+  foreach ($path in $paths) {
+    if ($path -and (Test-Path $path.Trim())) { return $path.Trim() }
+  }
   return $null
+}
+
+function Run-VisualStudioInstaller([string]$Executable, [string]$Arguments, [string]$Operation) {
+  # Use the installer from the project working directory, not its own folder.
+  # Elevation is interactive: Windows may request the user's approval.
+  Write-Host "[MSDS] Visual Studio Installer: $Operation" -ForegroundColor Cyan
+  $proc = Start-Process -FilePath $Executable -ArgumentList $Arguments `
+    -WorkingDirectory $env:TEMP -Verb RunAs -PassThru -Wait
+  if ($proc.ExitCode -eq 3010) {
+    throw "Microsoft C++ components installed but a Windows restart is required. Restart and rerun start-neural-kws.cmd."
+  }
+  if ($proc.ExitCode -ne 0) {
+    throw "Visual Studio $Operation returned exit code $($proc.ExitCode). Open Visual Studio Installer > Build Tools 2022 > Modify > Desktop development with C++ (including a Windows SDK), and select Modify. Then rerun start-neural-kws.cmd."
+  }
 }
 
 function Install-VisualCppTools {
   if (Find-WorkingMsvc) {
-    Write-Host "[MSDS] Microsoft C++ compilation tools found." -ForegroundColor Green
+    Write-Host "[MSDS] Microsoft C++ compiler components already installed." -ForegroundColor Green
     return
   }
-  Write-Host "[MSDS] DeepFilterLib needs the Microsoft C++ compiler and Windows SDK." -ForegroundColor Yellow
-  Write-Host "[MSDS] Installing official C++ Build Tools (large download; UAC approval may be required)." -ForegroundColor Yellow
-  $installed = $false
-  $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
-  if ($winget) {
-    & $winget.Source install --id Microsoft.VisualStudio.2022.BuildTools --exact `
-      --source winget --accept-source-agreements --accept-package-agreements `
-      --override "--passive --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-    $installed = ($LASTEXITCODE -eq 0)
-  }
-  if (-not $installed) {
+  $existing = Get-VisualStudioInstance
+  if ($existing) {
+    # NEVER run 'winget install' on an existing VS product. That attempts an
+    # upgrade and failed with exit 1 on the user's Build Tools 2022 install.
+    $setup = Join-Path (Split-Path $vswhere -Parent) "setup.exe"
+    if (-not (Test-Path $setup)) {
+      throw "Visual Studio is installed at $existing but the Installer setup.exe is missing. Open Visual Studio Installer and add 'Desktop development with C++' manually."
+    }
+    Write-Host "[MSDS] Existing Visual Studio found: $existing" -ForegroundColor Yellow
+    Write-Host "[MSDS] Adding missing C++ workload to that installation; no upgrade requested." -ForegroundColor Yellow
+    $arguments = 'modify --installPath "' + $existing + '" --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --passive --norestart'
+    Run-VisualStudioInstaller $setup $arguments "workload modification"
+  } else {
+    # Fresh installations only: download Microsoft's signed Build Tools 2022
+    # bootstrapper. Avoid winget install/upgrade ambiguity.
+    Write-Host "[MSDS] No Visual Studio installation found. Downloading official C++ Build Tools." -ForegroundColor Yellow
     $exe = Join-Path $env:TEMP "msds-vs-buildtools.exe"
     Invoke-WebRequest "https://aka.ms/vs/17/release/vs_BuildTools.exe" -OutFile $exe -UseBasicParsing
     $signature = Get-AuthenticodeSignature -FilePath $exe
@@ -38,20 +74,11 @@ function Install-VisualCppTools {
         $signature.SignerCertificate.Subject -notmatch "Microsoft") {
       throw "Microsoft C++ bootstrap signature could not be verified. Refusing to run it."
     }
-    $args = @(
-      "--passive", "--wait", "--norestart",
-      "--add", "Microsoft.VisualStudio.Workload.VCTools", "--includeRecommended"
-    )
-    $process = Start-Process -FilePath $exe -ArgumentList $args -Verb RunAs -Wait -PassThru
-    if ($process.ExitCode -notin @(0, 3010)) {
-      throw "Microsoft Visual Studio Build Tools exited with code $($process.ExitCode)."
-    }
-    if ($process.ExitCode -eq 3010) {
-      throw "Microsoft C++ tools installed; please restart Windows and rerun start-neural-kws.cmd."
-    }
+    $arguments = '--passive --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'
+    Run-VisualStudioInstaller $exe $arguments "new Build Tools installation"
   }
   if (-not (Find-WorkingMsvc)) {
-    throw "C++ x64 tools not detected. Use Visual Studio Installer > Desktop development with C++ (including Windows SDK), then rerun."
+    throw "C++ compiler component not yet detected. Open Visual Studio Installer > Build Tools 2022 > Modify > Desktop development with C++ (including Windows SDK). After completion, rerun."
   }
   Write-Host "[MSDS] Microsoft C++ compiler confirmed." -ForegroundColor Green
 }
