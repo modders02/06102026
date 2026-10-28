@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "electron:dev": "concurrently -k \"npm run dev\" \"wait-on http://localhost:8080 && npm run electron:start\"",
+    "electron:dev": "concurrently -k --success first \"npm run dev\" \"wait-on http://localhost:8080 && npm run electron:start\"",
     "electron:start": "electron .",
     "electron:build": "vite build --base=./ && electron-builder --win nsis --config electron-builder.yml",
     "electron:package": "vite build --base=./ && electron-builder --dir --config electron-builder.yml",
