@@ -77,6 +77,8 @@ describe('single active Camera Alert with bounded Event History', () => {
     });
     const verified = event(2, 'fire', {
       label: 'Verified fire: visual fire + "fire"',
+      // Archived accepted alerts retain their history evidence.
+      priorityScenario: false,
       snapshot: 'data:image/jpeg;base64,verified',
     });
     localStorage.setItem('msd-detection-events-v1', JSON.stringify([falseNight, verified]));
