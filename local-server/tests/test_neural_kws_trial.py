@@ -93,13 +93,15 @@ class NeuralKwsTrialTests(unittest.TestCase):
         installer = (
             Path(__file__).resolve().parents[1] / "setup-neural-kws.ps1"
         ).read_text(encoding="utf-8")
-        self.assertIn("deepfilternet sherpa-onnx scipy sentencepiece pypinyin", installer)
+        self.assertIn("deepfilternet scipy sentencepiece pypinyin", installer)
         self.assertIn("import sentencepiece, pypinyin", installer)
         self.assertIn("HELP @HELP", installer)
         self.assertIn("AMBULANCE @AMBULANCE", installer)
         self.assertIn('"torch==2.5.1" "torchaudio==2.5.1"', installer)
         self.assertIn("from torchaudio.backend.common import AudioMetaData", installer)
-        self.assertIn('Expected matched {expected}', installer)
+        self.assertIn('NVIDIA CUDA unavailable in torch', installer)
+        self.assertIn('sherpa-onnx==2.0.1+cuda12.cudnn9', installer)
+        self.assertIn('https://download.pytorch.org/whl/cu124', installer)
 
 
     def test_deepfilternet_maximum_uses_unlimited_neural_attenuation(self):
@@ -117,7 +119,7 @@ class NeuralKwsTrialTests(unittest.TestCase):
         script = (
             Path(__file__).resolve().parents[1] / "setup-neural-kws.ps1"
         ).read_text(encoding="utf-8")
-        self.assertIn('[ValidateSet("off", "standard", "strong", "maximum")]', script)
+        self.assertIn('[ValidateSet("off", "standard", "strong", "maximum", "voice")]', script)
         self.assertIn('$NoiseProfile = "maximum"', script)
         self.assertIn('$env:MSDS_KWS_ROBUST_MODE = $NoiseProfile', script)
         self.assertIn('$env:MSDS_KWS_NEURAL_STRENGTH = "maximum"', script)
