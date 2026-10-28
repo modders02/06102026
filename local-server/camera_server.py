@@ -13,9 +13,21 @@ Run:  python camera_server.py     (or start_server.bat on Windows)
 """
 from __future__ import annotations
 
+import os
 import signal
 import sys
 import threading
+
+# GPU use is mandatory on this dedicated experimental branch, even when
+# camera_server.py is started directly rather than via PowerShell.
+os.environ["MSDS_REQUIRE_CUDA"] = "1"
+from msds.neural_kws_trial import require_cuda
+try:
+    _gpu_name = require_cuda()
+except Exception as exc:
+    raise SystemExit(
+        f"[MSDS GPU REQUIRED] {exc}. No CPU inference fallback is permitted."
+    ) from exc
 
 import uvicorn
 
