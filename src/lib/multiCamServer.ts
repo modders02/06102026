@@ -79,6 +79,21 @@ export interface CctvAudioStatus {
     /** Streaming VAD RMS from the 16 kHz CCTV PCM path (0..1). */
     vad_last_rms?: number;
     vad_active?: boolean;
+    vad_backend?: string;
+    vad_noise_floor_rms?: number;
+    vad_speech_energy_gate?: number;
+    hearing_profile?: 'far' | 'normal' | string;
+    audio_noise_profile?: string;
+    audio_robust_mode?: string;
+    publisher_noise_profile?: string;
+    neural_mode?: 'off' | 'shadow' | 'verify' | string;
+    neural_candidate?: string | null;
+    neural_busy?: boolean;
+    neural_last_error?: string | null;
+    neural_last_at?: string | null;
+    segments_seen?: number;
+    last_keyword_scores?: Record<string, number>;
+    last_keyword_duration_ratios?: Record<string, number>;
     enrollment?: {
       state?: string;
       keyword?: string;
