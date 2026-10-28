@@ -136,6 +136,18 @@ class FarHearingTests(unittest.TestCase):
         self.assertEqual(kws_engine.MIN_DURATION_RATIO, 0.60)
         self.assertEqual(kws_engine.MAX_DURATION_RATIO, 1.55)
 
+    def test_explicit_original_adaptive_energy_mode_needs_no_webrtc(self):
+        with patch.dict(os.environ, {
+            "MSDS_KWS_HEARING_PROFILE": "adaptive",
+            "MSDS_KWS_ROBUST_MODE": "off",
+            "MSDS_KWS_WEBRTC_VAD": "0",
+        }):
+            vad = kws_engine.StreamingSpeechSegmenter()
+            self.assertEqual(hearing_profile(), "adaptive")
+        self.assertEqual(vad.vad_backend, "adaptive-energy")
+        self.assertEqual(vad.min_speech_seconds, 0.30)
+        self.assertEqual(vad.pre_roll_seconds, 0.12)
+
     def test_invalid_hearing_profile_falls_back_to_normal(self):
         with patch.dict(os.environ, {"MSDS_KWS_HEARING_PROFILE": "extreme"}):
             self.assertEqual(hearing_profile(), "normal")
