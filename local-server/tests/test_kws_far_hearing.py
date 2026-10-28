@@ -55,9 +55,22 @@ class FarHearingTests(unittest.TestCase):
                 module.Vad.assert_called_once_with(1)
         self.assertEqual(vad.hearing_profile, "far")
         self.assertEqual(vad.start_confirm_frames, 2)
-        self.assertEqual(vad.min_speech_seconds, 0.26)
-        self.assertAlmostEqual(vad.pre_roll_seconds, 0.20)
+        # Far mode must preserve lengths learned by the DTW templates.
+        self.assertEqual(vad.min_speech_seconds, 0.30)
+        self.assertAlmostEqual(vad.pre_roll_seconds, 0.12)
+        self.assertAlmostEqual(vad.end_silence_seconds, 0.24)
         self.assertAlmostEqual(vad.webrtc_min_rms, 0.0035)
+
+    def test_far_hearing_preserves_template_compatible_segment_boundaries(self):
+        for profile in ("normal", "far"):
+            with patch.dict(os.environ, {
+                "MSDS_KWS_HEARING_PROFILE": profile,
+                "MSDS_KWS_WEBRTC_VAD": "0",
+            }):
+                vad = kws_engine.StreamingSpeechSegmenter()
+            self.assertEqual(vad.min_speech_seconds, kws_engine.MIN_SPEECH_SECONDS)
+            self.assertEqual(vad.end_silence_seconds, kws_engine.END_SILENCE_SECONDS)
+            self.assertEqual(vad.pre_roll_seconds, kws_engine.PRE_ROLL_SECONDS)
 
     def test_quiet_word_survives_far_mode_but_normal_gate_rejects_it(self):
         rate = kws_engine.SAMPLE_RATE
