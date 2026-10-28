@@ -301,7 +301,7 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
             {' · '}Neural: <span className="font-semibold text-foreground">{kws.neural_mode || 'unknown'}</span>
             {kws.publisher_noise_profile && kws.publisher_noise_profile !== 'off' && (
               <>{' · '}Playback filter: <span className="font-semibold text-foreground">{kws.publisher_noise_profile}</span></>
-            )
+            )}
             {kws.neural_mode === 'shadow' && ' (comparison only; DTW decides alerts)'}
           </p>
           <p className="mb-2 text-xs text-muted-foreground">{diagnosticReason}</p>
