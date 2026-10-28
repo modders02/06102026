@@ -197,13 +197,8 @@ try {
     # CPU bridge on port 5000 to masquerade as the mandatory CUDA backend.
     try {
       $oldStatus = Invoke-RestMethod "http://127.0.0.1:5000/status" -TimeoutSec 2 -ErrorAction Stop
-      if ($oldStatus -and $oldStatus.cameras) {
-        $notGpu = @($oldStatus.cameras | Where-Object {
-          $_.audio.custom_kws.gpu_required -ne $true
-        })
-        if ($notGpu.Count -gt 0) {
-          throw "Existing CPU camera bridge on port 5000. Close the old app/server before launching GPU-only MSDS."
-        }
+      if ($oldStatus -and $oldStatus.gpu_required -ne $true) {
+        throw "Existing CPU camera bridge on port 5000. Close the old app/server before launching GPU-only MSDS."
       }
     } catch {
       if ($_.Exception.Message -match "Existing CPU camera bridge") { throw }
