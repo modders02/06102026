@@ -54,17 +54,18 @@ try {
     Invoke-Checked "Installing CPU PyTorch (needed by DeepFilterNet3)" {
       & $venvPython -m pip install --timeout 120 --retries 10 --index-url "https://download.pytorch.org/whl/cpu" torch torchaudio
     }
-    Invoke-Checked "Installing DeepFilterNet, sherpa-onnx, SciPy and SentencePiece" {
-      # sherpa-onnx's BPE text2token command imports SentencePiece but the
-      # sherpa-onnx wheel does not install it automatically on Windows.
-      & $venvPython -m pip install --timeout 120 --retries 10 deepfilternet sherpa-onnx scipy sentencepiece
+    Invoke-Checked "Installing DeepFilterNet, sherpa-onnx, SciPy and keyword tokenizer dependencies" {
+      # The sherpa-onnx 2.0.1 text2token function eagerly imports both
+      # sentencepiece and pypinyin, EVEN with --tokens-type bpe (English).
+      # Both are optional undeclared dependencies of the CLI.
+      & $venvPython -m pip install --timeout 120 --retries 10 deepfilternet sherpa-onnx scipy sentencepiece pypinyin
     }
   }
 
   # Keyword generation must also work with -SkipInstall. Check it up front
   # rather than failing deep inside sherpa-onnx-cli after model extraction.
-  Invoke-Checked "Checking English BPE tokenizer dependency" {
-    & $venvPython -c "import sentencepiece; print('SentencePiece:', sentencepiece.__version__)"
+  Invoke-Checked "Checking sherpa-onnx BPE tokenizer dependencies" {
+    & $venvPython -c "import sentencepiece, pypinyin; print('SentencePiece:', sentencepiece.__version__, '| pypinyin:', pypinyin.__version__)"
   }
 
   New-Item -ItemType Directory -Force -Path $modelsDir | Out-Null
