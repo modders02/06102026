@@ -262,6 +262,7 @@ class Camera:
         retime_audio = os.environ.get("MSDS_RTSP_AUDIO_RETIME", "1").strip().lower() not in (
             "0", "false", "no", "off"
         )
+        audio_filter = publisher_audio_filter(retime=retime_audio)
         return [
             ffmpeg,
             "-nostdin", "-hide_banner", "-loglevel", "warning",
@@ -280,8 +281,7 @@ class Camera:
             "-bf", "0", "-g", str(VIDEO_GOP), "-keyint_min", str(VIDEO_GOP),
             "-sc_threshold", "0", "-threads:v", str(VIDEO_THREADS),
             "-c:a", "libopus", "-ar", "48000", "-ac", "1", "-b:a", "64k",
-            *(["-af", publisher_audio_filter(retime=retime_audio)]
-              if publisher_audio_filter(retime=retime_audio) else []),
+            *(["-af", audio_filter] if audio_filter else []),
             "-application", "lowdelay", "-frame_duration", "20",
             "-max_interleave_delta", "100000", "-flush_packets", "1",
             "-muxdelay", "0", "-muxpreload", "0", "-rtsp_transport", "tcp",
