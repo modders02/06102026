@@ -8,7 +8,9 @@ param(
   # Avoid erasing weak syllables with the experimental 97-dB FFT preset.
   [ValidateSet("off", "standard", "strong", "maximum")][string]$NoiseProfile = "standard",
   # Normal preserves the enrollment-compatible segmentation duration.
-  [ValidateSet("normal", "far")][string]$HearingProfile = "normal",
+  # "adaptive" with NoiseProfile=off reproduces the unfiltered
+  # adaptive-energy speech gate without WebRTC.
+  [ValidateSet("normal", "far", "adaptive")][string]$HearingProfile = "normal",
   [switch]$SkipInstall,
   [switch]$NoLaunch
 )
@@ -149,6 +151,10 @@ try {
     Write-Host "[MSDS] DTW-only mode: neural model setup and CPU inference disabled." -ForegroundColor Green
   }
 
+  if ($HearingProfile -eq "adaptive" -and $NoiseProfile -ne "off") {
+    throw "Adaptive hearing is only valid with -NoiseProfile off (otherwise the robust noise preset forces WebRTC VAD)."
+  }
+
   $env:MSDS_KWS_NEURAL_MODE = $Mode
   # DeepFilterNet3 uses full model suppression (no attenuation limit) on
   # neural shadow/verify segments. It does not run before the live VAD.
@@ -164,7 +170,7 @@ try {
   # If KWS uses that MediaMTX relay, skip repeat FFT in its PCM decoder.
   # This switch is optional so strong/standard/off retain the old playback.
   $env:MSDS_RTSP_AUDIO_DENOISE_PLAYBACK = $(if ($NoiseProfile -eq "maximum") { "1" } else { "0" })
-  $env:MSDS_KWS_WEBRTC_VAD = "1"
+  $env:MSDS_KWS_WEBRTC_VAD = $(if ($HearingProfile -eq "adaptive") { "0" } else { "1" })
   $env:MSDS_KWS_HEARING_PROFILE = $HearingProfile
   # WebRTC mode 1 listens more readily for quiet/far voices than mode 3.
   # Retain the prior strict mode 3 for maximum + normal, with a one-command rollback.
@@ -175,6 +181,9 @@ try {
   Write-Host "[MSDS] Neural mode=$Mode, FFmpeg noise=$NoiseProfile, hearing=$HearingProfile, DeepFilterNet=maximum, WebRTC VAD=$env:MSDS_KWS_WEBRTC_MODE." -ForegroundColor Green
   if ($HearingProfile -eq "far") {
     Write-Host "[MSDS] Far hearing: more sensitive VAD onset. Speech duration/pre-roll and KWS safety thresholds stay unchanged." -ForegroundColor Cyan
+  }
+  if ($HearingProfile -eq "adaptive") {
+    Write-Host "[MSDS] Adaptive baseline: original noise-free PCM, energy VAD, no neural model computation." -ForegroundColor Cyan
   }
   if ($NoiseProfile -eq "maximum") {
     Write-Host "[MSDS] Maximum also denoises audible RTSP/WebRTC audio (no duplicate FFT for MediaMTX KWS)." -ForegroundColor Cyan
