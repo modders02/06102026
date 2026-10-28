@@ -23,6 +23,8 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
+from .kws_audio_filters import webrtc_requested
+
 try:
     import webrtcvad  # from webrtcvad-wheels, optional for existing installations
 except ImportError:  # retain the tested adaptive-energy baseline
@@ -137,7 +139,7 @@ class StreamingSpeechSegmenter:
         self.last_speech_frame = False
         self.webrtc_vad = None
         self.vad_backend = "adaptive-energy"
-        if os.environ.get("MSDS_KWS_WEBRTC_VAD", "0").strip().lower() in ("1", "true", "yes", "on"):
+        if webrtc_requested():
             if webrtcvad is not None:
                 try:
                     mode = max(0, min(3, int(os.environ.get("MSDS_KWS_WEBRTC_MODE", "2"))))
