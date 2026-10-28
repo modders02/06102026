@@ -140,7 +140,8 @@ def probe_streams(rtsp: str, transport: str = "tcp", timeout: int = 20) -> dict:
         return {"ok": False, "streams": [],
                 "error": (out.stderr or "").strip()[:400] or "ffprobe failed"}
     try:
-        streams = json.loads(out.stdout or "{}").get("streams", [])
+        metadata = json.loads(out.stdout or "{}")
+        streams = metadata.get("streams") if isinstance(metadata, dict) else None
     except json.JSONDecodeError:
         return {"ok": False, "streams": [], "error": "ffprobe returned invalid JSON"}
     if not isinstance(streams, list) or not streams:
