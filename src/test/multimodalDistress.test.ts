@@ -48,10 +48,6 @@ describe('multimodal distress fusion', () => {
     ['fearful', 'Frightened'],
     ['fear', 'Frightened'],
     ['frightened', 'Frightened'],
-    ['surprised', 'Frightened'],
-    ['surprise', 'Frightened'],
-    ['shock', 'Frightened'],
-    ['shocked', 'Frightened'],
     ['sad', 'Sad'],
     ['sadness', 'Sad'],
   ] as const)('accepts a reliable %s face', (expression, label) => {
@@ -65,6 +61,10 @@ describe('multimodal distress fusion', () => {
   it('rejects weak or non-target facial expressions', () => {
     expect(makeDistressFaceSignal('angry', DISTRESS_FACE_MIN_CONFIDENCE - 0.01, 1000)).toBeNull();
     expect(makeDistressFaceSignal('happy', 0.99, 1000)).toBeNull();
+    expect(makeDistressFaceSignal('surprised', 0.99, 1000)).toBeNull();
+    expect(makeDistressFaceSignal('surprise', 0.99, 1000)).toBeNull();
+    expect(makeDistressFaceSignal('shock', 0.99, 1000)).toBeNull();
+    expect(makeDistressFaceSignal('shocked', 0.99, 1000)).toBeNull();
     expect(makeDistressFaceSignal('neutral', 0.99, 1000)).toBeNull();
     expect(makeDistressFaceSignal('disgusted', 0.99, 1000)).toBeNull();
   });
@@ -102,8 +102,6 @@ describe('multimodal distress fusion', () => {
     ['angry', 'Angry'],
     ['fearful', 'Frightened'],
     ['frightened', 'Frightened'],
-    ['surprised', 'Frightened'],
-    ['shock', 'Frightened'],
   ] as const)('verifies accepted help with %s', (expression, label) => {
     const face = makeDistressFaceSignal(expression, 0.92, 5000)!;
     const help = makeDistressSpeechSignal('help', 0.95, 7000)!;
@@ -111,6 +109,29 @@ describe('multimodal distress fusion', () => {
     expect(result?.face.label).toBe(label);
     expect(result?.confidence).toBe(0.92);
     expect(multimodalDistressLabel(result!)).toBe(`Verified distress: ${label} + "help"`);
+  });
+
+  it.each(['surprised', 'surprise', 'shock', 'shocked'] as const)(
+    'does not falsely verify %s as frightened with any accepted distress keyword',
+    expression => {
+      const face = makeDistressFaceSignal(expression, 0.99, 2000);
+      expect(face).toBeNull();
+      expect(isKeywordFaceCompatible('help', expression)).toBe(false);
+      expect(isKeywordFaceCompatible('emergency', expression)).toBe(false);
+      for (const keyword of Object.keys(KEYWORD_FACE_PAIRINGS)) {
+        const speech = makeDistressSpeechSignal(keyword, 0.99, 2500);
+        expect(speech).not.toBeNull();
+        expect(fuseDistressSignals(face, speech)).toBeNull();
+      }
+    },
+  );
+
+  it('keeps frightened and surprised signals distinct despite matching confidence', () => {
+    const help = makeDistressSpeechSignal('help', 0.90, 2000);
+    const fear = makeDistressFaceSignal('fearful', 0.60, 2500);
+    const surprise = makeDistressFaceSignal('surprised', 0.99, 2500);
+    expect(fuseDistressSignals(fear, help)?.face.label).toBe('Frightened');
+    expect(fuseDistressSignals(surprise, help)).toBeNull();
   });
 
   it('verifies either ordering inside the configured same-camera window', () => {
