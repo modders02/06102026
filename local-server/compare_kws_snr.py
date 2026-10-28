@@ -8,7 +8,7 @@ recall, microphone distance, or real-world emergency reliability.
 
 Example:
   python local-server/compare_kws_snr.py --holdout local-server/kws-holdout-english \\
-      --noise-only room-noise.wav --snrs 20 15 10 5 0 --profiles off standard strong
+      --noise-only room-noise.wav --snrs 20 15 10 5 0 --profiles off standard strong maximum
 
 No files, templates, thresholds, or camera settings are modified.
 """
@@ -37,7 +37,7 @@ from msds.binaries import resolve_exe  # noqa: E402
 from msds.kws_engine import DEFAULT_KEYWORDS, KWS_ENGINE, NEGATIVE_CLASS, SAMPLE_RATE  # noqa: E402
 
 LEVELS = (20, 15, 10, 5, 0)
-PROFILES = ("off", "standard", "strong")
+PROFILES = ("off", "standard", "strong", "maximum")
 
 
 def _float_pcm(pcm: bytes) -> np.ndarray:
@@ -107,7 +107,7 @@ def compare(
     if not KWS_ENGINE.status().get("open_set_ready"):
         raise ValueError("Shared KWS model is not ready. Check enrollment before testing.")
     if any(p not in PROFILES for p in profiles):
-        raise ValueError("Only off, standard and strong profiles are supported.")
+        raise ValueError("Only off, standard, strong and maximum profiles are supported.")
 
     inputs: dict[str, list[tuple[str, bytes]]] = {}
     sufficient = True
@@ -179,7 +179,7 @@ def compare(
         "production_proven": False,
         "same_frozen_templates": True,
         "snr_definition": "RMS speech / RMS added recorded noise within each clip",
-        "mode_notes": "off=raw 16-kHz PCM; standard/strong=existing FFmpeg filters (with 1s warmup)",
+        "mode_notes": "off=raw 16-kHz PCM; standard/strong/maximum=FFmpeg filters (with 1s warmup); maximum uses afftdn nr=97 dB filter ceiling and may remove speech",
         "confusion_notes": "by_keyword.predictions counts every emitted word or rejected result, including HELP vs AMBULANCE confusions",
         "limits": "Pre-segmented offline KWS only; live CCTV VAD, ASR verification and alert delivery are NOT measured.",
         "heldout_counts": {key: len(value) for key, value in inputs.items()},
