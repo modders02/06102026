@@ -102,6 +102,27 @@ class NeuralKwsTrialTests(unittest.TestCase):
         self.assertIn('Expected matched {expected}', installer)
 
 
+    def test_deepfilternet_maximum_uses_unlimited_neural_attenuation(self):
+        with patch.dict(os.environ, {"MSDS_KWS_NEURAL_STRENGTH": "maximum"}):
+            self.assertIsNone(neural_kws_trial.neural_attenuation_limit_db())
+        with patch.dict(os.environ, {"MSDS_KWS_NEURAL_STRENGTH": "balanced"}):
+            self.assertEqual(neural_kws_trial.neural_attenuation_limit_db(), 12.0)
+        with patch.dict(os.environ, {"MSDS_KWS_NEURAL_STRENGTH": "strong"}):
+            self.assertEqual(neural_kws_trial.neural_attenuation_limit_db(), 24.0)
+        # Historic default was already full model enhancement. Preserve it.
+        with patch.dict(os.environ, {"MSDS_KWS_NEURAL_STRENGTH": ""}):
+            self.assertIsNone(neural_kws_trial.neural_attenuation_limit_db())
+
+    def test_experimental_launcher_defaults_to_maximum_with_rollback_option(self):
+        script = (
+            Path(__file__).resolve().parents[1] / "setup-neural-kws.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn('[ValidateSet("off", "standard", "strong", "maximum")]', script)
+        self.assertIn('$NoiseProfile = "maximum"', script)
+        self.assertIn('$env:MSDS_KWS_ROBUST_MODE = $NoiseProfile', script)
+        self.assertIn('$env:MSDS_KWS_NEURAL_STRENGTH = "maximum"', script)
+        self.assertIn('if ($NoiseProfile -eq "maximum") { "3" } else { "2" }', script)
+
     def test_exact_english_word_only_and_padding(self):
         for spoken, expected in [("HELP", "help"), ("AMBULANCE", "ambulance"),
                                  ("HELP ME", ""), ("HELLO", "")]:
