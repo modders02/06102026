@@ -138,7 +138,7 @@ describe('shared live camera views', () => {
         connected: true,
         chunks_received: 1,
         bytes_received: 32000,
-        last_chunk_at: null,
+        last_chunk_at: new Date().toISOString(),
         last_transcription_at: null,
         last_transcript: '',
         recognition_engine: 'custom',
@@ -157,6 +157,7 @@ describe('shared live camera views', () => {
           last_negative_confidence: 0.895,
           last_duration_ratio: 1.12,
           last_decision: decision,
+          last_segment_at: new Date().toISOString(),
           last_keyword: 'emergency',
           last_processing_ms: 205.95,
         },
@@ -201,7 +202,7 @@ describe('shared live camera views', () => {
         connected: true,
         chunks_received: 2,
         bytes_received: 32000,
-        last_chunk_at: null,
+        last_chunk_at: new Date().toISOString(),
         last_transcription_at: null,
         last_transcript: 'help',
         recognition_engine: 'custom',
@@ -209,6 +210,7 @@ describe('shared live camera views', () => {
           last_candidate: 'help',
           last_candidate_confidence: 0.95,
           last_decision: decision,
+          last_segment_at: new Date().toISOString(),
           last_keyword: 'help',
           last_processing_ms: 125,
         },
@@ -230,6 +232,52 @@ describe('shared live camera views', () => {
     expect(within(diagnostics).getByText('Wake word confirmed.')).toBeInTheDocument();
     expect(screen.queryByText(/Candidate: help/)).not.toBeInTheDocument();
     expect(screen.getByTitle('help')).toHaveTextContent('help');
+  });
+
+  it('does not present a cached help candidate as live speech after the camera microphone disconnects', () => {
+    makeSession(1, {
+      transcript: 'help',
+      audioListening: true,
+      audioBackendReachable: true,
+      audioTone: 'wait',
+      audioMessage: 'Waiting for camera microphone',
+      audio: {
+        thread_running: true,
+        connected: false,
+        chunks_received: 2,
+        bytes_received: 0,
+        last_chunk_at: null,
+        last_transcription_at: null,
+        last_transcript: 'help',
+        recognition_engine: 'custom',
+        custom_kws: {
+          hearing_profile: 'far',
+          audio_noise_profile: 'maximum',
+          neural_mode: 'shadow',
+          last_candidate: 'help',
+          last_candidate_confidence: 0.95,
+          last_decision: 'accepted',
+          last_segment_at: new Date().toISOString(),
+          last_keyword: 'help',
+        },
+        error: null,
+        ffmpeg_error: null,
+      },
+    });
+    render(<LiveCameraFeed
+      camera={slotCamera(mocks.slots[0] as CameraSlot)}
+      settings={DEFAULT_SETTINGS}
+      onConnect={vi.fn()}
+    />);
+    const diagnostics = screen.getByTestId('voice-diagnostics');
+    expect(screen.getByTestId('cctv-audio-health')).toHaveTextContent('Camera microphone disconnected');
+    expect(diagnostics).toHaveTextContent('Hearing: far');
+    expect(diagnostics).toHaveTextContent('Noise: maximum');
+    expect(diagnostics).toHaveTextContent('Neural: shadow');
+    expect(within(diagnostics).queryByText('ACCEPTED')).not.toBeInTheDocument();
+    expect(within(diagnostics).getByText('MIC UNAVAILABLE')).toBeInTheDocument();
+    expect(screen.queryByText('help', { selector: 'p[aria-live="polite"]' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('kws-previous-decision')).toHaveTextContent('Previous result only: help');
   });
 
   it('changes focused camera and layout without changing configured slots', () => {
