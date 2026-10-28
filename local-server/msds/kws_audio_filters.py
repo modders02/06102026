@@ -32,7 +32,7 @@ def robust_mode() -> str:
     WebRTC VAD; neither changes stored enrollment templates or thresholds.
     """
     value = os.environ.get("MSDS_KWS_ROBUST_MODE", "off").strip().lower()
-    return value if value in ("off", "standard", "strong", "maximum") else "off"
+    return value if value in ("off", "standard", "strong", "maximum", "voice") else "off"
 
 
 def hearing_profile() -> str:
