@@ -87,8 +87,10 @@ async function modelsFor(modes: TracingModes): Promise<{ tasks: VisionTasks; mod
   }
 }
 
-function showCount(face: number, pose: number, hands: number): string {
-  return `Face ${face} · Body ${pose} · Hands ${hands}`;
+function showCount(face: number, pose: number, hands: number, modes: TracingModes): string {
+  // A disabled pose/hand model is not a detection failure. The monitoring
+  // view intentionally enables face tracing only, not body or hands.
+  return `Face ${modes.face ? face : 'off'} · Body ${modes.body ? pose : 'off'} · Hands ${modes.hands ? hands : 'off'}`;
 }
 
 /**
@@ -317,7 +319,7 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh', pers
             }
           }
           setMessage(current => {
-            const next = showCount(faceCount, poseCount, handCount)
+            const next = showCount(faceCount, poseCount, handCount, modes)
               + (modes.face ? ` · Face box ${faceBox ? 'visible' : 'unavailable'} (${faceSource})` : '')
               + (modes.body ? ` · Pose bones ${poseLines}` : '')
               + (models.hand && handCount === 0 ? ' · Raise hands into view' : '')
