@@ -1557,9 +1557,16 @@ class Camera:
                     if self.kws_last_candidate else None
                 ),
                 "dtw_acceleration": (
-                    "wavefront_experimental"
+                    "cuda_required"
+                    if os.environ.get("MSDS_REQUIRE_CUDA", "0") == "1"
+                    else "wavefront_experimental"
                     if os.environ.get("MSDS_KWS_FAST_DTW", "0") == "1"
                     else "baseline"
+                ),
+                "gpu_required": os.environ.get("MSDS_REQUIRE_CUDA") == "1",
+                "neural_execution_provider": (
+                    "cuda" if os.environ.get("MSDS_REQUIRE_CUDA") == "1"
+                    else "cpu"
                 ),
                 "last_decision": self.kws_last_decision or None,
                 "original_kws_decision": self.kws_original_decision or None,
