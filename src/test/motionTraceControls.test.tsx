@@ -18,15 +18,17 @@ vi.mock('@/hooks/useCctvTalk', () => ({
   useCctvTalk: () => ({ talking: false, error: null, startTalk: vi.fn(), stopTalk: vi.fn() }),
 }));
 vi.mock('@/components/multicam/MotionTraceOverlay', () => ({
-  default: ({ modes, detail, onMovement }: {
+  default: ({ modes, detail, personRegion, onMovement }: {
     modes: { face: boolean; body: boolean; hands: boolean };
     detail?: 'mesh' | 'outline';
+    personRegion?: { x: number; y: number; width: number; height: number } | null;
     onMovement?: (value: { kind: 'smile'; label: string; activation: number; features: string[]; source: 'mediapipe-blendshapes' }) => void;
   }) => (
     <div>
       <output data-testid="trace-models">
         {Object.keys(modes).filter(key => modes[key as keyof typeof modes]).join(',')} | {detail}
       </output>
+      <output data-testid="trace-person-region">{personRegion ? JSON.stringify(personRegion) : 'none'}</output>
       <button onClick={() => onMovement?.({
         kind: 'smile', label: 'Smiling', activation: 0.72,
         features: ['mouthSmileLeft', 'mouthSmileRight'],
@@ -71,6 +73,21 @@ describe('automatic CCTV face boxes and object detection', () => {
     expect(mock.addEvent).toHaveBeenCalledWith(expect.objectContaining({
       cameraId: 'slot-1', type: 'emotion', label: 'Happy',
     }));
+  });
+
+  it('passes detected person bounds as a search hint without treating them as a face', () => {
+    mock.session.runtime = {
+      ...mock.session.runtime!,
+      frameWidth: 320,
+      frameHeight: 180,
+      objects: [{ label: 'person', confidence: 0.81, bbox: [80, 35, 90, 110] }],
+    } as CameraRuntime;
+    render(<LiveCameraFeed camera={cam} settings={DEFAULT_SETTINGS} onConnect={vi.fn()} />);
+    const box = JSON.parse(screen.getByTestId('trace-person-region').textContent || '{}');
+    expect(box.x).toBeCloseTo(80 / 320);
+    expect(box.y).toBeCloseTo(35 / 180);
+    expect(box.width).toBeCloseTo(90 / 320);
+    expect(box.height).toBeCloseTo(110 / 180);
   });
 
   it('does not start face models when AI monitoring is disabled', () => {
