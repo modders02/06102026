@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { drawConnections, drawSolidFaceBox, drawPoints, drawTrail, containedVideoRect, drawQualityConnections, imageLandmarks, usableFaceLandmarks, updateTrail, type TraceTrail } from '@/lib/landmarkRendering';
-import { detectFallbackFace68 } from '@/lib/faceLandmarkFallback';
+import { drawConnections, drawSolidFaceBox, drawDetectedFaceBox, drawPoints, drawTrail, containedVideoRect, drawQualityConnections, imageLandmarks, usableFaceLandmarks, updateTrail, type TraceTrail } from '@/lib/landmarkRendering';
+import { detectDistantFace, type FaceFallbackResult, type FaceSearchRegion } from '@/lib/faceLandmarkFallback';
 import { classifyFacialMovement, stableFacialMovement, type FacialMovementObservation } from '@/lib/facialMovementCues';
 import type { TracePoint } from '@/lib/landmarkRendering';
 
@@ -14,6 +14,8 @@ interface Props {
   video: HTMLVideoElement;
   modes: TracingModes;
   detail?: 'mesh' | 'outline';
+  /** Optional COCO person region, used ONLY to search for an actual face. */
+  personRegion?: FaceSearchRegion | null;
   /** Video-only heuristic observation; must not be used to trigger emergency alerts. */
   onMovement?: (observation: FacialMovementObservation | null) => void;
 }
@@ -94,12 +96,16 @@ function showCount(face: number, pose: number, hands: number): string {
  * No extra RTSP/WebRTC connection, persistent biometrics, identity recognition
  * or emergency-acceptance side effects. The main KWS/facial fusion is unchanged.
  */
-export default function MotionTraceOverlay({ video, modes, detail = 'mesh', onMovement }: Props) {
+export default function MotionTraceOverlay({ video, modes, detail = 'mesh', personRegion, onMovement }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [state, setState] = useState<'loading' | 'active' | 'error'>('loading');
   const [message, setMessage] = useState('Loading tracing models…');
   const onMovementRef = useRef(onMovement);
   onMovementRef.current = onMovement;
+  // Region moves with the tracked person every frame. Avoid recreating
+  // expensive MediaPipe models whenever the COCO object box moves.
+  const personRegionRef = useRef(personRegion);
+  personRegionRef.current = personRegion;
 
   useEffect(() => {
     let disposed = false;
@@ -108,7 +114,7 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh', onMo
     const paths = new Map<string, TraceTrail>();
     let lastTimestamp = 0;
     let lastVideoTime = -1;
-    let latestFallback: TracePoint[] | null = null;
+    let latestFallback: FaceFallbackResult | null = null;
     let latestFallbackAt = 0;
     let fallbackBusy = false;
     let lastFallbackAttemptAt = 0;
@@ -220,7 +226,7 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh', onMo
             if (!fallbackBusy && now - lastFallbackAttemptAt >= 1200) {
               fallbackBusy = true;
               lastFallbackAttemptAt = now;
-              void detectFallbackFace68(video)
+              void detectDistantFace(video, personRegionRef.current)
                 .then(result => {
                   if (disposed) return;
                   latestFallback = result;
@@ -236,8 +242,16 @@ export default function MotionTraceOverlay({ video, modes, detail = 'mesh', onMo
                 .finally(() => { fallbackBusy = false; });
             }
             if (latestFallback && now - latestFallbackAt < 1500) {
-              faceBox = drawSolidFaceBox(ctx, latestFallback, rect) || faceBox;
-              if (faceBox) faceSource = 'face-api 68 fallback';
+              // Prefer actual 68-point contours. When a tilted/distant
+              // face lacks stable geometry, show ONLY a high-confidence
+              // detector face box, not a guessed COCO person/head box.
+              faceBox = (latestFallback.landmarks
+                ? drawSolidFaceBox(ctx, latestFallback.landmarks, rect)
+                : false) || drawDetectedFaceBox(ctx, latestFallback.box, rect) || faceBox;
+              if (faceBox) {
+                faceSource = latestFallback.source + ' · ' + latestFallback.search;
+                faceCount = Math.max(faceCount, 1);
+              }
             }
           } else if (faceBox) {
             latestFallback = null;
