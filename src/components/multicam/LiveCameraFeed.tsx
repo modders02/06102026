@@ -8,6 +8,7 @@ import { HAPPY_SMILE_MIN_ACTIVATION, shouldRecordSignificantEvent } from '@/lib/
 import ValidationLayer from '@/components/dashboard/ValidationLayer';
 import MotionTraceOverlay from '@/components/multicam/MotionTraceOverlay';
 import { formatWakeWordDecision } from '@/lib/wakeWordValidation';
+import { describeKwsCaptureHealth, explainKwsDuration, recentKwsDecision } from '@/lib/kwsLiveDiagnostics';
 import type { CameraConfig, DetectionEvent, MultiCamSettings } from '@/types/multicam';
 
 function statusIsOnline(runtime: { status?: string } | null) {
@@ -76,34 +77,47 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
   const status = runtime?.status || 'connecting';
   const customKeywordMode = runtime?.audio?.recognition_engine === 'custom';
   const kws = runtime?.audio?.custom_kws;
+  const captureHealth = describeKwsCaptureHealth(
+    runtime?.audio ?? null, runtime?.audioBackendReachable !== false,
+  );
+  const freshDecision = recentKwsDecision(
+    runtime?.audio ?? null, runtime?.audioBackendReachable !== false,
+  );
   // The backend keeps the precise reason for testing, but the live camera
   // presents accepted voice recognition using one friendly green label.
   // This does not imply that face/visual alert fusion has also passed.
-  const kwsAccepted = ['accepted', 'accepted_help_90', 'verified', 'verified_help_rescue']
-    .includes(kws?.last_decision || '');
-  const diagnosticTone = kwsAccepted
-    ? 'bg-success/10 text-success'
-    : kws?.last_decision
-      ? 'text-amber-500'
-      : 'text-muted-foreground';
-  const diagnosticLabel = kwsAccepted
-    ? 'ACCEPTED'
-    : kws?.last_decision === 'verification_pending'
-      ? 'CHECKING'
-      : kws?.last_decision ? 'NOT CONFIRMED' : 'WAITING';
-  const diagnosticReason = formatWakeWordDecision(kws?.last_decision);
+  const kwsAccepted = freshDecision
+    && ['accepted', 'accepted_help_90', 'verified', 'verified_help_rescue']
+      .includes(kws?.last_decision || '');
+  const diagnosticTone = captureHealth.severity === 'error'
+    ? 'bg-destructive/10 text-destructive'
+    : kwsAccepted ? 'bg-success/10 text-success'
+      : freshDecision && kws?.last_decision ? 'text-amber-500'
+        : 'text-muted-foreground';
+  const diagnosticLabel = captureHealth.severity === 'error'
+    ? 'MIC UNAVAILABLE'
+    : kwsAccepted ? 'ACCEPTED'
+      : freshDecision && kws?.last_decision === 'verification_pending'
+        ? 'CHECKING'
+        : freshDecision && kws?.last_decision ? 'NOT CONFIRMED' : 'WAITING';
+  const diagnosticReason = captureHealth.state !== 'streaming'
+    ? captureHealth.message
+    : freshDecision ? formatWakeWordDecision(kws?.last_decision)
+      : 'Listening — no recent keyword decision.';
   const pct = (value?: number) => typeof value === 'number'
     ? `${(value * 100).toFixed(1)}%`
     : '—';
   const num = (value?: number, digits = 4) => typeof value === 'number'
     ? value.toFixed(digits)
     : '—';
-  const customSpeechText = customKeywordMode && kws?.last_candidate
+  const customSpeechText = customKeywordMode && freshDecision && kws?.last_candidate
     ? kwsAccepted
       ? (kws.last_keyword || kws.last_candidate)
       : `Candidate: ${kws.last_candidate} (${pct(kws.last_candidate_confidence)}) · ${formatWakeWordDecision(kws.last_decision || 'verification_pending')}`
     : '';
-  const speechText = customSpeechText || runtime?.transcript || '';
+  // Never display a cached accepted word while live camera audio has stopped.
+  const speechText = customKeywordMode && captureHealth.state !== 'streaming'
+    ? '' : (customSpeechText || runtime?.transcript || '');
 
   useEffect(() => {
     const container = containerRef.current;
@@ -213,11 +227,12 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
             aria-live="polite"
             aria-atomic="true"
             className="min-w-0 flex-1 truncate text-sm text-foreground"
-            title={speechText || runtime?.audioMessage || 'Listening…'}
+            title={speechText || (customKeywordMode ? diagnosticReason : runtime?.audioMessage) || 'Listening…'}
           >
             {speechText || (
-              <span className={runtime?.audioTone === 'error' ? 'text-destructive' : 'text-muted-foreground'}>
-                {runtime?.audioMessage || 'Listening…'}
+              <span className={captureHealth.severity === 'error' || runtime?.audioTone === 'error'
+                ? 'text-destructive' : 'text-muted-foreground'}>
+                {customKeywordMode ? captureHealth.message : runtime?.audioMessage || 'Listening…'}
               </span>
             )}
           </p>
@@ -253,7 +268,44 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
               {diagnosticLabel}
             </span>
           </div>
+          <div data-testid="cctv-audio-health" role="status"
+            className={`mb-2 rounded-md border px-3 py-2 text-xs ${captureHealth.severity === 'ok'
+              ? 'border-success/30 text-success'
+              : captureHealth.severity === 'error'
+                ? 'border-destructive/30 text-destructive'
+                : 'border-border text-muted-foreground'}`}>
+            <span className="font-semibold">{captureHealth.message}</span>
+            <span className="ml-2 opacity-85">
+              · Source: {runtime?.audio?.audio_source || 'unknown'}
+              · Last probed codec: {runtime?.audio?.audio_codec || 'unknown'}
+              · PCM: {(runtime?.audio?.bytes_received ?? 0).toLocaleString()} bytes
+            </span>
+          </div>
+          <p data-testid="kws-active-profiles" className="mb-2 text-xs text-muted-foreground">
+            Hearing: <span className="font-semibold text-foreground">{kws.hearing_profile || 'normal'}</span>
+            {' · '}Noise: <span className="font-semibold text-foreground">{kws.audio_noise_profile || 'off'}</span>
+            {' · '}VAD: <span className="font-semibold text-foreground">{kws.vad_backend || 'unknown'}</span>
+            {' · '}Neural: <span className="font-semibold text-foreground">{kws.neural_mode || 'off'}</span>
+            {kws.neural_mode === 'shadow' && ' (comparison only; DTW decides alerts)'}
+          </p>
           <p className="mb-2 text-xs text-muted-foreground">{diagnosticReason}</p>
+          {freshDecision && kws.last_decision === 'duration_mismatch' && (
+            <p className="mb-2 text-xs text-amber-600 dark:text-amber-400" data-testid="kws-duration-explanation">
+              {explainKwsDuration(kws.last_decision, kws.last_duration_ratio)}
+            </p>
+          )}
+          {!freshDecision && kws.last_candidate && (
+            <p className="mb-2 text-xs text-muted-foreground" data-testid="kws-previous-decision">
+              Previous result only: {kws.last_candidate} ({formatWakeWordDecision(kws.last_decision)})
+              {kws.last_segment_at && Number.isFinite(Date.parse(kws.last_segment_at))
+                ? ` · ${new Date(kws.last_segment_at).toLocaleTimeString()}` : ''}
+            </p>
+          )}
+          {kws.neural_mode === 'shadow' && kws.neural_last_error && (
+            <p className="mb-2 text-xs text-amber-600 dark:text-amber-400">
+              Neural comparison unavailable: {kws.neural_last_error}
+            </p>
+          )}
           {kws.language_scope && (
             <p className="mb-2 text-xs text-muted-foreground">
               Scope: <span className="font-semibold text-foreground">English only</span>
