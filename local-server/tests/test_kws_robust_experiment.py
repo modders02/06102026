@@ -56,7 +56,10 @@ class RobustModeTests(unittest.TestCase):
 
     def test_strong_mode_changes_only_camera_audio_capture(self):
         camera = Camera(id="slot-1", path="cam1", name="trial", rtsp="rtsp://example/live")
-        with patch.dict(os.environ, {"MSDS_KWS_ROBUST_MODE": "strong"}):
+        with patch.dict(os.environ, {
+            "MSDS_KWS_ROBUST_MODE": "strong",
+            "MSDS_RTSP_AUDIO_DENOISE_PLAYBACK": "0",
+        }):
             audio_cmd = camera._audio_pcm_cmd(
                 "ffmpeg", {"transport": "tcp", "url": "rtsp://example/live"}
             )
