@@ -14,3 +14,6 @@ kws-holdout-english/
 kws-data-v2/
 kws-backups/
 kws-training-english/.review-*
+
+# Downloaded experimental neural voice models; install on each local device.
+models/
