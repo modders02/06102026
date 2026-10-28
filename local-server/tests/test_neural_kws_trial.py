@@ -121,7 +121,10 @@ class NeuralKwsTrialTests(unittest.TestCase):
         self.assertIn('$NoiseProfile = "maximum"', script)
         self.assertIn('$env:MSDS_KWS_ROBUST_MODE = $NoiseProfile', script)
         self.assertIn('$env:MSDS_KWS_NEURAL_STRENGTH = "maximum"', script)
-        self.assertIn('if ($NoiseProfile -eq "maximum") { "3" } else { "2" }', script)
+        self.assertIn('$HearingProfile = "far"', script)
+        self.assertIn('$env:MSDS_KWS_HEARING_PROFILE = $HearingProfile', script)
+        self.assertIn('if ($HearingProfile -eq "far") { "1" }', script)
+        self.assertIn('elseif ($NoiseProfile -eq "maximum") { "3" } else { "2" }', script)
 
     def test_exact_english_word_only_and_padding(self):
         for spoken, expected in [("HELP", "help"), ("AMBULANCE", "ambulance"),
