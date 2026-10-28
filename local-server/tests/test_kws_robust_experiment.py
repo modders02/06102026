@@ -139,6 +139,10 @@ class NoisySpeechSNRTests(unittest.TestCase):
         self.assertEqual(values["unknown_total"], 10)
         self.assertEqual(values["unknown_false_accepts"], 10)
         self.assertEqual(values["unknown_false_accept_rate"], 1.0)
+        self.assertEqual(values["by_keyword"]["unknown"]["predictions"], {"help": 10})
+        self.assertEqual(values["by_keyword"]["unknown"]["wrong_keyword"], 10)
+        self.assertEqual(values["by_keyword"]["help"]["predictions"], {"help": 3})
+        self.assertEqual(values["by_keyword"]["ambulance"]["wrong_keyword"], 3)
         self.assertFalse(report["production_proven"])
 
 
