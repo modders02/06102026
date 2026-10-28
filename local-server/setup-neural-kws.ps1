@@ -2,12 +2,13 @@
 # Run locally from PowerShell or double-click start-neural-kws.cmd at the repo root.
 # This script NEVER changes stable_branch_271026 or retrains DTW templates.
 param(
-  [ValidateSet("shadow", "verify")][string]$Mode = "shadow",
-  # This explicit experimental launcher defaults to maximum noise filtering.
-  # For less aggressive KWS behavior, run -NoiseProfile strong/standard/off.
-  [ValidateSet("off", "standard", "strong", "maximum")][string]$NoiseProfile = "maximum",
-  # Far hearing is a VAD sensitivity change; it does not lower KWS matches.
-  [ValidateSet("normal", "far")][string]$HearingProfile = "far",
+  # Start with the working DTW KWS system. Neural mode is an optional
+  # comparison only, not a replacement for the live recognition engine.
+  [ValidateSet("off", "shadow", "verify")][string]$Mode = "off",
+  # Avoid erasing weak syllables with the experimental 97-dB FFT preset.
+  [ValidateSet("off", "standard", "strong", "maximum")][string]$NoiseProfile = "standard",
+  # Normal preserves the enrollment-compatible segmentation duration.
+  [ValidateSet("normal", "far")][string]$HearingProfile = "normal",
   [switch]$SkipInstall,
   [switch]$NoLaunch
 )
@@ -39,6 +40,10 @@ try {
   if (-not (Test-Path $venvPython)) { throw "Python venv was not created at $venvPython" }
 
   if (-not $SkipInstall) {
+    Invoke-Checked "Installing MSDS Python server dependencies" {
+      & $venvPython -m pip install --timeout 120 --retries 10 -r (Join-Path $PSScriptRoot "requirements.txt")
+    }
+    if ($Mode -ne "off") {
     # On Windows deepfilterlib 0.5.6 is source-distributed. It cannot build
     # without rustc/Cargo and the Microsoft MSVC/Windows SDK linker.
     # Do NOT retry the pip install until its native prerequisites are present.
@@ -52,9 +57,6 @@ try {
     if (-not $deepFilterInstalled) {
       Write-Host "[MSDS] Preparing Rust/Cargo and Microsoft C++ build tools for DeepFilterLib." -ForegroundColor Yellow
       . (Join-Path $PSScriptRoot "ensure-neural-build-tools.ps1")
-    }
-    Invoke-Checked "Installing MSDS Python server dependencies" {
-      & $venvPython -m pip install --timeout 120 --retries 10 -r (Join-Path $PSScriptRoot "requirements.txt")
     }
     Invoke-Checked "Installing matched CPU PyTorch/torchaudio 2.5.1 for DeepFilterNet3" {
       # DeepFilterNet 0.5.6 imports torchaudio.backend.common.AudioMetaData.
@@ -70,8 +72,10 @@ try {
       # Both are optional undeclared dependencies of the CLI.
       & $venvPython -m pip install --timeout 120 --retries 10 deepfilternet sherpa-onnx scipy sentencepiece pypinyin
     }
+    }
   }
 
+  if ($Mode -ne "off") {
   # The legacy torchaudio.backend import is required by DeepFilterNet
   # 0.5.6. Probe at every launch, including -SkipInstall, to detect a later
   # environment upgrade before downloading/loading any neural model.
@@ -141,13 +145,18 @@ try {
     }
   } finally { Pop-Location }
 
+  } else {
+    Write-Host "[MSDS] DTW-only mode: neural model setup and CPU inference disabled." -ForegroundColor Green
+  }
+
   $env:MSDS_KWS_NEURAL_MODE = $Mode
   # DeepFilterNet3 uses full model suppression (no attenuation limit) on
   # neural shadow/verify segments. It does not run before the live VAD.
   $env:MSDS_KWS_NEURAL_DENOISE = "1"
   $env:MSDS_KWS_NEURAL_STRENGTH = "maximum"
-  # The live DTW/VAD path reads these FFmpeg-filtered PCM samples.
-  # Maximum is opt-in to THIS experimental launcher, never stable_branch.
+  # The live DTW/VAD path reads the selected FFmpeg PCM filter. Standard
+  # (12-dB configured reduction) is the conservative default; maximum
+  # is available explicitly for controlled comparison only.
   $env:MSDS_KWS_ROBUST_MODE = $NoiseProfile
   $env:MSDS_KWS_AUDIO_DENOISE = "0" # robust_mode enables denoise when not off
   $env:MSDS_KWS_NOISE_PROFILE = $NoiseProfile
@@ -165,7 +174,7 @@ try {
 
   Write-Host "[MSDS] Neural mode=$Mode, FFmpeg noise=$NoiseProfile, hearing=$HearingProfile, DeepFilterNet=maximum, WebRTC VAD=$env:MSDS_KWS_WEBRTC_MODE." -ForegroundColor Green
   if ($HearingProfile -eq "far") {
-    Write-Host "[MSDS] Far hearing: detects softer VAD onsets with added pre-roll; KWS confidence/UNKNOWN safety checks remain unchanged." -ForegroundColor Cyan
+    Write-Host "[MSDS] Far hearing: more sensitive VAD onset. Speech duration/pre-roll and KWS safety thresholds stay unchanged." -ForegroundColor Cyan
   }
   if ($NoiseProfile -eq "maximum") {
     Write-Host "[MSDS] Maximum also denoises audible RTSP/WebRTC audio (no duplicate FFT for MediaMTX KWS)." -ForegroundColor Cyan
