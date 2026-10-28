@@ -6,6 +6,7 @@ import {
 } from '@/types/multicam';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
 import { isRelevantIndoorObject } from '@/types/dashboard';
+import { isVisualOnlyNightVisionFireEvent } from '@/lib/significantEvents';
 
 const CAMERAS_KEY = 'msd-cameras-v1';
 const SETTINGS_KEY = 'msd-multicam-settings-v1';
@@ -14,7 +15,8 @@ const ALERTS_KEY = 'msd-camera-alerts-v1';
 export const CAMERA_HISTORY_LIMIT = 50;
 export const isCameraAlert = (event: DetectionEvent) => isPriorityCameraAlert(event);
 const isRelevantStoredEvent = (event: DetectionEvent) =>
-  event.type !== 'object' || isRelevantIndoorObject(event.label);
+  !isVisualOnlyNightVisionFireEvent(event)
+  && (event.type !== 'object' || isRelevantIndoorObject(event.label));
 
 /** Once an alert is no longer the active Camera Alert, keep it as history only. */
 export const archiveCameraAlert = (event: DetectionEvent): DetectionEvent => ({
@@ -94,7 +96,8 @@ function newestUniqueEvents(events: DetectionEvent[]): DetectionEvent[] {
 function normalizeEventHistory(next: CameraEventHistory): CameraEventHistory {
   const events = newestUniqueEvents(next.events
     .filter(event => !isCameraAlert(event) && isRelevantStoredEvent(event)));
-  const validAlerts = newestUniqueEvents(next.alertEvents.filter(isCameraAlert));
+  const validAlerts = newestUniqueEvents(next.alertEvents.filter(event =>
+    !isVisualOnlyNightVisionFireEvent(event) && isCameraAlert(event)));
   const archivedAlerts = [
     ...validAlerts.slice(1),
     ...next.alertEvents.filter(event => !isCameraAlert(event) && isRelevantStoredEvent(event)),
