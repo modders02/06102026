@@ -116,8 +116,9 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
       : `Candidate: ${kws.last_candidate} (${pct(kws.last_candidate_confidence)}) · ${formatWakeWordDecision(kws.last_decision || 'verification_pending')}`
     : '';
   // Never display a cached accepted word while live camera audio has stopped.
-  const speechText = customKeywordMode && captureHealth.state !== 'streaming'
-    ? '' : (customSpeechText || runtime?.transcript || '');
+  const speechText = customKeywordMode
+    ? (captureHealth.state === 'streaming' && freshDecision ? customSpeechText || runtime?.transcript || '' : '')
+    : runtime?.transcript || '';
 
   useEffect(() => {
     const container = containerRef.current;
@@ -294,10 +295,13 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
             </span>
           </div>
           <p data-testid="kws-active-profiles" className="mb-2 text-xs text-muted-foreground">
-            Hearing: <span className="font-semibold text-foreground">{kws.hearing_profile || 'normal'}</span>
-            {' · '}Noise: <span className="font-semibold text-foreground">{kws.audio_noise_profile || 'off'}</span>
+            Hearing: <span className="font-semibold text-foreground">{kws.hearing_profile || 'unknown'}</span>
+            {' · '}Noise: <span className="font-semibold text-foreground">{kws.audio_noise_profile || 'unknown'}</span>
             {' · '}VAD: <span className="font-semibold text-foreground">{kws.vad_backend || 'unknown'}</span>
-            {' · '}Neural: <span className="font-semibold text-foreground">{kws.neural_mode || 'off'}</span>
+            {' · '}Neural: <span className="font-semibold text-foreground">{kws.neural_mode || 'unknown'}</span>
+            {kws.publisher_noise_profile && kws.publisher_noise_profile !== 'off' && (
+              <>{' · '}Playback filter: <span className="font-semibold text-foreground">{kws.publisher_noise_profile}</span></>
+            )
             {kws.neural_mode === 'shadow' && ' (comparison only; DTW decides alerts)'}
           </p>
           <p className="mb-2 text-xs text-muted-foreground">{diagnosticReason}</p>
@@ -340,7 +344,7 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
             <span className="text-muted-foreground">Duration ratio</span>
             <span className="font-mono text-foreground">{num(kws.last_duration_ratio, 3)}</span>
 
-            <span className="text-muted-foreground">Accepted keyword</span>
+            <span className="text-muted-foreground">Last accepted keyword</span>
             <span className="font-mono text-foreground">{kws.last_keyword || '—'}</span>
             <span className="text-muted-foreground">Processing</span>
             <span className="font-mono text-foreground">{typeof kws.last_processing_ms === 'number' ? `${kws.last_processing_ms.toFixed(1)} ms` : '—'}</span>
