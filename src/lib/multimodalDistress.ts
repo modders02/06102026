@@ -84,11 +84,13 @@ export function normalizeDistressFaceLabel(
   const normalized = (expression ?? '').trim().toLowerCase();
   if (normalized === 'angry' || normalized === 'anger') return 'Angry';
   if (normalized === 'sad' || normalized === 'sadness') return 'Sad';
-  if (
-    normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
-    || normalized === 'surprised' || normalized === 'surprise'
-    || normalized === 'shock' || normalized === 'shocked'
-  ) return 'Frightened';
+  // Surprised/shocked is a distinct facial-expression class, not proof of
+  // fear. Event History already records it separately; treating it as
+  // Frightened here produced false "verified distress" camera alerts.
+  // Only the classifier's explicit fear-related class can validate fear.
+  if (normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened') {
+    return 'Frightened';
+  }
   return null;
 }
 
