@@ -76,6 +76,27 @@ class NeuralKwsTrialTests(unittest.TestCase):
         with patch.dict(os.environ, {"MSDS_KWS_NEURAL_MODE": "verify-me"}):
             self.assertEqual(neural_kws_trial.neural_mode(), "off")
 
+    def test_deepfilternet_three_and_four_value_init_contracts(self):
+        model, state = object(), object()
+        self.assertEqual(
+            neural_kws_trial._df_model_and_state((model, state, "DF3", 100)),
+            (model, state),
+        )
+        self.assertEqual(
+            neural_kws_trial._df_model_and_state((model, state, "DF3")),
+            (model, state),
+        )
+        with self.assertRaisesRegex(RuntimeError, "model and state"):
+            neural_kws_trial._df_model_and_state((model,))
+
+    def test_installer_includes_sherpa_sentencepiece_dependency(self):
+        installer = (
+            Path(__file__).resolve().parents[1] / "setup-neural-kws.ps1"
+        ).read_text(encoding="utf-8")
+        self.assertIn("deepfilternet sherpa-onnx scipy sentencepiece", installer)
+        self.assertIn("import sentencepiece", installer)
+
+
     def test_exact_english_word_only_and_padding(self):
         for spoken, expected in [("HELP", "help"), ("AMBULANCE", "ambulance"),
                                  ("HELP ME", ""), ("HELLO", "")]:
