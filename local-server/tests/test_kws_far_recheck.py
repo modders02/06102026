@@ -28,7 +28,7 @@ def decision(**changes):
 
 class FarRecheckTests(unittest.TestCase):
     def setUp(self):
-        self.pcm = b"\\x00\\x00" * (16000 // 2)  # 500 ms synthetic segment
+        self.pcm = bytes([0, 0]) * (16000 // 2)  # 500 ms synthetic segment
 
     def test_default_off_and_invalid_fail_closed(self):
         with patch.dict(os.environ, {"MSDS_KWS_FAR_RECHECK": "invalid"}):
@@ -104,7 +104,7 @@ class FarRecheckTests(unittest.TestCase):
     def test_short_segment_not_cropped(self):
         original = decision()
         engine = Mock()
-        short_pcm = b"\\x00\\x00" * 3200  # 200 ms
+        short_pcm = bytes([0, 0]) * 3200  # 200 ms
         result = recheck_far_segment(engine, short_pcm, original=original, mode="strict")
         self.assertIs(result.decision, original)
         engine.diagnose.assert_not_called()
