@@ -25,7 +25,9 @@ from .config import (AUDIO_CHUNK_SECONDS, AUDIO_ENGINE, HLS_PORT, HLS_PROBE_TTL,
                      RTSP_PORT, VIDEO_FPS, VIDEO_GOP, VIDEO_MAX_WIDTH,
                      VIDEO_THREADS, WEBRTC_PORT, match_distress)
 from .kws_engine import KWS_ENGINE, StreamingSpeechSegmenter
-from .kws_audio_filters import denoise_enabled, selected_profile, pcm_audio_filter
+from .kws_audio_filters import (denoise_enabled, selected_profile, pcm_audio_filter,
+                                voice_isolation_mode, voice_isolation_model_dir,
+                                voice_isolation_model_path)
 from . import kws_verifier
 
 # Presentation/runtime configuration is custom-only, so importing this module
@@ -856,6 +858,11 @@ class Camera:
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         bufsize=0,
+                        # RNNoise references just "sh.rnnn"; the model's
+                        # working directory handles Windows drive letters and
+                        # spaces without FFmpeg filtergraph escaping.
+                        cwd=(voice_isolation_model_dir()
+                             if voice_isolation_mode() != "off" else None),
                         creationflags=no_window_flags(),
                     )
                 except (OSError, subprocess.SubprocessError) as exc:
@@ -1318,8 +1325,18 @@ class Camera:
                 "vad_max_length_drops": self.kws_segmenter.max_length_drops,
                 "vad_backend": self.kws_segmenter.vad_backend,
                 "vad_last_speech_frame": self.kws_segmenter.last_speech_frame,
-                "audio_denoise_enabled": denoise_enabled(),
-                "audio_noise_profile": selected_profile(),
+                "audio_denoise_enabled": denoise_enabled() or voice_isolation_mode() != "off",
+                "audio_noise_profile": (f"rnnoise-{voice_isolation_mode()}"
+                                        if voice_isolation_mode() != "off"
+                                        else selected_profile() if denoise_enabled() else "off"),
+                "voice_isolation_mode": voice_isolation_mode(),
+                "voice_isolation_model_ready": (
+                    os.path.isfile(voice_isolation_model_path())
+                    if voice_isolation_mode() != "off" else False
+                ),
+                "voice_isolation_pipeline": ("pre-VAD continuous RNNoise @48k -> 16k DTW"
+                                              if voice_isolation_mode() != "off"
+                                              else "original stable DTW"),
                 "vad_start_threshold": 0.025,
                 "vad_continue_threshold": 0.015,
                 "segments_seen": self.kws_segments_seen,
