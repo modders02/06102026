@@ -25,7 +25,7 @@ from .config import (AUDIO_CHUNK_SECONDS, AUDIO_ENGINE, HLS_PORT, HLS_PROBE_TTL,
                      RTSP_PORT, VIDEO_FPS, VIDEO_GOP, VIDEO_MAX_WIDTH,
                      VIDEO_THREADS, WEBRTC_PORT, match_distress)
 from .kws_engine import KWS_ENGINE, StreamingSpeechSegmenter
-from .kws_audio_filters import denoise_enabled, selected_profile, pcm_audio_filter
+from .kws_audio_filters import denoise_enabled, selected_profile, pcm_audio_filter, robust_mode, webrtc_requested
 from . import kws_verifier
 
 # Presentation/runtime configuration is custom-only, so importing this module
@@ -1320,6 +1320,8 @@ class Camera:
                 "vad_last_speech_frame": self.kws_segmenter.last_speech_frame,
                 "audio_denoise_enabled": denoise_enabled(),
                 "audio_noise_profile": selected_profile(),
+                "audio_robust_mode": robust_mode(),
+                "vad_webrtc_requested": webrtc_requested(),
                 "vad_start_threshold": 0.025,
                 "vad_continue_threshold": 0.015,
                 "segments_seen": self.kws_segments_seen,
