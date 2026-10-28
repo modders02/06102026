@@ -93,6 +93,14 @@ class StableRNNoiseTests(unittest.TestCase):
         self.assertIn("arnndn=m=sh.rnnn:mix=1", setup)
         self.assertIn('MSDS_KWS_VOICE_ISOLATION = $VoiceMode', setup)
         self.assertIn('MSDS_KWS_AUDIO_DENOISE = "0"', setup)
+        # Windows PowerShell rejects unbraced interpolation before a colon:
+        # "$VoiceMode:" is parsed as an invalid drive-qualified variable.
+        self.assertIn('Voice isolation=${VoiceMode}: RNNoise', setup)
+        import re
+        self.assertEqual(
+            re.findall(r'\$[A-Za-z_][A-Za-z_0-9]*:(?![A-Za-z_])', setup),
+            [],
+        )
 
     @unittest.skipUnless(
         resolve_exe("ffmpeg", "FFMPEG_EXE") and os.path.isfile(voice_isolation_model_path()),
