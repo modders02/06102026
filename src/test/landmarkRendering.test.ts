@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { containedVideoRect, toCanvasPoint, drawConnections, drawFaceLandmarkBounds, drawSolidFaceBox, faceLandmarkBounds, imageLandmarks, usableFaceLandmarks, validLandmarkCount, FACE_68_CONNECTIONS, drawQualityConnections, smoothLandmarks, updateTrail, drawTrail } from '@/lib/landmarkRendering';
+import { containedVideoRect, toCanvasPoint, drawConnections, drawFaceLandmarkBounds, drawSolidFaceBox, drawDetectedFaceBox, faceLandmarkBounds, imageLandmarks, usableFaceLandmarks, validLandmarkCount, FACE_68_CONNECTIONS, drawQualityConnections, smoothLandmarks, updateTrail, drawTrail } from '@/lib/landmarkRendering';
 
 describe('video-aligned face / pose / hand tracing geometry', () => {
   it('keeps camera geometry inside the actual object-contain video instead of painting letterboxes', () => {
@@ -130,6 +130,26 @@ describe('video-aligned face / pose / hand tracing geometry', () => {
     expect(drawConnections(ctx, face,
       [{ start: 0, end: 1 }, { start: 5, end: 7 }], rect, '#22d3ee')).toBe(2);
     expect(drawFaceLandmarkBounds(ctx, face, rect)).toBe(true);
+  });
+
+  it('draws only face-detector-confirmed distant boxes without inventing a face from a person', () => {
+    const ctx = {
+      save: vi.fn(), restore: vi.fn(), setLineDash: vi.fn(), strokeRect: vi.fn(),
+      measureText: vi.fn(() => ({ width: 105 })), fillRect: vi.fn(), fillText: vi.fn(),
+      strokeStyle: '', fillStyle: '', font: '', lineWidth: 0,
+    } as unknown as CanvasRenderingContext2D;
+    const viewport = containedVideoRect(960, 540, 1920, 1080);
+    const measuredFace = { x: 0.42, y: 0.24, width: 0.026, height: 0.044 };
+    expect(drawDetectedFaceBox(ctx, measuredFace, viewport)).toBe(true);
+    expect(ctx.strokeRect).toHaveBeenCalledWith(
+      expect.closeTo(0.42 * 960), expect.closeTo(0.24 * 540),
+      expect.closeTo(0.026 * 960), expect.closeTo(0.044 * 540),
+    );
+    expect(ctx.fillText).toHaveBeenCalledWith('FACE (detected)', expect.any(Number), expect.any(Number));
+    expect(drawDetectedFaceBox(ctx, {
+      x: -0.2, y: 0.1, width: 0.5, height: 0.6,
+    }, viewport)).toBe(false);
+    expect(ctx.strokeRect).toHaveBeenCalledTimes(1);
   });
 
   it('generates closed mouth and eye contours for 68-point fallback', () => {
