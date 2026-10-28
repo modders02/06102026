@@ -63,3 +63,6 @@ training/facial_distress/.venv/
 training/facial_distress/data/
 training/facial_distress/artifacts/
 training/facial_distress/__pycache__/
+
+# Downloaded, integrity-checked RNNoise model (not part of source code)
+local-server/models/rnnoise/
