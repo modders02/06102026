@@ -93,8 +93,10 @@ class NeuralKwsTrialTests(unittest.TestCase):
         installer = (
             Path(__file__).resolve().parents[1] / "setup-neural-kws.ps1"
         ).read_text(encoding="utf-8")
-        self.assertIn("deepfilternet sherpa-onnx scipy sentencepiece", installer)
-        self.assertIn("import sentencepiece", installer)
+        self.assertIn("deepfilternet sherpa-onnx scipy sentencepiece pypinyin", installer)
+        self.assertIn("import sentencepiece, pypinyin", installer)
+        self.assertIn("HELP @HELP", installer)
+        self.assertIn("AMBULANCE @AMBULANCE", installer)
 
 
     def test_exact_english_word_only_and_padding(self):
