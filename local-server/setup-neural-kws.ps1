@@ -34,14 +34,23 @@ try {
   if (-not (Test-Path $venvPython)) { throw "Python venv was not created at $venvPython" }
 
   if (-not $SkipInstall) {
+    # On Windows deepfilterlib 0.5.6 is source-distributed. It cannot build
+    # without rustc/Cargo and the Microsoft MSVC/Windows SDK linker.
+    # Do NOT retry the pip install until its native prerequisites are present.
+    & $venvPython -m pip show deepfilternet *> $null
+    $deepFilterInstalled = ($LASTEXITCODE -eq 0)
+    if (-not $deepFilterInstalled) {
+      Write-Host "[MSDS] Preparing Rust/Cargo and Microsoft C++ build tools for DeepFilterLib." -ForegroundColor Yellow
+      . (Join-Path $PSScriptRoot "ensure-neural-build-tools.ps1")
+    }
     Invoke-Checked "Installing MSDS Python server dependencies" {
-      & $venvPython -m pip install -r (Join-Path $PSScriptRoot "requirements.txt")
+      & $venvPython -m pip install --timeout 120 --retries 10 -r (Join-Path $PSScriptRoot "requirements.txt")
     }
     Invoke-Checked "Installing CPU PyTorch (needed by DeepFilterNet3)" {
-      & $venvPython -m pip install --index-url "https://download.pytorch.org/whl/cpu" torch torchaudio
+      & $venvPython -m pip install --timeout 120 --retries 10 --index-url "https://download.pytorch.org/whl/cpu" torch torchaudio
     }
     Invoke-Checked "Installing DeepFilterNet, sherpa-onnx and scipy" {
-      & $venvPython -m pip install deepfilternet sherpa-onnx scipy
+      & $venvPython -m pip install --timeout 120 --retries 10 deepfilternet sherpa-onnx scipy
     }
   }
 
