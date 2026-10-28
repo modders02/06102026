@@ -76,6 +76,17 @@ def _df_model_and_state(loaded: tuple):
     return loaded[0], loaded[1]
 
 
+def neural_attenuation_limit_db() -> float | None:
+    """Maximum means UNLIMITED model suppression, not an invented dB target.
+
+    DeepFilterNet's enhance(atten_lim_db=None) applies the complete neural
+    mask without mixing back a fixed amount of the original noisy signal.
+    Positive limits retain increasing amounts of background audio.
+    """
+    strength = os.environ.get("MSDS_KWS_NEURAL_STRENGTH", "maximum").strip().lower()
+    return {"balanced": 12.0, "strong": 24.0, "maximum": None}.get(strength, None)
+
+
 def _enhance_16k(audio: np.ndarray) -> np.ndarray:
     """DeepFilterNet is 48k; preserve sample length via band-limited resampling."""
     global _DF
@@ -96,7 +107,10 @@ def _enhance_16k(audio: np.ndarray) -> np.ndarray:
     if hasattr(state, "reset"):
         state.reset()
     with torch.inference_mode():
-        cleaned = enhance(model, state, torch.from_numpy(hi.copy())[None, :])
+        cleaned = enhance(
+            model, state, torch.from_numpy(hi.copy())[None, :],
+            atten_lim_db=neural_attenuation_limit_db(),
+        )
     samples = cleaned.detach().cpu().numpy().reshape(-1)
     down = resample_poly(samples, 1, 3).astype(np.float32, copy=False)
     if not np.all(np.isfinite(down)):
