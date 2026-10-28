@@ -149,6 +149,10 @@ try {
   $env:MSDS_KWS_ROBUST_MODE = $NoiseProfile
   $env:MSDS_KWS_AUDIO_DENOISE = "0" # robust_mode enables denoise when not off
   $env:MSDS_KWS_NOISE_PROFILE = $NoiseProfile
+  # Also clean the AUDIO HEARD from the CCTV/WebRTC stream in Maximum mode.
+  # If KWS uses that MediaMTX relay, skip repeat FFT in its PCM decoder.
+  # This switch is optional so strong/standard/off retain the old playback.
+  $env:MSDS_RTSP_AUDIO_DENOISE_PLAYBACK = $(if ($NoiseProfile -eq "maximum") { "1" } else { "0" })
   $env:MSDS_KWS_WEBRTC_VAD = "1"
   $env:MSDS_KWS_WEBRTC_MODE = $(if ($NoiseProfile -eq "maximum") { "3" } else { "2" })
   $env:MSDS_KWS_HELP_90_FAST_ACCEPT = "0" # do not mix acceptance shortcuts in this experiment
@@ -156,7 +160,8 @@ try {
 
   Write-Host "[MSDS] Neural mode=$Mode, FFmpeg live noise profile=$NoiseProfile, neural enhancement=maximum, WebRTC VAD mode=$env:MSDS_KWS_WEBRTC_MODE." -ForegroundColor Green
   if ($NoiseProfile -eq "maximum") {
-    Write-Host "[MSDS] WARNING: Maximum FFT/VAD filtering can discard quiet emergency words. Validate help/fire recall and false alarms before relying on it." -ForegroundColor Yellow
+    Write-Host "[MSDS] Maximum also denoises audible RTSP/WebRTC audio (no duplicate FFT for MediaMTX KWS)." -ForegroundColor Cyan
+    Write-Host "[MSDS] WARNING: Maximum FFT/VAD filtering can discard quiet emergency words and add A/V delay. Validate help/fire recall and lip-sync before relying on it." -ForegroundColor Yellow
   }
   Write-Host "[MSDS] Stable DTW enrollment and source branch unchanged." -ForegroundColor Green
   if (-not $NoLaunch) {
