@@ -55,6 +55,36 @@ def selected_profile() -> str:
     return value
 
 
+def publisher_audio_denoise_enabled() -> bool:
+    """Optional noise suppression on audible MediaMTX/WebRTC output.
+
+    Default OFF preserves the previous livestream and lip-sync behavior.
+    This is enabled by the experimental Maximum launcher only; it must not
+    silently change the stable branch.
+    """
+    return os.environ.get("MSDS_RTSP_AUDIO_DENOISE_PLAYBACK", "0").strip().lower() in (
+        "1", "true", "yes", "on"
+    )
+
+
+def publisher_audio_filter(*, retime: bool = True) -> str:
+    """Encode-path filter at 48 kHz; avoid changing video frame timestamps.
+
+    If playback is denoised, the PCM decoder must not apply FFmpeg FFT again
+    when consuming that local MediaMTX relay. Only direct camera fallbacks
+    should apply pcm_audio_filter() separately.
+    """
+    filters = []
+    if publisher_audio_denoise_enabled():
+        filters.extend([
+            "highpass=f=120", "lowpass=f=4200", PROFILES[selected_profile()],
+            "aresample=48000",
+        ])
+    if retime:
+        filters.append("asetpts=N/SR/TB")
+    return ",".join(filters)
+
+
 def pcm_audio_filter(*, enabled: bool | None = None, profile: str | None = None) -> str:
     """Identical live/offline filter chain, ending in a 16 kHz PCM clock."""
     if enabled is None:
