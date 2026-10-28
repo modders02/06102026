@@ -39,7 +39,7 @@ def hearing_profile() -> str:
     changes VAD sensitivity and framing only; normal is the old default.
     """
     value = os.environ.get("MSDS_KWS_HEARING_PROFILE", "normal").strip().lower()
-    return value if value in ("normal", "far") else "normal"
+    return value if value in ("normal", "far", "adaptive") else "normal"
 
 
 def webrtc_requested() -> bool:
