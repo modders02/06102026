@@ -32,6 +32,16 @@ def robust_mode() -> str:
     return value if value in ("off", "standard", "strong", "maximum") else "off"
 
 
+def hearing_profile() -> str:
+    """Opt-in sensitivity preset for the speech segmenter, not classifier.
+
+    'far' keeps the same open-set keyword model and alert validation. It
+    changes VAD sensitivity and framing only; normal is the old default.
+    """
+    value = os.environ.get("MSDS_KWS_HEARING_PROFILE", "normal").strip().lower()
+    return value if value in ("normal", "far") else "normal"
+
+
 def webrtc_requested() -> bool:
     return robust_mode() != "off" or os.environ.get(
         "MSDS_KWS_WEBRTC_VAD", "0"
