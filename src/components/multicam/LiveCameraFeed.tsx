@@ -53,6 +53,24 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
     });
   }, [addEvent, camera.id, camera.name, camera.location, camera.aiEnabled]);
   const tracingActive = !!video && statusIsOnline(runtime) && camera.aiEnabled;
+  // The object detector already found a real person in the camera frame.
+  // Search the person's upper area at higher resolution to locate an actual
+  // distant face. A PERSON box alone is never displayed as a FACE box.
+  const trackedPerson = (runtime?.objects ?? [])
+    .filter(object => object.label === 'person' && object.confidence >= 0.55)
+    .sort((a, b) => b.confidence - a.confidence)[0];
+  const sourceWidth = runtime?.frameWidth || 320;
+  const sourceHeight = runtime?.frameHeight || (video?.videoWidth
+    ? Math.max(1, Math.round(video.videoHeight / video.videoWidth * sourceWidth))
+    : 180);
+  const personRegion = trackedPerson && sourceWidth > 0 && sourceHeight > 0
+    ? {
+        x: trackedPerson.bbox[0] / sourceWidth,
+        y: trackedPerson.bbox[1] / sourceHeight,
+        width: trackedPerson.bbox[2] / sourceWidth,
+        height: trackedPerson.bbox[3] / sourceHeight,
+      }
+    : null;
   const talk = useCctvTalk(settings.pythonServer, camera.id);
   const stopTalk = talk.stopTalk;
   const status = runtime?.status || 'connecting';
@@ -175,7 +193,7 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
       <div className="relative aspect-video bg-black">
         <div ref={containerRef} className="absolute inset-0" />
         <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full object-contain" />
-        {tracingActive && video && <MotionTraceOverlay video={video} modes={{ face: true, body: false, hands: false }} detail="outline" onMovement={onFaceMovement} />}
+        {tracingActive && video && <MotionTraceOverlay video={video} modes={{ face: true, body: false, hands: false }} detail="outline" personRegion={personRegion} onMovement={onFaceMovement} />}
         {status !== 'online' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/80 px-6 text-center">
             <VideoOff className="h-8 w-8 text-muted-foreground" />
