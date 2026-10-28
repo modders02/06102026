@@ -13,6 +13,23 @@ export const HAPPY_EXPRESSION_MIN_CONFIDENCE = EMOTION_MIN_CONFIDENCE;
 export const HAPPY_SMILE_MIN_ACTIVATION = 0.60;
 
 /**
+ * Suppress the unverified night-vision "fire" snapshot popup/event. IR camera
+ * hotspots can look like fire even when a person sees no flames. Accepted
+ * audio + visual fire fusion uses a separate "Verified fire..." label and
+ * must remain eligible for emergency alerts and recordings.
+ *
+ * Also recognize old persisted events so they disappear from history after
+ * upgrading, without discarding independently verified fire evidence.
+ */
+export function isVisualOnlyNightVisionFireEvent(
+  event: Pick<DetectionEvent, 'type' | 'label' | 'alertValidation'>,
+): boolean {
+  return event.type === 'fire'
+    && /^fire detected \(night vision\)$/i.test(event.label.trim())
+    && event.alertValidation?.status !== 'accepted';
+}
+
+/**
  * Event History logs detector-confirmed incidents AND informational estimates
  * of all seven facial-expression categories. Emotions do not require a matching
  * voice keyword, and never grant permission to alert or notify.
@@ -21,6 +38,7 @@ export const HAPPY_SMILE_MIN_ACTIVATION = 0.60;
  */
 export function isSignificantHistoryEvent(event: EventCandidate): boolean {
   if (!event || !Number.isFinite(event.confidence)) return false;
+  if (isVisualOnlyNightVisionFireEvent(event)) return false;
   if (event.type === 'emotion') {
     return event.confidence >= EMOTION_MIN_CONFIDENCE
       && event.confidence <= 1
