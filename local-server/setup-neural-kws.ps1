@@ -37,7 +37,12 @@ try {
     # On Windows deepfilterlib 0.5.6 is source-distributed. It cannot build
     # without rustc/Cargo and the Microsoft MSVC/Windows SDK linker.
     # Do NOT retry the pip install until its native prerequisites are present.
-    & $venvPython -m pip show deepfilternet *> $null
+    # PowerShell 5.1 + ErrorActionPreference=Stop treats pip's expected
+    # "WARNING: Package(s) not found" stderr as a terminating error.
+    # Use a silent Python metadata query instead; exit 1 means not installed,
+    # NOT a setup failure. Check both packages because the native extension
+    # is the dependency that previously failed mid-install.
+    & $venvPython -c "import sys, importlib.metadata as m; found={str(d.metadata.get('Name','')).lower() for d in m.distributions()}; sys.exit(0 if {'deepfilternet','deepfilterlib'} <= found else 1)"
     $deepFilterInstalled = ($LASTEXITCODE -eq 0)
     if (-not $deepFilterInstalled) {
       Write-Host "[MSDS] Preparing Rust/Cargo and Microsoft C++ build tools for DeepFilterLib." -ForegroundColor Yellow
