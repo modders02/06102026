@@ -82,12 +82,18 @@ def _enhance_16k(audio: np.ndarray) -> np.ndarray:
     if source_rate != 48000:
         raise RuntimeError(f"Unexpected DeepFilterNet sample rate {source_rate}")
     hi = resample_poly(audio, 3, 1).astype(np.float32, copy=False)
+    # Every word is an independent VAD segment. Reset the DSP state so a
+    # preceding word/camera cannot bleed into the current word.
+    if hasattr(state, "reset"):
+        state.reset()
     with torch.inference_mode():
         cleaned = enhance(model, state, torch.from_numpy(hi.copy())[None, :])
     samples = cleaned.detach().cpu().numpy().reshape(-1)
     down = resample_poly(samples, 1, 3).astype(np.float32, copy=False)
     if not np.all(np.isfinite(down)):
         raise RuntimeError("DeepFilterNet produced non-finite audio")
+    if len(down) < len(audio):
+        down = np.pad(down, (0, len(audio) - len(down)))
     return np.clip(down[:len(audio)], -1.0, 1.0)
 
 
