@@ -69,6 +69,13 @@ def _load_spotter():
     return _SPOTTER
 
 
+def _df_model_and_state(loaded: tuple):
+    """Support both historical and current init_df return signatures."""
+    if not isinstance(loaded, tuple) or len(loaded) < 2:
+        raise RuntimeError("DeepFilterNet initialization did not return model and state")
+    return loaded[0], loaded[1]
+
+
 def _enhance_16k(audio: np.ndarray) -> np.ndarray:
     """DeepFilterNet is 48k; preserve sample length via band-limited resampling."""
     global _DF
@@ -77,12 +84,9 @@ def _enhance_16k(audio: np.ndarray) -> np.ndarray:
     from df.enhance import init_df, enhance
     if _DF is None:
         _DF = init_df(model_base_dir="DeepFilterNet3")
-    # DeepFilterNet's init_df returns (model, df_state, suffix, epoch).
-    # Older examples document three values, so accept either without
-    # rejecting a successfully loaded DeepFilterNet3 model.
-    if len(_DF) < 2:
-        raise RuntimeError("DeepFilterNet initialization did not return model and state")
-    model, state = _DF[:2]
+    # DeepFilterNet's init_df returns (model, df_state, suffix, epoch)
+    # in current releases; handle older three-value returns as well.
+    model, state = _df_model_and_state(_DF)
     source_rate = int(state.sr())
     if source_rate != 48000:
         raise RuntimeError(f"Unexpected DeepFilterNet sample rate {source_rate}")
