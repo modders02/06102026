@@ -840,10 +840,17 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
             status: 'accepted', reason: validationReason, keyword: 'fire', emotion: 'visual fire',
           }, true, false, verifiedFire.fire.regionRatio ?? verifiedFire.fire.firePixelRatio);
           visualFireAlertActiveRef.current = true;
+        } else if (fire.nightVisionMode) {
+          // Do not create the false-prone visual-only night-vision fire
+          // snapshot/event. Night-mode IR highlights aren't sufficient
+          // evidence of an emergency. Genuine night fire + an accepted
+          // "fire" keyword still enters the verifiedFire branch above.
+          // Reset the visual-only edge for when the camera exits IR mode.
+          visualFireAlertActiveRef.current = false;
         } else if (!visualFireAlertActiveRef.current) {
           visualFireAlertActiveRef.current = true;
           const waitingReason = 'Visual fire confirmed; waiting for an accepted "fire" safety keyword.';
-          emit('fire', fire.nightVisionMode ? 'Fire detected (night vision)' : 'Fire detected', fire.confidence, {
+          emit('fire', 'Fire detected', fire.confidence, {
             status: 'pending', reason: waitingReason, keyword: '', emotion: 'visual fire',
           }, true);
           const currentValidation = runtimeRef.current.alertValidation;
