@@ -1,5 +1,8 @@
 # Far Hearing KWS: quieter and more distant CCTV speech (28 October 2026)
 
+> **Recovery branch note (28 October 2026):** The previous aggressive default presets may lose quiet words. On `fix/kws-speech-preservation-diagnostics-20261028`, this launcher now starts with **DTW-only, standard noise filtering and normal hearing**, not neural shadow / maximum / far. See `docs/kws-audio-reliability-recovery-20261028.md` for the recommended first test and raw baseline.
+
+
 **Experimental branch:** `experiment/deepfilternet-sherpa-kws-20261028`  
 **Stable branch:** `stable_branch_271026` (unchanged)
 
