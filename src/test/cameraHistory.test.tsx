@@ -65,6 +65,33 @@ afterEach(() => {
 });
 
 describe('single active Camera Alert with bounded Event History', () => {
+  it('migrates away old visual-only night-vision fire snapshots but keeps verified fire', () => {
+    const falseNight = event(1, 'fire', {
+      label: 'Fire detected (night vision)',
+      confidence: 1,
+      snapshot: 'data:image/jpeg;base64,night',
+      alertValidation: {
+        status: 'pending', keyword: '', emotion: 'visual fire',
+        reason: 'Waiting for accepted keyword',
+      },
+    });
+    const verified = event(2, 'fire', {
+      label: 'Verified fire: visual fire + "fire"',
+      snapshot: 'data:image/jpeg;base64,verified',
+    });
+    localStorage.setItem('msd-detection-events-v1', JSON.stringify([falseNight, verified]));
+    const history = loadEventHistory();
+    expect(history.events.map(item => item.id)).toEqual([verified.id]);
+    expect(JSON.parse(localStorage.getItem('msd-detection-events-v1')!)
+      .map((item: DetectionEvent) => item.id)).toEqual([verified.id]);
+
+    const registry = renderHook(useCameraRegistry);
+    act(() => registry.result.current.addEvent({
+      ...falseNight, id: 'new-night-vision-false-positive',
+    }));
+    expect(loadEventHistory().events.map(item => item.id)).toEqual([verified.id]);
+  });
+
   it('retains older fire records without size evidence as history with their images intact', () => {
     const legacy = event(1, 'fire', { fireRegionRatio: undefined, snapshot: 'data:image/jpeg;base64,legacy' });
     localStorage.setItem('msd-camera-alerts-v1', JSON.stringify([legacy]));
