@@ -1391,6 +1391,13 @@ class Camera:
                 "vad_end_rms": round(self.kws_segmenter.last_end_rms, 5),
                 "vad_max_length_drops": self.kws_segmenter.max_length_drops,
                 "vad_backend": self.kws_segmenter.vad_backend,
+                "hearing_profile": self.kws_segmenter.hearing_profile,
+                "vad_start_confirm_frames": self.kws_segmenter.start_confirm_frames,
+                "vad_min_speech_seconds": self.kws_segmenter.min_speech_seconds,
+                "vad_preroll_seconds": self.kws_segmenter.pre_roll_seconds,
+                "vad_speech_energy_gate": round(
+                    self.kws_segmenter.last_webrtc_energy_gate, 5
+                ),
                 "vad_last_speech_frame": self.kws_segmenter.last_speech_frame,
                 "audio_denoise_enabled": denoise_enabled(),
                 "audio_noise_profile": selected_profile(),
