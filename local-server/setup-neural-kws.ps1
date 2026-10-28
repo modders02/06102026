@@ -51,8 +51,13 @@ try {
     Invoke-Checked "Installing MSDS Python server dependencies" {
       & $venvPython -m pip install --timeout 120 --retries 10 -r (Join-Path $PSScriptRoot "requirements.txt")
     }
-    Invoke-Checked "Installing CPU PyTorch (needed by DeepFilterNet3)" {
-      & $venvPython -m pip install --timeout 120 --retries 10 --index-url "https://download.pytorch.org/whl/cpu" torch torchaudio
+    Invoke-Checked "Installing matched CPU PyTorch/torchaudio 2.5.1 for DeepFilterNet3" {
+      # DeepFilterNet 0.5.6 imports torchaudio.backend.common.AudioMetaData.
+      # Newer torchaudio releases removed that legacy module, causing an
+      # ImportError before the enhancement model can load. Pin BOTH halves
+      # to the same official PyTorch CPU release. Windows CPython 3.12
+      # wheels are available for this version.
+      & $venvPython -m pip install --timeout 120 --retries 10 --index-url "https://download.pytorch.org/whl/cpu" "torch==2.5.1" "torchaudio==2.5.1"
     }
     Invoke-Checked "Installing DeepFilterNet, sherpa-onnx, SciPy and keyword tokenizer dependencies" {
       # The sherpa-onnx 2.0.1 text2token function eagerly imports both
@@ -60,6 +65,13 @@ try {
       # Both are optional undeclared dependencies of the CLI.
       & $venvPython -m pip install --timeout 120 --retries 10 deepfilternet sherpa-onnx scipy sentencepiece pypinyin
     }
+  }
+
+  # The legacy torchaudio.backend import is required by DeepFilterNet
+  # 0.5.6. Probe at every launch, including -SkipInstall, to detect a later
+  # environment upgrade before downloading/loading any neural model.
+  Invoke-Checked "Checking DeepFilterNet/PyTorch compatibility" {
+    & $venvPython -W ignore -c "import torch, torchaudio; from torchaudio.backend.common import AudioMetaData; expected='2.5.1'; a=torch.__version__.split('+')[0]; b=torchaudio.__version__.split('+')[0]; assert a == b == expected, f'Expected matched {expected}, found torch={a}, torchaudio={b}. Rerun without -SkipInstall'; print('torch', a, '| torchaudio', b, '| DeepFilterNet legacy audio metadata: OK')"
   }
 
   # Keyword generation must also work with -SkipInstall. Check it up front
