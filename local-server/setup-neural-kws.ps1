@@ -10,14 +10,16 @@ param(
   [ValidateSet("normal", "far")][string]$HearingProfile = "far",
   # Additional HELP re-evaluation: default shadow never changes alert outcomes.
   [ValidateSet("off", "shadow", "strict")][string]$FarRecheck = "shadow",
-  # Optional NumPy wavefront DTW speed experiment; baseline remains default.
-  [switch]$FastDtw,
   [switch]$SkipInstall,
   [switch]$NoLaunch
 )
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$venvPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+# A separate GPU virtual environment prevents replacing the existing CPU
+# environment or changing stable-branch dependencies.
+$venvPython = Join-Path $PSScriptRoot ".gpu-venv\Scripts\python.exe"
+$env:MSDS_REQUIRE_CUDA = "1"
+$env:MSDS_PYTHON_EXE = $venvPython
 $modelsDir = Join-Path $PSScriptRoot "models"
 $modelName = "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"
 $modelDir = Join-Path $modelsDir $modelName
@@ -32,15 +34,24 @@ function Invoke-Checked([string]$Description, [scriptblock]$Action) {
 
 Push-Location $root
 try {
+  if (-not (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) {
+    throw "GPU-only MSDS needs NVIDIA drivers and nvidia-smi. NVIDIA CUDA hardware is mandatory; no CPU fallback."
+  }
+  $detectedGpu = & nvidia-smi --query-gpu=name --format=csv,noheader
+  if ($LASTEXITCODE -ne 0 -or -not $detectedGpu) {
+    throw "No working NVIDIA CUDA GPU was detected. GPU-only mode cannot start."
+  }
+  Write-Host "[MSDS] CUDA-required GPU hardware: $($detectedGpu | Select-Object -First 1)" -ForegroundColor Green
   if (-not (Test-Path $venvPython)) {
-    $pythonCmd = Get-Command py -ErrorAction SilentlyContinue
-    if ($pythonCmd) {
-      Invoke-Checked "Creating local Python environment" { py -3 -m venv (Join-Path $PSScriptRoot ".venv") }
-    } else {
-      Invoke-Checked "Creating local Python environment" { python -m venv (Join-Path $PSScriptRoot ".venv") }
+    if ($SkipInstall) { throw "GPU environment not installed; first run without -SkipInstall to create the isolated .gpu-venv." }
+    if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
+      throw "Python 3.12 launcher (py.exe) missing. Install 64-bit Python 3.12 first."
+    }
+    Invoke-Checked "Creating isolated CUDA Python 3.12 environment" {
+      py -3.12 -m venv (Join-Path $PSScriptRoot ".gpu-venv")
     }
   }
-  if (-not (Test-Path $venvPython)) { throw "Python venv was not created at $venvPython" }
+  if (-not (Test-Path $venvPython)) { throw "GPU virtual environment was not created at $venvPython" }
 
   if (-not $SkipInstall) {
     # On Windows deepfilterlib 0.5.6 is source-distributed. It cannot build
@@ -60,27 +71,25 @@ try {
     Invoke-Checked "Installing MSDS Python server dependencies" {
       & $venvPython -m pip install --timeout 120 --retries 10 -r (Join-Path $PSScriptRoot "requirements.txt")
     }
-    Invoke-Checked "Installing matched CPU PyTorch/torchaudio 2.5.1 for DeepFilterNet3" {
-      # DeepFilterNet 0.5.6 imports torchaudio.backend.common.AudioMetaData.
-      # Newer torchaudio releases removed that legacy module, causing an
-      # ImportError before the enhancement model can load. Pin BOTH halves
-      # to the same official PyTorch CPU release. Windows CPython 3.12
-      # wheels are available for this version.
-      & $venvPython -m pip install --timeout 120 --retries 10 --index-url "https://download.pytorch.org/whl/cpu" "torch==2.5.1" "torchaudio==2.5.1"
+    Invoke-Checked "Installing DeepFilterNet, SciPy and English keyword dependencies" {
+      & $venvPython -m pip install --timeout 120 --retries 10 deepfilternet scipy sentencepiece pypinyin
     }
-    Invoke-Checked "Installing DeepFilterNet, sherpa-onnx, SciPy and keyword tokenizer dependencies" {
-      # The sherpa-onnx 2.0.1 text2token function eagerly imports both
-      # sentencepiece and pypinyin, EVEN with --tokens-type bpe (English).
-      # Both are optional undeclared dependencies of the CLI.
-      & $venvPython -m pip install --timeout 120 --retries 10 deepfilternet sherpa-onnx scipy sentencepiece pypinyin
+    Invoke-Checked "Installing required matched CUDA 12.4 torch/torchaudio 2.5.1" {
+      & $venvPython -m pip install --timeout 120 --retries 10 --index-url "https://download.pytorch.org/whl/cu124" "torch==2.5.1" "torchaudio==2.5.1"
+    }
+    Invoke-Checked "Installing CUDA-enabled sherpa-onnx (CUDA 12 / cuDNN 9)" {
+      & $venvPython -m pip install --timeout 120 --retries 10 "sherpa-onnx==2.0.1+cuda12.cudnn9" -f "https://k2-fsa.github.io/sherpa/onnx/cuda.html"
     }
   }
 
   # The legacy torchaudio.backend import is required by DeepFilterNet
   # 0.5.6. Probe at every launch, including -SkipInstall, to detect a later
   # environment upgrade before downloading/loading any neural model.
-  Invoke-Checked "Checking DeepFilterNet/PyTorch compatibility" {
-    & $venvPython -W ignore -c "import torch, torchaudio; from torchaudio.backend.common import AudioMetaData; expected='2.5.1'; a=torch.__version__.split('+')[0]; b=torchaudio.__version__.split('+')[0]; assert a == b == expected, f'Expected matched {expected}, found torch={a}, torchaudio={b}. Rerun without -SkipInstall'; print('torch', a, '| torchaudio', b, '| DeepFilterNet legacy audio metadata: OK')"
+  Invoke-Checked "Checking CUDA-only PyTorch, matching torchaudio and CUDA compute" {
+    & $venvPython -W ignore -c "import torch, torchaudio; from torchaudio.backend.common import AudioMetaData; from msds.neural_kws_trial import require_cuda; v='2.5.1'; assert torch.__version__.split('+')[0]==torchaudio.__version__.split('+')[0]==v; assert '+cu' in torch.__version__ and '+cu' in torchaudio.__version__, 'CPU-only torch detected; reinstall CUDA packages without -SkipInstall'; print('GPU:', require_cuda(), '| torch:',torch.__version__,'| torchaudio:',torchaudio.__version__)"
+  }
+  Invoke-Checked "Checking sherpa CUDA wheel rather than CPU-only package" {
+    & $venvPython -c "import sherpa_onnx; v=sherpa_onnx.__version__; assert '+cuda12.cudnn9' in v, f'CPU-only or incorrect sherpa version: {v}'; print('sherpa-onnx GPU:', v)"
   }
 
   # Keyword generation must also work with -SkipInstall. Check it up front
@@ -119,7 +128,7 @@ try {
     "DANGER @DANGER", "INTRUDER @INTRUDER", "POLICE @POLICE",
     "AMBULANCE @AMBULANCE") |
     Set-Content -Path $keywordsRaw -Encoding ASCII
-  $cli = Join-Path $PSScriptRoot ".venv\Scripts\sherpa-onnx-cli.exe"
+  $cli = Join-Path $PSScriptRoot ".gpu-venv\Scripts\sherpa-onnx-cli.exe"
   if (-not (Test-Path $cli)) {
     $command = Get-Command sherpa-onnx-cli -ErrorAction SilentlyContinue
     if ($command) { $cli = $command.Source }
@@ -140,7 +149,7 @@ try {
     Invoke-Checked "Loading sherpa-onnx English model" {
       & $venvPython -c "from msds.neural_kws_trial import _load_spotter; _load_spotter(); print('sherpa-onnx: ready')"
     }
-    Invoke-Checked "Downloading/loading DeepFilterNet3 and testing CPU enhancement" {
+    Invoke-Checked "Loading DeepFilterNet3 on CUDA and testing GPU enhancement" {
       & $venvPython -c "import numpy as np; from msds.neural_kws_trial import _enhance_16k; x=_enhance_16k(np.zeros(16000,dtype=np.float32)); assert len(x)==16000; print('DeepFilterNet3: ready')"
     }
   } finally { Pop-Location }
@@ -162,7 +171,7 @@ try {
   $env:MSDS_KWS_WEBRTC_VAD = "1"
   $env:MSDS_KWS_HEARING_PROFILE = $HearingProfile
   $env:MSDS_KWS_FAR_RECHECK = $FarRecheck
-  $env:MSDS_KWS_FAST_DTW = $(if ($FastDtw) { "1" } else { "0" })
+  $env:MSDS_KWS_FAST_DTW = "0"  # CUDA DTW is unconditional; NumPy accelerator is not used
   # WebRTC mode 1 listens more readily for quiet/far voices than mode 3.
   # Retain the prior strict mode 3 for maximum + normal, with a one-command rollback.
   $env:MSDS_KWS_WEBRTC_MODE = $(if ($HearingProfile -eq "far") { "1" } elseif ($NoiseProfile -eq "maximum") { "3" } else { "2" })
@@ -181,7 +190,7 @@ try {
     Write-Host "[MSDS] WARNING: Maximum FFT/VAD filtering can discard quiet emergency words and add A/V delay. Validate help/fire recall and lip-sync before relying on it." -ForegroundColor Yellow
   }
   Write-Host "[MSDS] Far-field keyword recheck=$FarRecheck (shadow is diagnostic-only; strict is experimental and needs holdout validation)." -ForegroundColor Cyan
-  Write-Host "[MSDS] Experimental fast DTW=$env:MSDS_KWS_FAST_DTW (identical matching policy, optimized wavefront calculation)." -ForegroundColor Cyan
+  Write-Host "[MSDS] GPU-required: NVIDIA CUDA for DTW, DeepFilterNet3 and sherpa-onnx; no CPU inference fallback." -ForegroundColor Green
   Write-Host "[MSDS] Stable DTW enrollment and source branch unchanged." -ForegroundColor Green
   if (-not $NoLaunch) {
     if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
