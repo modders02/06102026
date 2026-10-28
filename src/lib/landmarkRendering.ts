@@ -38,7 +38,11 @@ export function usableFaceLandmarks(points: readonly TracePoint[]): boolean {
     minY = Math.min(minY, point.y);
     maxY = Math.max(maxY, point.y);
   }
-  return maxX - minX > 0.035 && maxY - minY > 0.045;
+  // The original 3.5%-of-frame width / 4.5%-height requirement
+  // rejected legitimate distant faces before drawing any box. Geometry
+  // validation still rejects coincident/invalid points; source detector
+  // confidence, not this size cutoff, determines whether a face exists.
+  return maxX - minX > 0.008 && maxY - minY > 0.012;
 }
 
 export const FACE_68_CONNECTIONS: TraceConnection[] = [
