@@ -238,7 +238,11 @@ export function faceLandmarkBounds(
   const top = rect.y + ys[lo] * rect.height;
   const width = (xs[hi] - xs[lo]) * rect.width;
   const height = (ys[hi] - ys[lo]) * rect.height;
-  if (width < rect.width * 0.02 || height < rect.height * 0.02
+  // At 1920px CCTV resolution a genuinely distant 20-35px face may be
+  // <2% of the frame. The older fixed 2% cutoff discarded usable landmarks
+  // even when face detection succeeded. Keep a pixel-floor + sane max size.
+  if (width < Math.max(8, rect.width * 0.008)
+      || height < Math.max(8, rect.height * 0.008)
       || width > rect.width * 0.90 || height > rect.height * 0.90) return null;
   return { x: left, y: top, width, height };
 }
@@ -281,6 +285,42 @@ export function drawSolidFaceBox(
   ctx.fillRect(bounds.x, labelY, textWidth, 21);
   ctx.fillStyle = color;
   ctx.fillText(label, bounds.x + 6, labelY + 15);
+  ctx.restore();
+  return true;
+}
+
+/** Render only a high-confidence face detector's actual bounding box.
+ * Never draw an inferred face box from an object/person bounding box.
+ * Detector-only boxes are for the overlay, not for mood or emergency fusion.
+ */
+export function drawDetectedFaceBox(
+  ctx: CanvasRenderingContext2D,
+  box: TraceRect,
+  rect: TraceRect,
+  color = '#22d3ee',
+): boolean {
+  if (![box.x, box.y, box.width, box.height].every(Number.isFinite)
+      || box.x < -0.02 || box.y < -0.02
+      || box.width <= 0 || box.height <= 0
+      || box.x + box.width > 1.02 || box.y + box.height > 1.02) return false;
+  const x = rect.x + box.x * rect.width;
+  const y = rect.y + box.y * rect.height;
+  const width = box.width * rect.width;
+  const height = box.height * rect.height;
+  if (width < 8 || height < 8) return false;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.5;
+  ctx.setLineDash([]);
+  ctx.strokeRect(x, y, width, height);
+  const label = 'FACE (detected)';
+  ctx.font = 'bold 12px sans-serif';
+  const labelWidth = ctx.measureText(label).width + 12;
+  const labelY = Math.max(rect.y, y - 22);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.78)';
+  ctx.fillRect(x, labelY, labelWidth, 20);
+  ctx.fillStyle = color;
+  ctx.fillText(label, x + 6, labelY + 14);
   ctx.restore();
   return true;
 }
