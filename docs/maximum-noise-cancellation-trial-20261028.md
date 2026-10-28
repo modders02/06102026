@@ -3,6 +3,10 @@
 **Experimental branch:** `experiment/deepfilternet-sherpa-kws-20261028`  
 **Stable branch:** `stable_branch_271026` (not changed)
 
+The launcher now includes a separate **Far Hearing** mode for quiet/distant
+words (default), documented in
+`docs/far-hearing-kws-20261028.md`. This is separate from FFT filtering.
+
 This is a **maximum-suppression experimental mode**, not a guarantee of improved
 word-recognition accuracy. Very aggressive denoising may erase `help`, `fire`,
 and other short emergency words. Compare measured recall and false positives
@@ -22,8 +26,11 @@ For this experimental launcher's CCTV audio:
    `nr=97` is FFmpeg's **maximum configurable value**, not a measured
    guarantee of 97 dB real-world noise reduction. Enrollment templates
    remain unchanged.
-3. **Voice activity detection:** WebRTC VAD mode **3** (most aggressive).
-   This is a classifier, not a noise remover, and may reject quiet words.
+3. **Voice activity detection:** The newer Far Hearing preset (default
+   for this experimental launcher) uses WebRTC VAD mode **1** for better
+   detection of quiet/distant speech. Use `-HearingProfile normal` to restore
+   the original mode **3** Maximum configuration. The VAD is a speech
+   classifier, not a noise remover.
 4. **Neural comparison (shadow mode):** DeepFilterNet3 processes each
    accepted VAD segment at 48 kHz using `atten_lim_db=None` (unlimited
    model suppression). Output is resampled to 16 kHz for sherpa-onnx.
@@ -100,9 +107,11 @@ $cam.audio.custom_kws |
         neural_processing_ms,neural_last_error
 ```
 
-Expected **configured** maximum: `audio_robust_mode=maximum`,
+Expected **configured** Maximum + Far Hearing:
+`audio_robust_mode=maximum`,
 `audio_denoise_enabled=True`, `publisher_audio_denoise_enabled=True`,
-`publisher_noise_profile=maximum`, `vad_backend=webrtc-3`,
+`publisher_noise_profile=maximum`, `hearing_profile=far`,
+`vad_backend=webrtc-1` (or `webrtc-3` if using `-HearingProfile normal`),
 `neural_enhancement_strength=maximum` and a **null**
 `neural_attenuation_limit_db` (meaning no model attenuation cap).
 These configuration flags do not certify actual acoustic performance.
