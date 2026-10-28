@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "local-server"))
 
 from msds.camera import Camera  # noqa: E402
+from msds.config import RTSP_PORT  # noqa: E402
 
 
 class RtspAudioTimestampTests(unittest.TestCase):
@@ -29,7 +30,7 @@ class RtspAudioTimestampTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("-map") + 1], "0:v:0")
         self.assertIn("0:a:0?", cmd)
         self.assertIn("-vf", cmd)
-        self.assertEqual(cmd[-1], "rtsp://127.0.0.1:8554/cam1")
+        self.assertEqual(cmd[-1], f"rtsp://127.0.0.1:{RTSP_PORT}/cam1")
 
     def test_can_opt_out_for_cameras_with_audio_video_sync_problems(self):
         for value in ("0", "off", "false", "no"):
