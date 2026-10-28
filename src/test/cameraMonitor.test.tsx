@@ -520,8 +520,8 @@ describe('camera snapshots and page-scoped playback', () => {
     ['sad', 'Sad', true, 'Sad'],
     ['angry', 'Angry', true, 'Angry'],
     ['fearful', 'Frightened', true, 'Frightened'],
-    // History preserves the expression class; safety fusion maps separately.
-    ['surprised', 'Surprised', true, 'Frightened'],
+    // Surprise is not evidence of fear: record display-only history.
+    ['surprised', 'Surprised', false, ''],
     ['neutral', 'Neutral', false, ''],
     ['disgusted', 'Disgust', false, ''],
   ] as const)('records %s as a non-alert emotion event', async (expression, label, distressDetected, distressLabel) => {
@@ -578,8 +578,6 @@ describe('camera snapshots and page-scoped playback', () => {
   it.each([
     ['angry', 'help me', 'help', 'Angry'],
     ['fearful', 'help me', 'help', 'Frightened'],
-    ['surprised', 'help me', 'help', 'Frightened'],
-    ['shock', 'help me', 'help', 'Frightened'],
     ['fearful', 'emergency', 'emergency', 'Frightened'],
     ['angry', 'danger', 'danger', 'Angry'],
     ['fearful', 'danger', 'danger', 'Frightened'],
@@ -894,20 +892,26 @@ describe('camera snapshots and page-scoped playback', () => {
     expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'multimodal-distress' }));
   });
 
-  it('treats configured surprised + help as Frightened + help', async () => {
-    mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
-    mocked.analyzeFace.mockImplementationOnce(async () => {
-      mocked.distress = { hasFace: true, expression: 'surprised', probability: 0.95, distressScore: 90, distressLevel: 'severe' };
-    });
-    const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
-    const onEvent = vi.fn();
-    render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
-    await act(async () => {});
-    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'multimodal-distress',
-      label: 'Verified distress: Frightened + "help"',
-    }));
-  });
+  it.each(['surprised', 'shock'])(
+    'never promotes %s + accepted help to Frightened or an emergency alert',
+    async expression => {
+      mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
+      mocked.analyzeFace.mockImplementationOnce(async () => {
+        mocked.distress = { hasFace: true, expression, probability: 0.95, distressScore: 90, distressLevel: 'severe' };
+      });
+      const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
+      const onEvent = vi.fn();
+      render(<CameraMonitor slot={slot} monitoring playbackEnabled={false} onEvent={onEvent} />);
+      await act(async () => {});
+      expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'emotion', label: 'Surprised',
+      }));
+      expect(onEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+        type: 'multimodal-distress',
+      }));
+      expect(getCameraSession('slot-1').runtime?.alerts).toBe(0);
+    },
+  );
 
   it('does not alarm on help without Angry or Frightened', async () => {
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [helpSafetyEvent], status: null });
