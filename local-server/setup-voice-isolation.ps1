@@ -83,7 +83,7 @@ try {
   # confidence/margin/UNKNOWN threshold is changed.
   $env:MSDS_KWS_WEBRTC_VAD = $(if ($VoiceMode -eq "off") { "0" } else { "1" })
   $env:MSDS_KWS_WEBRTC_MODE = "2"
-  Write-Host "[MSDS] Voice isolation=$VoiceMode: RNNoise at 48 kHz -> 16 kHz original trained DTW." -ForegroundColor Green
+  Write-Host "[MSDS] Voice isolation=${VoiceMode}: RNNoise at 48 kHz -> 16 kHz original trained DTW." -ForegroundColor Green
   Write-Host "[MSDS] Existing enrollment templates and safety rules unchanged." -ForegroundColor Green
   if ($VoiceMode -ne "off") {
     Write-Host "[MSDS] Noise suppression may cut off quiet syllables or leave some noise. Test the live microphone and English words." -ForegroundColor Yellow
