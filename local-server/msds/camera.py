@@ -26,7 +26,7 @@ from .config import (AUDIO_CHUNK_SECONDS, AUDIO_ENGINE, HLS_PORT, HLS_PROBE_TTL,
                      VIDEO_THREADS, WEBRTC_PORT, match_distress)
 from .kws_engine import KWS_ENGINE, StreamingSpeechSegmenter
 from .kws_audio_filters import denoise_enabled, selected_profile, pcm_audio_filter, robust_mode, webrtc_requested
-from .neural_kws_trial import neural_mode, detect_keyword
+from .neural_kws_trial import neural_mode, neural_attenuation_limit_db, detect_keyword
 from . import kws_verifier
 
 # Presentation/runtime configuration is custom-only, so importing this module
@@ -1387,6 +1387,10 @@ class Camera:
                 "audio_robust_mode": robust_mode(),
                 "vad_webrtc_requested": webrtc_requested(),
                 "neural_mode": neural_mode(),
+                "neural_enhancement_strength": os.environ.get(
+                    "MSDS_KWS_NEURAL_STRENGTH", "maximum"
+                ).strip().lower(),
+                "neural_attenuation_limit_db": neural_attenuation_limit_db(),
                 "neural_candidate": self.kws_neural_candidate or None,
                 "neural_processing_ms": self.kws_neural_processing_ms,
                 "neural_last_error": self.kws_neural_last_error,
