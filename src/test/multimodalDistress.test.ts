@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { historyEmotionMeta } from '@/lib/emotionEvents';
 import {
   DISTRESS_FACE_MIN_CONFIDENCE,
   MULTIMODAL_FUSION_WINDOW_MS,
@@ -125,6 +126,22 @@ describe('multimodal distress fusion', () => {
       }
     },
   );
+
+  it('keeps the camera alert and Event History consistent for a surprise-only frame', () => {
+    const label = 'surprised';
+    const confidence = 0.60; // reported in the original CCTV screenshot
+    const emotionEvent = historyEmotionMeta(label);
+    expect(emotionEvent?.label).toBe('Surprised');
+    expect(emotionEvent?.emotion).toBe('surprised');
+    const evidence = makeDistressFaceSignal(label, confidence, 1_000);
+    const keyword = makeDistressSpeechSignal('emergency', 0.79, 1_200);
+    expect(evidence).toBeNull();
+    expect(fuseDistressSignals(evidence, keyword)).toBeNull();
+    // A genuine fear reading remains eligible with the same parameters.
+    expect(fuseDistressSignals(
+      makeDistressFaceSignal('fearful', confidence, 1_000), keyword,
+    )?.face.label).toBe('Frightened');
+  });
 
   it('keeps frightened and surprised signals distinct despite matching confidence', () => {
     const help = makeDistressSpeechSignal('help', 0.90, 2000);
