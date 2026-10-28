@@ -12,25 +12,33 @@ before any real-world use. Keep alerts/notifications in supervised test mode.
 
 For this experimental launcher's CCTV audio:
 
-1. **Live 16-kHz DTW input:** FFmpeg high-pass 120 Hz, low-pass 4.2 kHz,
-   `afftdn=nr=97:nf=-30:tn=1`, continuous 16 kHz sample clock.
-   FFT noise reduction `nr=97` is the **maximum configurable value** that
-   the FFmpeg `afftdn` filter accepts. It does **not** imply a real
-   97 dB reduction in every room. Existing enrolled DTW templates are
-   never rewritten.
-2. **Voice activity detection:** WebRTC VAD mode **3** (most aggressive
-   classification). This is a gate on potential speech, not a denoiser.
-   It can reject whispered/quiet keywords.
-3. **Experimental neural shadow comparator:** DeepFilterNet3 processes
-   each VAD segment at 48 kHz (resampled from 16 kHz) using
-   `enhance(..., atten_lim_db=None)` — **no model attenuation cap**.
-   The enhanced clip is returned to 16 kHz and evaluated by sherpa-onnx.
-   Neural `shadow` does NOT directly publish safety alerts.
-4. **Diagnostics:** `audio_noise_profile`, `audio_robust_mode`,
-   `vad_backend`, `neural_enhancement_strength`, and
-   `neural_attenuation_limit_db` show what is configured and loaded.
-   `neural_candidate`, `neural_processing_ms` and
-   `neural_last_error` show actual model operation.
+1. **Audible CCTV / MediaMTX/WebRTC stream:** The experimental Maximum
+   launcher enables FFmpeg high-pass 120 Hz, low-pass 4.2 kHz, and
+   `afftdn=nr=97:nf=-30:tn=1` on 48-kHz Opus playback audio.
+2. **Live 16-kHz DTW input:** When KWS reads that already denoised MediaMTX
+   stream, its PCM decoder **skips the second FFT filter** to avoid
+   destructive double processing. When it uses the original camera
+   directly as fallback, its PCM decoder runs the maximum FFT filter once.
+   `nr=97` is FFmpeg's **maximum configurable value**, not a measured
+   guarantee of 97 dB real-world noise reduction. Enrollment templates
+   remain unchanged.
+3. **Voice activity detection:** WebRTC VAD mode **3** (most aggressive).
+   This is a classifier, not a noise remover, and may reject quiet words.
+4. **Neural comparison (shadow mode):** DeepFilterNet3 processes each
+   accepted VAD segment at 48 kHz using `atten_lim_db=None` (unlimited
+   model suppression). Output is resampled to 16 kHz for sherpa-onnx.
+   Shadow mode cannot directly generate an emergency alert.
+5. **Runtime diagnostics:** `audio_robust_mode`, `audio_noise_profile`,
+   `publisher_audio_denoise_enabled`, `publisher_noise_profile`,
+   `vad_backend`, `neural_mode`, `neural_enhancement_strength`,
+   `neural_attenuation_limit_db`, `neural_candidate`,
+   `neural_processing_ms`, and `neural_last_error`.
+
+**Audio/video sync risk:** FFT denoising on the RTSP publisher takes
+processing time and may delay the audible feed relative to video. Test
+speech and lip movements together. If the audible stream lags, close
+MSDS and start with `-NoiseProfile strong`, which disables publisher
+filtering while keeping 24-dB FFT reduction on the KWS PCM path.
 
 **Architecture limitation:** DeepFilterNet3 runs **after** speech segmentation,
 not on the continuous pre-VAD stream. Maximum FFT suppression therefore
@@ -86,13 +94,15 @@ $st = Invoke-RestMethod "http://127.0.0.1:5000/status"
 $cam = $st.cameras | Where-Object id -eq "slot-1"
 $cam.audio.custom_kws |
     Select-Object audio_robust_mode,audio_denoise_enabled,audio_noise_profile,
+        publisher_audio_denoise_enabled,publisher_noise_profile,
         vad_backend,neural_mode,neural_enhancement_strength,
         neural_attenuation_limit_db,neural_candidate,
         neural_processing_ms,neural_last_error
 ```
 
 Expected **configured** maximum: `audio_robust_mode=maximum`,
-`audio_denoise_enabled=True`, `vad_backend=webrtc-3`,
+`audio_denoise_enabled=True`, `publisher_audio_denoise_enabled=True`,
+`publisher_noise_profile=maximum`, `vad_backend=webrtc-3`,
 `neural_enhancement_strength=maximum` and a **null**
 `neural_attenuation_limit_db` (meaning no model attenuation cap).
 These configuration flags do not certify actual acoustic performance.
@@ -102,6 +112,7 @@ These configuration flags do not certify actual acoustic performance.
 ```powershell
 & ".\local-server\.venv\Scripts\python.exe" -m unittest discover -s ".\local-server\tests" -p "test_kws_robust_experiment.py" -v
 & ".\local-server\.venv\Scripts\python.exe" -m unittest discover -s ".\local-server\tests" -p "test_neural_kws_trial.py" -v
+& ".\local-server\.venv\Scripts\python.exe" -m unittest discover -s ".\local-server\tests" -p "test_rtsp_audio_timestamp.py" -v
 
 # Holdout files must be NEW WAVs, not enrollment examples.
 & ".\local-server\.venv\Scripts\python.exe" ".\local-server\compare_kws_snr.py" `
