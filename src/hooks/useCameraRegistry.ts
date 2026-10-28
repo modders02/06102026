@@ -4,7 +4,7 @@ import {
   archiveCameraAlert, isCameraAlert, makeCamera, revokeUnusedEventClips, type CameraEventHistory,
 } from '@/lib/cameraRegistry';
 import { captureCameraEventSnapshot } from '@/lib/cameraEventSnapshot';
-import { EMOTION_EVENT_COOLDOWN_MS, isIndependentVisualHistoryEvent } from '@/lib/significantEvents';
+import { EMOTION_EVENT_COOLDOWN_MS, isIndependentVisualHistoryEvent, isVisualOnlyNightVisionFireEvent } from '@/lib/significantEvents';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
 import type { CameraConfig, DetectionEvent, MultiCamSettings } from '@/types/multicam';
 
@@ -69,6 +69,10 @@ export function useCameraRegistry() {
   }, []);
 
   const addEvent = useCallback((evt: DetectionEvent) => {
+    // Visual-only IR/night-vision "fire" is not a Camera Alert. Do not
+    // capture, persist, email, or surface its misleading 100% snapshot.
+    // Validated fire + accepted keyword remains processed normally.
+    if (isVisualOnlyNightVisionFireEvent(evt)) return;
     const current = loadEventHistory();
     if ([...current.events, ...current.alertEvents].some(event => event.id === evt.id)) {
       // Repeated/stale emissions must not recapture the accepted frame or
