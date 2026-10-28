@@ -97,6 +97,9 @@ class NeuralKwsTrialTests(unittest.TestCase):
         self.assertIn("import sentencepiece, pypinyin", installer)
         self.assertIn("HELP @HELP", installer)
         self.assertIn("AMBULANCE @AMBULANCE", installer)
+        self.assertIn('"torch==2.5.1" "torchaudio==2.5.1"', installer)
+        self.assertIn("from torchaudio.backend.common import AudioMetaData", installer)
+        self.assertIn('Expected matched {expected}', installer)
 
 
     def test_exact_english_word_only_and_padding(self):
