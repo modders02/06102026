@@ -143,9 +143,12 @@ class StreamingSpeechSegmenter:
         # threshold, UNKNOWN veto, class margins and duration-ratio checks
         # remain identical to normal mode.
         self.start_confirm_frames = 2 if far else self.START_CONFIRM_FRAMES
-        self.pre_roll_seconds = 0.20 if far else PRE_ROLL_SECONDS
-        self.min_speech_seconds = 0.26 if far else MIN_SPEECH_SECONDS
-        self.end_silence_seconds = 0.28 if far else END_SILENCE_SECONDS
+        # Excessive pre-roll pads DTW samples with ambient sound, changing
+        # the observed length relative to enrolled templates.
+        self.pre_roll_seconds = PRE_ROLL_SECONDS
+        # Maintain duration invariants for existing manually enrolled words.
+        self.min_speech_seconds = MIN_SPEECH_SECONDS
+        self.end_silence_seconds = END_SILENCE_SECONDS
         self.webrtc_min_rms = 0.0035 if far else 0.007
         self.webrtc_floor_ratio = 1.03 if far else 1.08
         self.last_webrtc_energy_gate = self.webrtc_min_rms
