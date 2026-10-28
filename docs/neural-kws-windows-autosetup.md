@@ -159,6 +159,12 @@ real recorded holdout evaluation.
   detects this and runs `ensure-neural-build-tools.ps1` automatically.
   Run `.\\start-neural-kws.cmd` again after updating the branch.
   To inspect the tools manually: `cargo --version` and `rustc --version`.
+- **`unknown proxy name: msds-rustup-init`**: The previous setup
+  renamed Rust's multi-call installer, so Rust was never installed.
+  Update this branch and rerun `.\\start-neural-kws.cmd`. The corrected helper
+  saves the official executable as
+  `%TEMP%\\msds-neural-rustup\\rustup-init.exe` and invokes it by its
+  expected filename. No Rust uninstall is required.
 - **Visual Studio Build Tools 2022 is installed, but `winget` reports
   an upgrade/install error (exit 1)**: Update the branch. The repaired
   script uses `setup.exe modify` on the existing installation, not
