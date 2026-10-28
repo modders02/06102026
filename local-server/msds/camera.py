@@ -29,6 +29,7 @@ from .kws_audio_filters import (denoise_enabled, selected_profile, pcm_audio_fil
                                 publisher_audio_filter, publisher_audio_denoise_enabled,
                                 robust_mode, webrtc_requested)
 from .neural_kws_trial import neural_mode, neural_attenuation_limit_db, detect_keyword
+from .kws_far_recheck import far_recheck_mode, recheck_far_segment
 from . import kws_verifier
 
 # Presentation/runtime configuration is custom-only, so importing this module
@@ -207,6 +208,10 @@ class Camera:
     kws_last_duration_ratio: float = 0.0
     kws_last_decision: str = ""
     kws_original_decision: str = ""
+    kws_far_recheck_result: str = ""
+    kws_far_recheck_accepted_trims_ms: list = field(default_factory=list)
+    kws_far_recheck_attempts: int = 0
+    kws_far_recheck_proposed: bool = False
     kws_verification_state: str = ""
     kws_verification_target: str = ""
     kws_help_rescue_source: str = ""
@@ -533,7 +538,24 @@ class Camera:
                 continue
 
             started = time.perf_counter()
-            decision = KWS_ENGINE.diagnose(segment)
+            original_decision = KWS_ENGINE.diagnose(segment)
+            recheck = None
+            if (self.kws_segmenter.hearing_profile == "far"
+                    and selected_profile() == "voice"
+                    and far_recheck_mode() != "off"):
+                recheck = recheck_far_segment(
+                    KWS_ENGINE, segment, original=original_decision,
+                    mode=far_recheck_mode(),
+                )
+            decision = recheck.decision if recheck else original_decision
+            self.kws_far_recheck_result = recheck.reason if recheck else "disabled"
+            self.kws_far_recheck_accepted_trims_ms = (
+                list(recheck.accepted_trims_ms) if recheck else []
+            )
+            self.kws_far_recheck_attempts = recheck.attempts if recheck else 0
+            self.kws_far_recheck_proposed = (
+                recheck.candidate_accepted if recheck else False
+            )
             processing_ms = (time.perf_counter() - started) * 1000.0
             self.kws_segments_seen += 1
             self.kws_last_segment_at = now_iso()
@@ -554,7 +576,7 @@ class Camera:
                 self.kws_last_negative_top_confidences = list(decision.negative_top_confidences)
                 self.kws_last_duration_ratio = decision.duration_ratio
                 self.kws_last_decision = decision.reason
-                self.kws_original_decision = decision.reason
+                self.kws_original_decision = original_decision.reason if original_decision else ""
                 print(
                     f"[KWS {self.id}] candidate={decision.keyword} "
                     f"confidence={decision.confidence:.3f} "
@@ -1437,6 +1459,11 @@ class Camera:
                 "last_duration_ratio": self.kws_last_duration_ratio,
                 "last_decision": self.kws_last_decision or None,
                 "original_kws_decision": self.kws_original_decision or None,
+                "far_recheck_mode": far_recheck_mode(),
+                "far_recheck_result": self.kws_far_recheck_result or None,
+                "far_recheck_proposed": self.kws_far_recheck_proposed,
+                "far_recheck_attempts": self.kws_far_recheck_attempts,
+                "far_recheck_accepted_trims_ms": list(self.kws_far_recheck_accepted_trims_ms),
                 "help_rescue_enabled": kws_verifier.help_rescue_enabled(),
                 "help_90_fast_accept_enabled": kws_verifier.help_fast_accept_enabled(),
                 "help_90_fast_accept_threshold": kws_verifier.HELP_FAST_ACCEPT_THRESHOLD,
