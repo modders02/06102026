@@ -186,6 +186,18 @@ export default function LiveCameraFeed({ camera, settings, onExpand, onConnect }
         </div>
         <div className="flex items-center gap-1">
           <span className={`mr-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${status === 'online' ? 'bg-success/15 text-success' : status === 'error' ? 'bg-destructive/15 text-destructive' : 'bg-muted text-muted-foreground'}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{status === 'online' ? 'Live' : status === 'connecting' ? 'Connecting' : 'Offline'}</span>
+          {customKeywordMode && (
+            <span data-testid="camera-microphone-badge" title={captureHealth.message}
+              className={`mr-1 inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${captureHealth.severity === 'ok'
+                ? 'bg-success/10 text-success'
+                : captureHealth.severity === 'error'
+                  ? 'bg-destructive/10 text-destructive'
+                  : 'bg-muted text-muted-foreground'}`}>
+              {captureHealth.state === 'streaming' ? 'Mic live'
+                : captureHealth.state === 'warming-up' ? 'Mic connecting'
+                  : 'Mic offline'}
+            </span>
+          )}
           <button onClick={() => setSpeaker(value => !value)} title={speaker ? 'Mute camera sound' : 'Hear camera sound'} aria-label={speaker ? 'Mute camera sound' : 'Hear camera sound'} aria-pressed={speaker} className={`rounded-lg p-2 hover:bg-muted ${speaker ? 'text-primary' : 'text-muted-foreground'}`}>{speaker ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}</button>
           <button
             onPointerDown={event => { event.currentTarget.setPointerCapture(event.pointerId); void talk.startTalk(); }}
