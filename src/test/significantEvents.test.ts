@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   SIGNIFICANT_EVENT_COOLDOWN_MS, EMOTION_EVENT_COOLDOWN_MS, EMOTION_MIN_CONFIDENCE, isSignificantHistoryEvent, isIndependentVisualHistoryEvent,
-  shouldRecordSignificantEvent,
+  isVisualOnlyNightVisionFireEvent, shouldRecordSignificantEvent,
 } from '@/lib/significantEvents';
 import type { DetectionEvent } from '@/types/multicam';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
@@ -83,6 +83,27 @@ describe('incident and expression Event History significance policy', () => {
       ...verifiedFire, fireRegionRatio: 0.01,
     })).toBe(true);
   });
+  it('suppresses the unverified night-vision fire popup while retaining normal and verified fire', () => {
+    const nightVisual = evt('fire', {
+      label: 'Fire detected (night vision)', confidence: 1,
+      fireConfirmed: true,
+      snapshot: 'data:image/jpeg;base64,night-visual',
+      alertValidation: {
+        status: 'pending', keyword: '', emotion: 'visual fire',
+        reason: 'Waiting for accepted fire keyword',
+      },
+    });
+    expect(isVisualOnlyNightVisionFireEvent(nightVisual)).toBe(true);
+    expect(isSignificantHistoryEvent(nightVisual)).toBe(false);
+    expect(isIndependentVisualHistoryEvent(nightVisual)).toBe(false);
+    expect(shouldRecordSignificantEvent(nightVisual, new Map(), 1000)).toBe(false);
+    expect(isSignificantHistoryEvent({
+      ...nightVisual, label: 'Fire detected',
+    })).toBe(true);
+    expect(isVisualOnlyNightVisionFireEvent(verifiedFire)).toBe(false);
+    expect(isSignificantHistoryEvent(verifiedFire)).toBe(true);
+  });
+
   it('logs detector-confirmed visual-only fire/smoke, not unconfirmed candidates', () => {
     expect(isSignificantHistoryEvent(evt('fire', {
       fireConfirmed: true, alertValidation: { status: 'pending', keyword: '',
