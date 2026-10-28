@@ -25,7 +25,9 @@ from .config import (AUDIO_CHUNK_SECONDS, AUDIO_ENGINE, HLS_PORT, HLS_PROBE_TTL,
                      RTSP_PORT, VIDEO_FPS, VIDEO_GOP, VIDEO_MAX_WIDTH,
                      VIDEO_THREADS, WEBRTC_PORT, match_distress)
 from .kws_engine import KWS_ENGINE, StreamingSpeechSegmenter
-from .kws_audio_filters import denoise_enabled, selected_profile, pcm_audio_filter, robust_mode, webrtc_requested
+from .kws_audio_filters import (denoise_enabled, selected_profile, pcm_audio_filter,
+                                publisher_audio_filter, publisher_audio_denoise_enabled,
+                                robust_mode, webrtc_requested)
 from .neural_kws_trial import neural_mode, neural_attenuation_limit_db, detect_keyword
 from . import kws_verifier
 
@@ -278,7 +280,8 @@ class Camera:
             "-bf", "0", "-g", str(VIDEO_GOP), "-keyint_min", str(VIDEO_GOP),
             "-sc_threshold", "0", "-threads:v", str(VIDEO_THREADS),
             "-c:a", "libopus", "-ar", "48000", "-ac", "1", "-b:a", "64k",
-            *(["-af", "asetpts=N/SR/TB"] if retime_audio else []),
+            *(["-af", publisher_audio_filter(retime=retime_audio)]
+              if publisher_audio_filter(retime=retime_audio) else []),
             "-application", "lowdelay", "-frame_duration", "20",
             "-max_interleave_delta", "100000", "-flush_packets", "1",
             "-muxdelay", "0", "-muxpreload", "0", "-rtsp_transport", "tcp",
@@ -375,7 +378,14 @@ class Camera:
         # Denoise is opt-in because aggressive filtering can alter the
         # characteristics of existing unfiltered KWS training templates.
         # FFmpeg's FFT denoiser is native and requires no new model download.
-        filters = pcm_audio_filter()
+        # The audible MediaMTX relay is already denoised when the
+        # experimental playback switch is active. Do NOT denoise it a second
+        # time: double FFT at maximum reduction can erase short keywords.
+        # Direct camera fallbacks still need their own denoiser.
+        already_filtered = (
+            cand.get("label") == "mediamtx" and publisher_audio_denoise_enabled()
+        )
+        filters = pcm_audio_filter(enabled=False if already_filtered else None)
         return [
             ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "warning",
             "-rtsp_transport", cand["transport"],
@@ -1384,6 +1394,9 @@ class Camera:
                 "vad_last_speech_frame": self.kws_segmenter.last_speech_frame,
                 "audio_denoise_enabled": denoise_enabled(),
                 "audio_noise_profile": selected_profile(),
+                "publisher_audio_denoise_enabled": publisher_audio_denoise_enabled(),
+                "publisher_noise_profile": selected_profile()
+                    if publisher_audio_denoise_enabled() else "off",
                 "audio_robust_mode": robust_mode(),
                 "vad_webrtc_requested": webrtc_requested(),
                 "neural_mode": neural_mode(),
