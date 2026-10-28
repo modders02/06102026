@@ -212,6 +212,8 @@ class Camera:
     kws_far_recheck_accepted_trims_ms: list = field(default_factory=list)
     kws_far_recheck_attempts: int = 0
     kws_far_recheck_proposed: bool = False
+    _kws_far_recheck_busy: bool = False
+    _kws_far_recheck_seq: int = 0
     kws_verification_state: str = ""
     kws_verification_target: str = ""
     kws_help_rescue_source: str = ""
@@ -540,22 +542,68 @@ class Camera:
             started = time.perf_counter()
             original_decision = KWS_ENGINE.diagnose(segment)
             recheck = None
-            if (self.kws_segmenter.hearing_profile == "far"
-                    and selected_profile() == "voice"
-                    and far_recheck_mode() != "off"):
+            self._kws_far_recheck_seq += 1
+            recheck_seq = self._kws_far_recheck_seq
+            recheck_mode = far_recheck_mode()
+            recheck_eligible = (
+                self.kws_segmenter.hearing_profile == "far"
+                and selected_profile() == "voice"
+                and recheck_mode != "off"
+            )
+            self.kws_far_recheck_proposed = False
+            self.kws_far_recheck_attempts = 0
+            self.kws_far_recheck_accepted_trims_ms = []
+            self.kws_far_recheck_result = "disabled"
+            if recheck_eligible and recheck_mode == "strict":
+                # STRICT can affect the decision: it must run synchronously.
                 recheck = recheck_far_segment(
-                    KWS_ENGINE, segment, original=original_decision,
-                    mode=far_recheck_mode(),
+                    KWS_ENGINE, segment, original=original_decision, mode="strict"
                 )
+            elif recheck_eligible and recheck_mode == "shadow":
+                # SHADOW is diagnostic only: never delay normal audio/alert
+                # decisions while additional CPU-intensive DTW passes run.
+                if self._kws_far_recheck_busy:
+                    self.kws_far_recheck_result = "busy_skipped"
+                elif (original_decision is not None
+                      and original_decision.keyword == "help"
+                      and not original_decision.accepted):
+                    self._kws_far_recheck_busy = True
+                    self.kws_far_recheck_result = "pending"
+                    def compare_far(data: bytes, baseline, seq: int) -> None:
+                        try:
+                            outcome = recheck_far_segment(
+                                KWS_ENGINE, data, original=baseline, mode="shadow"
+                            )
+                            if (not self.stop_flag.is_set()
+                                    and seq == self._kws_far_recheck_seq):
+                                self.kws_far_recheck_result = outcome.reason
+                                self.kws_far_recheck_proposed = outcome.candidate_accepted
+                                self.kws_far_recheck_attempts = outcome.attempts
+                                self.kws_far_recheck_accepted_trims_ms = list(
+                                    outcome.accepted_trims_ms
+                                )
+                        except Exception as exc:
+                            if seq == self._kws_far_recheck_seq:
+                                self.kws_far_recheck_result = (
+                                    f"shadow_error:{type(exc).__name__}"
+                                )
+                        finally:
+                            self._kws_far_recheck_busy = False
+                    threading.Thread(
+                        target=compare_far,
+                        args=(bytes(segment), original_decision, recheck_seq),
+                        daemon=True, name=f"msds-far-kws-{self.id}",
+                    ).start()
+                else:
+                    self.kws_far_recheck_result = "not_eligible"
             decision = recheck.decision if recheck else original_decision
-            self.kws_far_recheck_result = recheck.reason if recheck else "disabled"
-            self.kws_far_recheck_accepted_trims_ms = (
-                list(recheck.accepted_trims_ms) if recheck else []
-            )
-            self.kws_far_recheck_attempts = recheck.attempts if recheck else 0
-            self.kws_far_recheck_proposed = (
-                recheck.candidate_accepted if recheck else False
-            )
+            if recheck is not None:
+                self.kws_far_recheck_result = recheck.reason
+                self.kws_far_recheck_accepted_trims_ms = list(
+                    recheck.accepted_trims_ms
+                )
+                self.kws_far_recheck_attempts = recheck.attempts
+                self.kws_far_recheck_proposed = recheck.candidate_accepted
             processing_ms = (time.perf_counter() - started) * 1000.0
             self.kws_segments_seen += 1
             self.kws_last_segment_at = now_iso()
@@ -1463,6 +1511,7 @@ class Camera:
                 "far_recheck_result": self.kws_far_recheck_result or None,
                 "far_recheck_proposed": self.kws_far_recheck_proposed,
                 "far_recheck_attempts": self.kws_far_recheck_attempts,
+                "far_recheck_busy": self._kws_far_recheck_busy,
                 "far_recheck_accepted_trims_ms": list(self.kws_far_recheck_accepted_trims_ms),
                 "help_rescue_enabled": kws_verifier.help_rescue_enabled(),
                 "help_90_fast_accept_enabled": kws_verifier.help_fast_accept_enabled(),
