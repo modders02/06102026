@@ -133,7 +133,10 @@ def compare(
             }
         for keyword, files in inputs.items():
             for profile in profiles:
-                level[profile]["by_keyword"][keyword] = {"correct": 0, "total": 0}
+                level[profile]["by_keyword"][keyword] = {
+                    "correct": 0, "total": 0, "rejected": 0,
+                    "wrong_keyword": 0, "predictions": {},
+                }
             for index, (_, clip) in enumerate(files):
                 mixed, start, end = mix_at_snr(
                     clip, noise_pcm, snr,
@@ -148,8 +151,15 @@ def compare(
                     expected = None if keyword == NEGATIVE_CLASS else keyword
                     correct = prediction == expected
                     record = level[profile]
-                    record["by_keyword"][keyword]["total"] += 1
-                    record["by_keyword"][keyword]["correct"] += int(correct)
+                    by_class = record["by_keyword"][keyword]
+                    by_class["total"] += 1
+                    by_class["correct"] += int(correct)
+                    outcome = prediction if prediction is not None else "rejected"
+                    by_class["predictions"][outcome] = by_class["predictions"].get(outcome, 0) + 1
+                    if prediction is None:
+                        by_class["rejected"] += 1
+                    elif prediction != expected:
+                        by_class["wrong_keyword"] += 1
                     if keyword == NEGATIVE_CLASS:
                         record["unknown_total"] += 1
                         record["unknown_false_accepts"] += int(prediction is not None)
@@ -170,6 +180,7 @@ def compare(
         "same_frozen_templates": True,
         "snr_definition": "RMS speech / RMS added recorded noise within each clip",
         "mode_notes": "off=raw 16-kHz PCM; standard/strong=existing FFmpeg filters (with 1s warmup)",
+        "confusion_notes": "by_keyword.predictions counts every emitted word or rejected result, including HELP vs AMBULANCE confusions",
         "limits": "Pre-segmented offline KWS only; live CCTV VAD, ASR verification and alert delivery are NOT measured.",
         "heldout_counts": {key: len(value) for key, value in inputs.items()},
         "adequate_sample_counts": sufficient,
