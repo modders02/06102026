@@ -142,7 +142,11 @@ def probe_streams(rtsp: str, transport: str = "tcp", timeout: int = 20) -> dict:
     try:
         streams = json.loads(out.stdout or "{}").get("streams", [])
     except json.JSONDecodeError:
-        streams = []
+        return {"ok": False, "streams": [], "error": "ffprobe returned invalid JSON"}
+    if not isinstance(streams, list) or not streams:
+        # Empty/malformed metadata is an inconclusive probe, NOT proof of
+        # video-only RTSP. The live decoder must still attempt capture.
+        return {"ok": False, "streams": [], "error": "ffprobe did not identify any streams"}
     return {"ok": True, "streams": streams, "error": None}
 
 
@@ -183,6 +187,7 @@ class Camera:
     audio_restarts: int = 0
     audio_source: Optional[str] = None          # which URL/transport is working
     audio_sources_tried: List[str] = field(default_factory=list)
+    audio_probe_results: List[dict] = field(default_factory=list)
     kws_segmenter: StreamingSpeechSegmenter = field(default_factory=StreamingSpeechSegmenter)
     kws_pending_enrollment: Optional[str] = None
     kws_enrollment_status: Optional[dict] = None
@@ -275,7 +280,9 @@ class Camera:
             "-nostdin", "-hide_banner", "-loglevel", "warning",
             "-fflags", "+genpts+discardcorrupt+nobuffer",
             "-flags", "low_delay", "-threads", "1",
-            "-analyzeduration", "1000000", "-probesize", "262144",
+            # Allow late RTSP audio parameters to be discovered before publishing
+            # an optional Opus track. Applies only to experimental camera video.
+            "-analyzeduration", "3000000", "-probesize", "1048576",
             "-max_delay", "0", "-reorder_queue_size", "0",
             "-rtsp_transport", "tcp",
             "-i", self.rtsp,
@@ -334,44 +341,71 @@ class Camera:
         return candidates
 
     def probe_audio(self) -> dict:
-        """Detect whether this camera really exposes an audio track anywhere.
+        """Inspect every reachable RTSP path before declaring audio absent.
 
-        Only a probe that succeeded and found no audio proves the camera is
-        mute — a failed probe leaves `has_audio_track` unknown so capture is
-        still attempted.
+        Successful video-only probing on one path is not proof that the camera
+        has no microphone if another path failed to respond. In that case the
+        result is UNKNOWN and the audio worker must try FFmpeg decoding.
         """
         self.audio_probed_at = now_iso()
         candidates = self._audio_candidates()
+        self.audio_probe_results = []
         if not candidates:
             self.audio_probe_error = "no RTSP URL configured for this camera"
             self.has_audio_track = None
+            self.audio_codec = None
             return {"ok": False, "streams": [], "error": self.audio_probe_error}
 
+        succeeded = 0
+        failed = 0
         last_error = None
-        probed_ok = False
-        last_result = {"ok": False, "streams": [], "error": "not probed"}
+        last_success = None
         for cand in candidates:
             result = probe_streams(cand["url"], cand["transport"])
-            last_result = result
             if not result["ok"]:
+                failed += 1
                 last_error = f"{cand['label']}: {result['error']}"
+                self.audio_probe_results.append({
+                    "source": cand["label"], "ok": False,
+                    "has_audio_track": None, "codec": None,
+                    # Avoid recording the RTSP URL / camera credentials.
+                    "error": "probe failed; check the local FFmpeg diagnostics",
+                })
                 continue
-            probed_ok = True
-            audio = [s for s in result["streams"] if s.get("codec_type") == "audio"]
+
+            succeeded += 1
+            last_success = result
+            audio = [stream for stream in result["streams"]
+                     if stream.get("codec_type") == "audio"]
+            codec = audio[0].get("codec_name") if audio else None
+            self.audio_probe_results.append({
+                "source": cand["label"], "ok": True,
+                "has_audio_track": bool(audio), "codec": codec,
+                "error": None,
+            })
             if audio:
                 self.audio_probe_error = None
                 self.has_audio_track = True
-                self.audio_codec = audio[0].get("codec_name")
+                self.audio_codec = codec
                 return result
-        if probed_ok:
-            # At least one probe worked and none of them saw audio.
-            self.audio_probe_error = None
+
+        self.audio_codec = None
+        if succeeded and not failed:
+            # All available candidates were inspected and every one was mute.
             self.has_audio_track = False
-            self.audio_codec = None
-        else:
-            self.audio_probe_error = last_error
-            self.has_audio_track = None
-        return last_result
+            self.audio_probe_error = None
+            return last_success
+
+        # A video-only relay plus failed direct probes is inconclusive.
+        # Do not prevent the FFmpeg PCM worker from trying those paths.
+        self.has_audio_track = None
+        self.audio_probe_error = (
+            "Audio track not confirmed on all RTSP paths; attempting capture"
+            if succeeded else
+            "Unable to inspect the audio tracks; attempting direct capture"
+        )
+        return {"ok": False, "streams": (last_success or {}).get("streams", []),
+                "error": self.audio_probe_error}
 
     def _audio_pcm_cmd(self, ffmpeg: str, cand: dict) -> List[str]:
         """Decode RTSP audio to a continuous 16 kHz mono PCM pipe.
@@ -937,6 +971,10 @@ class Camera:
         def transcribe_pcm(data: bytes) -> None:
             if len(data) < 16000:  # less than ~0.5 s
                 return
+            # Decoded PCM is positive evidence of an audio track even if an
+            # earlier ffprobe returned an incomplete/failed result.
+            self.has_audio_track = True
+            self.audio_probe_error = None
             self._publish_scream_if_detected(data)
 
             if AUDIO_ENGINE == "custom":
@@ -1143,6 +1181,7 @@ class Camera:
         report["probe"] = {
             "ok": probe["ok"],
             "error": probe["error"],
+            "sources": list(self.audio_probe_results),
             "has_audio_track": self.has_audio_track,
             "audio_codec": self.audio_codec,
             "streams": probe["streams"],
@@ -1341,6 +1380,7 @@ class Camera:
         self.last_transcript = ""
         self.audio_source = None
         self.audio_sources_tried = []
+        self.audio_probe_results = []
         self.has_audio_track = None
         self.audio_codec = None
         self.audio_probe_error = None
@@ -1448,6 +1488,7 @@ class Camera:
             "audio_restarts": self.audio_restarts,
             "audio_source": self.audio_source,
             "audio_sources_tried": list(self.audio_sources_tried),
+            "audio_probe_results": list(self.audio_probe_results),
             "chunk_seconds": AUDIO_CHUNK_SECONDS,
             "recognition_engine": AUDIO_ENGINE,
             "custom_kws": {
