@@ -20,9 +20,14 @@ new pipeline is working.
 **DeepFilterLib 0.5.6 builds from Rust source on Windows.** When it is not
 installed yet, the launcher now automatically:
 1. Checks for Microsoft Visual Studio C++ Build Tools (MSVC plus Windows SDK).
-2. Installs them through WinGet, or downloads a verified signed Microsoft
-   installer if WinGet fails. This is a **large download** that may ask for
-   Windows administrator approval and may require a restart.
+2. If Build Tools 2022 is **already installed**, runs the Microsoft
+   `setup.exe modify --installPath ... --add Microsoft.VisualStudio.Workload.VCTools
+   --includeRecommended` operation. It deliberately **does not** issue
+   `winget install`, which can attempt to upgrade an existing installation
+   instead of adding the required workload. If Build Tools is not installed,
+   downloads the officially signed Microsoft bootstrapper.
+   This is a **large download**, can request Windows administrator approval,
+   and sometimes requires a restart.
 3. Downloads the official Rustup installer from `static.rust-lang.org`, then
    installs 64-bit stable Rust/Cargo using the Windows MSVC toolchain.
 4. Makes Cargo available to pip in the SAME PowerShell process and retries
@@ -154,10 +159,17 @@ real recorded holdout evaluation.
   detects this and runs `ensure-neural-build-tools.ps1` automatically.
   Run `.\\start-neural-kws.cmd` again after updating the branch.
   To inspect the tools manually: `cargo --version` and `rustc --version`.
-- **Microsoft Visual Studio Build Tools or link.exe missing**: Restart
-  Windows if the C++ installer requested it. In Visual Studio Installer,
-  ensure **Desktop development with C++** and a Windows SDK are installed,
-  then retry. The C++ Build Tools may require administrator permission.
+- **Visual Studio Build Tools 2022 is installed, but `winget` reports
+  an upgrade/install error (exit 1)**: Update the branch. The repaired
+  script uses `setup.exe modify` on the existing installation, not
+  `winget install`. Do not uninstall Build Tools just to resolve this error.
+- **Microsoft Visual Studio Build Tools or link.exe missing**: Open
+  **Visual Studio Installer > Build Tools 2022 > Modify > Workloads >
+  Desktop development with C++**. Ensure the MSVC x64/x86 compiler
+  and Windows 10/11 SDK are selected, then click **Modify**. This is
+  the manual fallback if the automatic modification returns exit 1.
+  Restart Windows if prompted, then rerun the launcher.
+  Administrator approval may be required.
 - **pip network read timeout**: The setup now uses
   `--timeout 120 --retries 10` for downloading Python packages.
   Keep an internet connection and retry; already-installed PyTorch should
