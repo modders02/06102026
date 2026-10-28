@@ -570,9 +570,10 @@ class Camera:
                         target=compare_shadow, args=(bytes(segment),),
                         daemon=True, name=f"msds-neural-kws-{self.id}",
                     ).start()
-                elif mode == "verify" and (
-                    decision.accepted or kws_verifier.eligible_help_fast_accept(decision)
-                ):
+                elif mode == "verify":
+                    # Evaluate every KWS candidate, including candidates that
+                    # might be rescued by optional ASR. A rescue must never
+                    # bypass independent neural agreement on its actual word.
                     observation = detect_keyword(segment)
                     self.kws_neural_candidate = observation.keyword
                     self.kws_neural_processing_ms = observation.processing_ms
@@ -585,6 +586,13 @@ class Camera:
                         )
                         self.kws_verification_state = "neural_blocked"
                         continue
+
+                if mode == "verify" and self.kws_neural_candidate != decision.keyword:
+                    # This path is intentionally redundant with the above
+                    # rejection, ensuring future rescue policies cannot silently
+                    # bypass the neural agreement requirement.
+                    self.kws_last_decision = "neural_disagreement"
+                    continue
 
                 # Explicit experimental policy: HELP >= 90% is accepted at
                 # KWS recognition stage without blocking on Whisper. Preserve
