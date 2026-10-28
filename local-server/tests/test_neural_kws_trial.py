@@ -113,18 +113,23 @@ class NeuralKwsTrialTests(unittest.TestCase):
         with patch.dict(os.environ, {"MSDS_KWS_NEURAL_STRENGTH": ""}):
             self.assertIsNone(neural_kws_trial.neural_attenuation_limit_db())
 
-    def test_experimental_launcher_defaults_to_maximum_with_rollback_option(self):
+    def test_recovery_launcher_defaults_to_speech_preservation(self):
         script = (
             Path(__file__).resolve().parents[1] / "setup-neural-kws.ps1"
         ).read_text(encoding="utf-8")
         self.assertIn('[ValidateSet("off", "standard", "strong", "maximum")]', script)
-        self.assertIn('$NoiseProfile = "maximum"', script)
+        self.assertIn('[ValidateSet("off", "shadow", "verify")]', script)
+        self.assertIn('$Mode = "off"', script)
+        self.assertIn('$NoiseProfile = "standard"', script)
+        self.assertIn('$HearingProfile = "normal"', script)
+        self.assertIn('if ($Mode -ne "off") {', script)
         self.assertIn('$env:MSDS_KWS_ROBUST_MODE = $NoiseProfile', script)
-        self.assertIn('$env:MSDS_KWS_NEURAL_STRENGTH = "maximum"', script)
-        self.assertIn('$HearingProfile = "far"', script)
         self.assertIn('$env:MSDS_KWS_HEARING_PROFILE = $HearingProfile', script)
         self.assertIn('if ($HearingProfile -eq "far") { "1" }', script)
         self.assertIn('elseif ($NoiseProfile -eq "maximum") { "3" } else { "2" }', script)
+        self.assertIn('if ($NoiseProfile -eq "maximum") { "1" } else { "0" }', script)
+        self.assertIn('DTW-only mode: neural model setup and CPU inference disabled.', script)
+
 
     def test_exact_english_word_only_and_padding(self):
         for spoken, expected in [("HELP", "help"), ("AMBULANCE", "ambulance"),
