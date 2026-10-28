@@ -20,6 +20,28 @@ from .kws_engine import DEFAULT_KEYWORDS, SAMPLE_RATE
 
 MODEL_NAME = "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"
 MODEL_ROOT = Path(__file__).resolve().parents[1] / "models" / MODEL_NAME
+# Dedicated CUDA-required experiment. This branch never silently substitutes
+# CPU inference for the Sherpa or DeepFilterNet neural modules.
+_GPU_DEVICE = "cuda:0"
+
+
+def require_cuda() -> str:
+    """Fail closed when GPU inference cannot run; never silently use CPU."""
+    import torch
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "CUDA-required MSDS: PyTorch cannot use an NVIDIA GPU. "
+            "Install matching CUDA PyTorch wheels and supported NVIDIA drivers."
+        )
+    try:
+        name = torch.cuda.get_device_name(0)
+        tensor = torch.ones((2, 2), dtype=torch.float32, device=_GPU_DEVICE)
+        if float((tensor @ tensor).sum().item()) != 8.0:
+            raise RuntimeError("CUDA compute self-test returned incorrect results")
+    except Exception as exc:
+        raise RuntimeError(f"CUDA-required MSDS: GPU compute failed: {exc}") from exc
+    return name
+
 _ALLOWED = frozenset(DEFAULT_KEYWORDS)
 _MUTEX = threading.RLock()
 _SPOTTER = None
@@ -61,9 +83,10 @@ def _load_spotter():
     missing = [name for name, p in files.items() if not p.is_file()]
     if missing:
         raise RuntimeError(f"Sherpa English model incomplete ({', '.join(missing)}); run setup-neural-kws.ps1")
+    require_cuda()
     _SPOTTER = sherpa_onnx.KeywordSpotter(
         **{name: str(path) for name, path in files.items()},
-        provider="cpu", num_threads=2,
+        provider="cuda", num_threads=2,
         keywords_score=1.0, keywords_threshold=0.35,
     )
     return _SPOTTER
@@ -93,11 +116,22 @@ def _enhance_16k(audio: np.ndarray) -> np.ndarray:
     from scipy.signal import resample_poly
     import torch
     from df.enhance import init_df, enhance
+    require_cuda()
     if _DF is None:
         _DF = init_df(model_base_dir="DeepFilterNet3")
     # DeepFilterNet's init_df returns (model, df_state, suffix, epoch)
     # in current releases; handle older three-value returns as well.
     model, state = _df_model_and_state(_DF)
+    # DeepFilterNet's own device selector should put the *model* on CUDA.
+    # Validate instead of allowing the package to run its neural network on CPU.
+    try:
+        actual_device = next(model.parameters()).device
+    except (StopIteration, AttributeError) as exc:
+        raise RuntimeError("DeepFilterNet CUDA device could not be verified") from exc
+    if actual_device.type != "cuda":
+        raise RuntimeError(
+            "DeepFilterNet initialized on CPU; CUDA is required and fallback is disabled"
+        )
     source_rate = int(state.sr())
     if source_rate != 48000:
         raise RuntimeError(f"Unexpected DeepFilterNet sample rate {source_rate}")
