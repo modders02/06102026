@@ -130,8 +130,8 @@ class NoisySpeechSNRTests(unittest.TestCase):
                         wav.setframerate(rate)
                         wav.writeframes(waveform)
             room = pcm(np.random.default_rng(12).normal(0, 0.04, rate * 3))
-            with patch("compare_kws_snr.KWS_ENGINE.status", return_value={"open_set_ready": True}), \\
-                 patch("compare_kws_snr.predicted_word", return_value=("help", "accepted")):
+            with (patch("compare_kws_snr.KWS_ENGINE.status", return_value={"open_set_ready": True}),
+                  patch("compare_kws_snr.predicted_word", return_value=("help", "accepted"))):
                 report = compare("", root, room, snrs=(10,), profiles=("off",), max_files=10)
         values = report["snr_results"]["10dB"]["off"]
         self.assertTrue(report["adequate_sample_counts"])
