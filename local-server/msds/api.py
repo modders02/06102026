@@ -11,6 +11,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+# Enforce GPU-required inference even when started using uvicorn msds.api:app.
+os.environ["MSDS_REQUIRE_CUDA"] = "1"
+
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -23,6 +26,15 @@ from .manager import (CAMERAS, mediamtx_last_error, mediamtx_running,
 from .kws_engine import KWS_ENGINE
 
 app = FastAPI(title="MSDSystem multi-camera bridge")
+
+
+@app.on_event("startup")
+def _require_gpu_at_api_start() -> None:
+    from .neural_kws_trial import require_cuda, _load_spotter
+    require_cuda()
+    _load_spotter()  # CUDA provider must initialize; CPU is not an alternative.
+
+
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
     expose_headers=["X-Snapshot-Timestamp"],
