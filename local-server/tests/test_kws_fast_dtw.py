@@ -58,13 +58,18 @@ class FastDtwTests(unittest.TestCase):
                 np.empty((0, 32), dtype=np.float32), a), float("inf"))
 
     def test_accelerator_is_off_without_opt_in(self):
-        with patch.dict(os.environ, {"MSDS_KWS_FAST_DTW": "0"}):
-            self.assertEqual(
-                CustomKeywordEngine._dtw_distance(
-                    self.vectors(90, 5), self.vectors(90, 6)),
-                CustomKeywordEngine._dtw_distance(
-                    self.vectors(90, 5), self.vectors(90, 6))
-            )
+        with patch.dict(os.environ, {"MSDS_KWS_FAST_DTW": "0"}), \
+             patch.object(CustomKeywordEngine, "_dtw_distance_wavefront",
+                          side_effect=AssertionError("unexpected opt-in path")):
+            self.assertTrue(np.isfinite(CustomKeywordEngine._dtw_distance(
+                self.vectors(90, 5), self.vectors(90, 6))))
+
+    def test_short_templates_stay_legacy_even_when_accelerator_enabled(self):
+        with patch.dict(os.environ, {"MSDS_KWS_FAST_DTW": "1"}), \
+             patch.object(CustomKeywordEngine, "_dtw_distance_wavefront",
+                          side_effect=AssertionError("short template optimized")):
+            self.assertTrue(np.isfinite(CustomKeywordEngine._dtw_distance(
+                self.vectors(40, 5), self.vectors(45, 6))))
 
 
 if __name__ == "__main__":
