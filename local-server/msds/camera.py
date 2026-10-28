@@ -1400,16 +1400,17 @@ class Camera:
                 ),
                 "vad_last_speech_frame": self.kws_segmenter.last_speech_frame,
                 "audio_denoise_enabled": denoise_enabled(),
-                "audio_noise_profile": selected_profile(),
+                "audio_noise_profile": selected_profile() if denoise_enabled() else "off",
                 "publisher_audio_denoise_enabled": publisher_audio_denoise_enabled(),
                 "publisher_noise_profile": selected_profile()
                     if publisher_audio_denoise_enabled() else "off",
                 "audio_robust_mode": robust_mode(),
                 "vad_webrtc_requested": webrtc_requested(),
                 "neural_mode": neural_mode(),
-                "neural_enhancement_strength": os.environ.get(
-                    "MSDS_KWS_NEURAL_STRENGTH", "maximum"
-                ).strip().lower(),
+                "neural_enhancement_strength": (
+                    os.environ.get("MSDS_KWS_NEURAL_STRENGTH", "maximum").strip().lower()
+                    if neural_mode() != "off" else "off"
+                ),
                 "neural_attenuation_limit_db": neural_attenuation_limit_db(),
                 "neural_candidate": self.kws_neural_candidate or None,
                 "neural_processing_ms": self.kws_neural_processing_ms,
