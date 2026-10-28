@@ -441,6 +441,12 @@ class CustomKeywordEngine:
         if len(b) > 260:
             b = b[np.linspace(0, len(b) - 1, 260).astype(int)]
 
+        # Optional experimental wavefront acceleration. Stable default OFF.
+        # Preserve the original DTW matcher for short templates or rollback.
+        if (os.environ.get("MSDS_KWS_FAST_DTW", "0") == "1"
+                and max(len(a), len(b)) >= 75):
+            return CustomKeywordEngine._dtw_distance_wavefront(a, b)
+
         # Sakoe-Chiba band prevents unrelated sounds from matching via
         # extreme time warping while still allowing ordinary speaking-rate
         # differences. The band expands enough to connect unequal lengths.
@@ -460,6 +466,37 @@ class CustomKeywordEngine:
                 )
             previous = current
         return float(previous[-1] / max(len(a), len(b)))
+
+    @staticmethod
+    def _dtw_distance_wavefront(a: np.ndarray, b: np.ndarray) -> float:
+        """Opt-in NumPy anti-diagonal DTW with baseline-equivalent constraints.
+
+        All cells in one anti-diagonal are independent. The algorithm retains
+        the legacy 30% Sakoe-Chiba band, length cap and float32 accumulation;
+        vectorized dot products may differ by ~1e-7 from scalar dot products.
+        """
+        if a.size == 0 or b.size == 0:
+            return float("inf")
+        if len(a) > 260:
+            a = a[np.linspace(0, len(a) - 1, 260).astype(int)]
+        if len(b) > 260:
+            b = b[np.linspace(0, len(b) - 1, 260).astype(int)]
+        n, m = len(a), len(b)
+        band = max(abs(n - m) + 2, int(max(n, m) * 0.30))
+        costs = np.maximum(0.0, 1.0 - (a @ b.T))
+        acc = np.full((n + 1, m + 1), np.inf, dtype=np.float32)
+        acc[0, 0] = 0.0
+        for diagonal in range(2, n + m + 1):
+            rows = np.arange(max(1, diagonal - m), min(n, diagonal - 1) + 1)
+            cols = diagonal - rows
+            valid = np.abs(rows - cols) <= band
+            rows, cols = rows[valid], cols[valid]
+            if rows.size:
+                acc[rows, cols] = costs[rows - 1, cols - 1] + np.minimum(
+                    np.minimum(acc[rows, cols - 1], acc[rows - 1, cols]),
+                    acc[rows - 1, cols - 1],
+                )
+        return float(acc[n, m] / max(n, m))
 
     @staticmethod
     def _distance_to_confidence(distance: float) -> float:
