@@ -72,8 +72,10 @@ installation, persistent Windows Startup task or service is created.
 
 1. The project Python virtual environment and existing MSDS dependencies.
 2. PyTorch/torchaudio **CPU** wheels, DeepFilterNet, sherpa-onnx,
-   SciPy, and **SentencePiece**, which sherpa-onnx's English BPE
-   `text2token` helper imports but does not install automatically.
+   SciPy, **SentencePiece** and **pypinyin**. Sherpa-onnx's English
+   BPE `text2token` helper imports both of the latter libraries, even
+   when no Chinese words are being tokenized; both must be installed
+   before generating keyword files.
 3. Official **English** GigaSpeech Zipformer KWS model from
    `k2-fsa/sherpa-onnx` release `kws-models`:
    `sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01`.
@@ -195,6 +197,15 @@ real recorded holdout evaluation.
   the *same* MSDS virtual environment first:
   `& ".\\local-server\\.venv\\Scripts\\python.exe" -m pip install sentencepiece`
   and then run `.\\start-neural-kws.cmd -SkipInstall`.
+- **`ModuleNotFoundError: No module named 'pypinyin'`**: SentencePiece
+  is already installed, but sherpa-onnx also imports pypinyin even for
+  English BPE keyword token generation. Update this branch and rerun
+  `.\\start-neural-kws.cmd`. As a direct recovery without repeating
+  all package installation, use:
+  `& ".\\local-server\\.venv\\Scripts\\python.exe" -m pip install pypinyin`
+  followed by `.\\start-neural-kws.cmd -SkipInstall`.
+  The generated tokens now include their explicit original-word labels,
+  e.g. `@HELP`, which sherpa-onnx preserves.
 - **DeepFilterNet `too many values to unpack` on model preflight**: The
   current Python `init_df()` returns four values, whereas older examples
   returned three. This branch now accepts both.
