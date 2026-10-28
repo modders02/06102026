@@ -23,7 +23,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from .kws_audio_filters import webrtc_requested
+from .kws_audio_filters import webrtc_requested, hearing_profile
 
 try:
     import webrtcvad  # from webrtcvad-wheels, optional for existing installations
@@ -137,6 +137,18 @@ class StreamingSpeechSegmenter:
         self.blocks_seen = 0
         self.max_length_drops = 0
         self.last_speech_frame = False
+        self.hearing_profile = hearing_profile()
+        far = self.hearing_profile == "far"
+        # In far mode the VAD listens for weaker onsets; the trained KWS
+        # threshold, UNKNOWN veto, class margins and duration-ratio checks
+        # remain identical to normal mode.
+        self.start_confirm_frames = 2 if far else self.START_CONFIRM_FRAMES
+        self.pre_roll_seconds = 0.20 if far else PRE_ROLL_SECONDS
+        self.min_speech_seconds = 0.26 if far else MIN_SPEECH_SECONDS
+        self.end_silence_seconds = 0.28 if far else END_SILENCE_SECONDS
+        self.webrtc_min_rms = 0.0035 if far else 0.007
+        self.webrtc_floor_ratio = 1.03 if far else 1.08
+        self.last_webrtc_energy_gate = self.webrtc_min_rms
         self.webrtc_vad = None
         self.vad_backend = "adaptive-energy"
         if webrtc_requested():
@@ -169,6 +181,7 @@ class StreamingSpeechSegmenter:
         self.last_start_rms = START_RMS
         self.last_end_rms = CONTINUE_RMS
         self.last_speech_frame = False
+        self.last_webrtc_energy_gate = self.webrtc_min_rms
         self._reset_utterance()
 
     @staticmethod
@@ -190,7 +203,7 @@ class StreamingSpeechSegmenter:
         self.blocks_seen += 1
         self._tail.extend(usable)
         emitted: List[bytes] = []
-        preroll_bytes = int(PRE_ROLL_SECONDS * SAMPLE_RATE) * SAMPLE_WIDTH
+        preroll_bytes = int(self.pre_roll_seconds * SAMPLE_RATE) * SAMPLE_WIDTH
 
         while len(self._tail) >= self.FRAME_BYTES:
             frame = bytes(self._tail[:self.FRAME_BYTES])
@@ -208,15 +221,23 @@ class StreamingSpeechSegmenter:
             if not self.active:
                 self.noise_floor_rms = float(np.percentile(self._rms_history, 25))
 
-            self.last_start_rms = max(START_RMS, self.noise_floor_rms * 1.55 + 0.004)
-            self.last_end_rms = max(CONTINUE_RMS, self.noise_floor_rms * 1.20 + 0.002)
+            if self.hearing_profile == "far":
+                self.last_start_rms = max(0.013, self.noise_floor_rms * 1.24 + 0.002)
+                self.last_end_rms = max(0.009, self.noise_floor_rms * 1.13 + 0.001)
+            else:
+                self.last_start_rms = max(START_RMS, self.noise_floor_rms * 1.55 + 0.004)
+                self.last_end_rms = max(CONTINUE_RMS, self.noise_floor_rms * 1.20 + 0.002)
             # WebRTC VAD is a speech/non-speech discriminator rather than a
             # pure energy threshold. Require a small excess over ambient RMS
             # as well to veto stationary fan/static that WebRTC may mislabel.
             # The conservative energy VAD remains available as a fallback.
             if self.webrtc_vad is not None:
                 speech = self.webrtc_vad.is_speech(frame, SAMPLE_RATE)
-                speech = speech and rms >= max(0.007, self.noise_floor_rms * 1.08)
+                self.last_webrtc_energy_gate = max(
+                    self.webrtc_min_rms,
+                    self.noise_floor_rms * self.webrtc_floor_ratio,
+                )
+                speech = speech and rms >= self.last_webrtc_energy_gate
                 start_frame = speech
                 continue_frame = speech
             else:
@@ -237,7 +258,7 @@ class StreamingSpeechSegmenter:
                     self._start_frames += 1
                 else:
                     self._start_frames = 0
-                if self._start_frames >= self.START_CONFIRM_FRAMES:
+                if self._start_frames >= self.start_confirm_frames:
                     self.active = True
                     self.speech = bytearray(self.pre_roll)
                     self.pre_roll.clear()
@@ -252,8 +273,8 @@ class StreamingSpeechSegmenter:
             else:
                 self.silence_samples += self.FRAME_SAMPLES
 
-            enough_speech = self.total_samples >= int(MIN_SPEECH_SECONDS * SAMPLE_RATE)
-            ended = self.silence_samples >= int(END_SILENCE_SECONDS * SAMPLE_RATE)
+            enough_speech = self.total_samples >= int(self.min_speech_seconds * SAMPLE_RATE)
+            ended = self.silence_samples >= int(self.end_silence_seconds * SAMPLE_RATE)
             too_long = self.total_samples >= int(MAX_SPEECH_SECONDS * SAMPLE_RATE)
             if too_long and not ended:
                 # Do not classify forced timeouts as wake words. They usually
@@ -265,7 +286,7 @@ class StreamingSpeechSegmenter:
             elif enough_speech and ended:
                 trailing = self.silence_samples * SAMPLE_WIDTH
                 segment = bytes(self.speech[:-trailing] if trailing < len(self.speech) else b"")
-                if len(segment) >= int(MIN_SPEECH_SECONDS * SAMPLE_RATE) * SAMPLE_WIDTH:
+                if len(segment) >= int(self.min_speech_seconds * SAMPLE_RATE) * SAMPLE_WIDTH:
                     emitted.append(segment)
                 self._reset_utterance()
 
