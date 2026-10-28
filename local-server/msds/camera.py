@@ -251,6 +251,15 @@ class Camera:
         WebRTC and low-latency HLS; transcription independently decodes 16 kHz
         PCM from the same local restream.
         """
+        # Some RTSP cameras send overlapping/backward audio PTS. libopus
+        # cannot enqueue non-monotonic timestamps, so reconstruct the *output*
+        # audio PTS from the decoded sample count. This does not change the
+        # separate 16-kHz neural/DTW keyword pipeline or its word templates.
+        # Opt out if a particular camera develops A/V drift:
+        # MSDS_RTSP_AUDIO_RETIME=0 (restart local camera service).
+        retime_audio = os.environ.get("MSDS_RTSP_AUDIO_RETIME", "1").strip().lower() not in (
+            "0", "false", "no", "off"
+        )
         return [
             ffmpeg,
             "-nostdin", "-hide_banner", "-loglevel", "warning",
@@ -269,6 +278,7 @@ class Camera:
             "-bf", "0", "-g", str(VIDEO_GOP), "-keyint_min", str(VIDEO_GOP),
             "-sc_threshold", "0", "-threads:v", str(VIDEO_THREADS),
             "-c:a", "libopus", "-ar", "48000", "-ac", "1", "-b:a", "64k",
+            *(["-af", "asetpts=N/SR/TB"] if retime_audio else []),
             "-application", "lowdelay", "-frame_duration", "20",
             "-max_interleave_delta", "100000", "-flush_packets", "1",
             "-muxdelay", "0", "-muxpreload", "0", "-rtsp_transport", "tcp",
