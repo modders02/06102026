@@ -77,7 +77,12 @@ def _enhance_16k(audio: np.ndarray) -> np.ndarray:
     from df.enhance import init_df, enhance
     if _DF is None:
         _DF = init_df(model_base_dir="DeepFilterNet3")
-    model, state, _ = _DF
+    # DeepFilterNet's init_df returns (model, df_state, suffix, epoch).
+    # Older examples document three values, so accept either without
+    # rejecting a successfully loaded DeepFilterNet3 model.
+    if len(_DF) < 2:
+        raise RuntimeError("DeepFilterNet initialization did not return model and state")
+    model, state = _DF[:2]
     source_rate = int(state.sr())
     if source_rate != 48000:
         raise RuntimeError(f"Unexpected DeepFilterNet sample rate {source_rate}")
