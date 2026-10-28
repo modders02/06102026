@@ -63,7 +63,8 @@ const META: Record<HistoryEmotion, HistoryEmotionMeta> = {
 /**
  * Show face-api's seven supported facial-expression classes distinctly.
  * In particular, a surprised face is not proof that someone is frightened.
- * This is history/display labeling only; emergency fusion is unchanged.
+ * The separate multimodalDistress safety mapping now also excludes surprise
+ * and shock; Event History remains an independent, non-alerting view.
  */
 export function historyEmotionMeta(expression: string | null | undefined): HistoryEmotionMeta | null {
   const normalized = (expression ?? '').trim().toLowerCase();
