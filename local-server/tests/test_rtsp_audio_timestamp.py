@@ -32,6 +32,50 @@ class RtspAudioTimestampTests(unittest.TestCase):
         self.assertIn("-vf", cmd)
         self.assertEqual(cmd[-1], f"rtsp://127.0.0.1:{RTSP_PORT}/cam1")
 
+    def test_maximum_publisher_denoises_audible_cctv_once(self):
+        with patch.dict(os.environ, {
+            "MSDS_RTSP_AUDIO_DENOISE_PLAYBACK": "1",
+            "MSDS_KWS_ROBUST_MODE": "maximum",
+            "MSDS_RTSP_AUDIO_RETIME": "1",
+        }):
+            publisher = self.cam._video_cmd("ffmpeg")
+            relay = self.cam._audio_pcm_cmd("ffmpeg", {
+                "label": "mediamtx",
+                "transport": "tcp",
+                "url": f"rtsp://127.0.0.1:{RTSP_PORT}/cam1",
+            })
+            direct_fallback = self.cam._audio_pcm_cmd("ffmpeg", {
+                "label": "camera-tcp",
+                "transport": "tcp",
+                "url": self.cam.rtsp,
+            })
+        publisher_audio = publisher[publisher.index("-af") + 1]
+        relay_audio = relay[relay.index("-af") + 1]
+        direct_audio = direct_fallback[direct_fallback.index("-af") + 1]
+        self.assertEqual(publisher_audio.count("afftdn="), 1)
+        self.assertIn("afftdn=nr=97:nf=-30:tn=1", publisher_audio)
+        self.assertIn("asetpts=N/SR/TB", publisher_audio)
+        self.assertNotIn("afftdn=", relay_audio)
+        self.assertIn("aresample=16000", relay_audio)
+        self.assertEqual(direct_audio.count("afftdn="), 1)
+        self.assertIn("afftdn=nr=97:nf=-30:tn=1", direct_audio)
+        self.assertIn("libopus", publisher)
+        self.assertIn("pcm_s16le", direct_fallback)
+
+    def test_unfiltered_publisher_preserves_single_kws_filter(self):
+        with patch.dict(os.environ, {
+            "MSDS_RTSP_AUDIO_DENOISE_PLAYBACK": "0",
+            "MSDS_KWS_ROBUST_MODE": "maximum",
+            "MSDS_RTSP_AUDIO_RETIME": "1",
+        }):
+            publisher = self.cam._video_cmd("ffmpeg")
+            relay = self.cam._audio_pcm_cmd("ffmpeg", {
+                "label": "mediamtx", "transport": "tcp",
+                "url": f"rtsp://127.0.0.1:{RTSP_PORT}/cam1",
+            })
+        self.assertEqual(publisher[publisher.index("-af") + 1], "asetpts=N/SR/TB")
+        self.assertEqual(relay[relay.index("-af") + 1].count("afftdn="), 1)
+
     def test_can_opt_out_for_cameras_with_audio_video_sync_problems(self):
         for value in ("0", "off", "false", "no"):
             with self.subTest(value=value), patch.dict(os.environ, {"MSDS_RTSP_AUDIO_RETIME": value}):
