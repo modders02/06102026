@@ -86,7 +86,7 @@ try {
   # 0.5.6. Probe at every launch, including -SkipInstall, to detect a later
   # environment upgrade before downloading/loading any neural model.
   Invoke-Checked "Checking CUDA-only PyTorch, matching torchaudio and CUDA compute" {
-    & $venvPython -W ignore -c "import torch, torchaudio; from torchaudio.backend.common import AudioMetaData; from msds.neural_kws_trial import require_cuda; v='2.5.1'; assert torch.__version__.split('+')[0]==torchaudio.__version__.split('+')[0]==v; assert '+cu' in torch.__version__ and '+cu' in torchaudio.__version__, 'CPU-only torch detected; reinstall CUDA packages without -SkipInstall'; print('GPU:', require_cuda(), '| torch:',torch.__version__,'| torchaudio:',torchaudio.__version__)"
+    & $venvPython -W ignore -c "import torch, torchaudio; from torchaudio.backend.common import AudioMetaData; v='2.5.1'; assert torch.__version__.split('+')[0]==torchaudio.__version__.split('+')[0]==v; assert '+cu' in torch.__version__ and '+cu' in torchaudio.__version__, 'CPU-only torch detected; reinstall CUDA packages without -SkipInstall'; assert torch.cuda.is_available(), 'NVIDIA CUDA unavailable in torch'; t=torch.ones((2,2),device='cuda'); assert (t@t).sum().item()==8; print('GPU:',torch.cuda.get_device_name(0),'| torch:',torch.__version__,'| torchaudio:',torchaudio.__version__)"
   }
   Invoke-Checked "Checking sherpa CUDA wheel rather than CPU-only package" {
     & $venvPython -c "import sherpa_onnx; v=sherpa_onnx.__version__; assert '+cuda12.cudnn9' in v, f'CPU-only or incorrect sherpa version: {v}'; print('sherpa-onnx GPU:', v)"
@@ -193,6 +193,22 @@ try {
   Write-Host "[MSDS] GPU-required: NVIDIA CUDA for DTW, DeepFilterNet3 and sherpa-onnx; no CPU inference fallback." -ForegroundColor Green
   Write-Host "[MSDS] Stable DTW enrollment and source branch unchanged." -ForegroundColor Green
   if (-not $NoLaunch) {
+    # Electron reuses an already-running local bridge. Never permit a stale
+    # CPU bridge on port 5000 to masquerade as the mandatory CUDA backend.
+    try {
+      $oldStatus = Invoke-RestMethod "http://127.0.0.1:5000/status" -TimeoutSec 2 -ErrorAction Stop
+      if ($oldStatus -and $oldStatus.cameras) {
+        $notGpu = @($oldStatus.cameras | Where-Object {
+          $_.audio.custom_kws.gpu_required -ne $true
+        })
+        if ($notGpu.Count -gt 0) {
+          throw "Existing CPU camera bridge on port 5000. Close the old app/server before launching GPU-only MSDS."
+        }
+      }
+    } catch {
+      if ($_.Exception.Message -match "Existing CPU camera bridge") { throw }
+      # No running bridge is the normal startup case.
+    }
     if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
       throw "Node.js/npm is missing. Install Node.js LTS, then rerun this script."
     }
