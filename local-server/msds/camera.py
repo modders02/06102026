@@ -26,6 +26,7 @@ from .config import (AUDIO_CHUNK_SECONDS, AUDIO_ENGINE, HLS_PORT, HLS_PROBE_TTL,
                      VIDEO_THREADS, WEBRTC_PORT, match_distress)
 from .kws_engine import KWS_ENGINE, StreamingSpeechSegmenter
 from .kws_audio_filters import denoise_enabled, selected_profile, pcm_audio_filter, robust_mode, webrtc_requested
+from .neural_kws_trial import neural_mode, detect_keyword
 from . import kws_verifier
 
 # Presentation/runtime configuration is custom-only, so importing this module
@@ -212,6 +213,12 @@ class Camera:
     kws_verification_no_speech_prob: float | None = None
     kws_verification_avg_logprob: float | None = None
     kws_verification_error: str = ""
+    kws_neural_candidate: str = ""
+    kws_neural_processing_ms: float = 0.0
+    kws_neural_last_error: str = ""
+    kws_neural_last_at: str = ""
+    kws_neural_denoised: bool = False
+    _kws_neural_busy: bool = False
     _last_kws_publish_ts: float = 0.0
     _kws_enroll_suppress_until: float = 0.0
 
@@ -540,6 +547,45 @@ class Camera:
                     f"processing={processing_ms:.1f}ms",
                     flush=True,
                 )
+                # Experimental neural mode is OFF unless explicitly opted in.
+                # SHADOW evaluates the SAME captured segment without blocking
+                # camera audio or changing KWS/alert decisions. VERIFY requires
+                # independent neural agreement before the existing DTW policy
+                # is allowed to publish; unavailable models fail closed.
+                mode = neural_mode()
+                if mode == "shadow" and not self._kws_neural_busy:
+                    self._kws_neural_busy = True
+                    def compare_shadow(data: bytes) -> None:
+                        try:
+                            observation = detect_keyword(data)
+                            if not self.stop_flag.is_set():
+                                self.kws_neural_candidate = observation.keyword
+                                self.kws_neural_processing_ms = observation.processing_ms
+                                self.kws_neural_last_error = observation.error
+                                self.kws_neural_denoised = observation.enhanced
+                                self.kws_neural_last_at = now_iso()
+                        finally:
+                            self._kws_neural_busy = False
+                    threading.Thread(
+                        target=compare_shadow, args=(bytes(segment),),
+                        daemon=True, name=f"msds-neural-kws-{self.id}",
+                    ).start()
+                elif mode == "verify" and (
+                    decision.accepted or kws_verifier.eligible_help_fast_accept(decision)
+                ):
+                    observation = detect_keyword(segment)
+                    self.kws_neural_candidate = observation.keyword
+                    self.kws_neural_processing_ms = observation.processing_ms
+                    self.kws_neural_last_error = observation.error
+                    self.kws_neural_denoised = observation.enhanced
+                    self.kws_neural_last_at = now_iso()
+                    if observation.error or observation.keyword != decision.keyword:
+                        self.kws_last_decision = (
+                            "neural_unavailable" if observation.error else "neural_disagreement"
+                        )
+                        self.kws_verification_state = "neural_blocked"
+                        continue
+
                 # Explicit experimental policy: HELP >= 90% is accepted at
                 # KWS recognition stage without blocking on Whisper. Preserve
                 # original diagnosis, never accept if UNKNOWN outranks HELP,
@@ -1322,6 +1368,13 @@ class Camera:
                 "audio_noise_profile": selected_profile(),
                 "audio_robust_mode": robust_mode(),
                 "vad_webrtc_requested": webrtc_requested(),
+                "neural_mode": neural_mode(),
+                "neural_candidate": self.kws_neural_candidate or None,
+                "neural_processing_ms": self.kws_neural_processing_ms,
+                "neural_last_error": self.kws_neural_last_error,
+                "neural_last_at": self.kws_neural_last_at,
+                "neural_denoised": self.kws_neural_denoised,
+                "neural_busy": self._kws_neural_busy,
                 "vad_start_threshold": 0.025,
                 "vad_continue_threshold": 0.015,
                 "segments_seen": self.kws_segments_seen,
