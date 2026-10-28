@@ -17,6 +17,22 @@ Python version. DeepFilterNet may fail on unsupported Python/Windows
 configurations. The installer reports this rather than pretending the
 new pipeline is working.
 
+**DeepFilterLib 0.5.6 builds from Rust source on Windows.** When it is not
+installed yet, the launcher now automatically:
+1. Checks for Microsoft Visual Studio C++ Build Tools (MSVC plus Windows SDK).
+2. Installs them through WinGet, or downloads a verified signed Microsoft
+   installer if WinGet fails. This is a **large download** that may ask for
+   Windows administrator approval and may require a restart.
+3. Downloads the official Rustup installer from `static.rust-lang.org`, then
+   installs 64-bit stable Rust/Cargo using the Windows MSVC toolchain.
+4. Makes Cargo available to pip in the SAME PowerShell process and retries
+   the DeepFilterNet installation with a 120-second network timeout.
+
+If Visual Studio's installer asks for permission, approve it only if you
+want to install Microsoft's development tools on this PC. If the machine
+lacks administrator privileges or compatible native extensions, do not
+force deployment; use the unchanged DTW engine.
+
 From PowerShell in your existing working repository:
 
 ```powershell
@@ -134,6 +150,18 @@ real recorded holdout evaluation.
 
 ### Troubleshooting
 
+- **Cargo, the Rust package manager, is not installed**: The setup
+  detects this and runs `ensure-neural-build-tools.ps1` automatically.
+  Run `.\\start-neural-kws.cmd` again after updating the branch.
+  To inspect the tools manually: `cargo --version` and `rustc --version`.
+- **Microsoft Visual Studio Build Tools or link.exe missing**: Restart
+  Windows if the C++ installer requested it. In Visual Studio Installer,
+  ensure **Desktop development with C++** and a Windows SDK are installed,
+  then retry. The C++ Build Tools may require administrator permission.
+- **pip network read timeout**: The setup now uses
+  `--timeout 120 --retries 10` for downloading Python packages.
+  Keep an internet connection and retry; already-installed PyTorch should
+  not need to download again.
 - **pip no matching distribution / DLL load failure**: Python version or
   CPU/Windows wheel incompatibility; use a supported interpreter or
   disable neural mode. Do not claim the model is installed.
