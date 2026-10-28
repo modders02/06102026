@@ -15,6 +15,8 @@ const DECISION_MESSAGES = new Map(Object.entries({
   verification_unavailable: 'The speech check is unavailable. The wake word was not confirmed.',
   verification_no_speech: 'No clear speech was found to confirm the wake word.',
   verification_mismatch: 'The speech check heard different words. The wake word was not confirmed.',
+  neural_unavailable: 'Neural keyword verification is unavailable. The wake word was not confirmed.',
+  neural_disagreement: 'Neural and trained keyword recognizers disagreed. The wake word was not confirmed.',
   below_frontend_threshold: 'The wake word did not meet the required confidence level.',
 }));
 
