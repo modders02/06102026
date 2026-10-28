@@ -141,10 +141,12 @@ describe('video-aligned face / pose / hand tracing geometry', () => {
     const viewport = containedVideoRect(960, 540, 1920, 1080);
     const measuredFace = { x: 0.42, y: 0.24, width: 0.026, height: 0.044 };
     expect(drawDetectedFaceBox(ctx, measuredFace, viewport)).toBe(true);
-    expect(ctx.strokeRect).toHaveBeenCalledWith(
-      expect.closeTo(0.42 * 960), expect.closeTo(0.24 * 540),
-      expect.closeTo(0.026 * 960), expect.closeTo(0.044 * 540),
-    );
+    expect(ctx.strokeRect).toHaveBeenCalledOnce();
+    const [x, y, w, h] = vi.mocked(ctx.strokeRect).mock.calls[0];
+    expect(x).toBeCloseTo(0.42 * 960);
+    expect(y).toBeCloseTo(0.24 * 540);
+    expect(w).toBeCloseTo(0.026 * 960);
+    expect(h).toBeCloseTo(0.044 * 540);
     expect(ctx.fillText).toHaveBeenCalledWith('FACE (detected)', expect.any(Number), expect.any(Number));
     expect(drawDetectedFaceBox(ctx, {
       x: -0.2, y: 0.1, width: 0.5, height: 0.6,
