@@ -1033,9 +1033,14 @@ class Camera:
                         [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
                          "-rtsp_transport", cand["transport"], "-timeout", "15000000",
                          "-i", cand["url"], "-vn", "-map", "0:a:0",
+                         # The one-shot audio-test must use the SAME
+                         # enhancement chain as the continuous KWS worker.
+                         "-af", pcm_audio_filter(),
                          "-acodec", "pcm_s16le", "-ac", "1", "-ar", "16000",
                          "-t", "5", "-f", "wav", "-y", wav],
                         capture_output=True, text=True, timeout=40,
+                        cwd=(voice_isolation_model_dir()
+                             if voice_isolation_mode() != "off" else None),
                         creationflags=no_window_flags(),
                     )
                     size = os.path.getsize(wav) if os.path.exists(wav) else 0
