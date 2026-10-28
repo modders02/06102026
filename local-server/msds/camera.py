@@ -24,7 +24,8 @@ from .binaries import (MissingExecutable, install_hint, need_exe, no_window_flag
 from .config import (AUDIO_CHUNK_SECONDS, AUDIO_ENGINE, HLS_PORT, HLS_PROBE_TTL,
                      RTSP_PORT, VIDEO_FPS, VIDEO_GOP, VIDEO_MAX_WIDTH,
                      VIDEO_THREADS, WEBRTC_PORT, match_distress)
-from .kws_engine import KWS_ENGINE, StreamingSpeechSegmenter
+from .kws_engine import (KWS_ENGINE, StreamingSpeechSegmenter,
+                         MIN_DURATION_RATIO, MAX_DURATION_RATIO)
 from .kws_audio_filters import (denoise_enabled, selected_profile, pcm_audio_filter,
                                 publisher_audio_filter, publisher_audio_denoise_enabled,
                                 robust_mode, webrtc_requested)
@@ -1547,6 +1548,19 @@ class Camera:
                 "last_negative_mean2_confidence": self.kws_last_negative_mean2_confidence,
                 "last_negative_top_confidences": list(self.kws_last_negative_top_confidences),
                 "last_duration_ratio": self.kws_last_duration_ratio,
+                "last_duration_direction": (
+                    "shorter_than_enrolled"
+                    if self.kws_last_candidate and self.kws_last_duration_ratio < MIN_DURATION_RATIO
+                    else "longer_than_enrolled"
+                    if self.kws_last_candidate and self.kws_last_duration_ratio > MAX_DURATION_RATIO
+                    else "within_range"
+                    if self.kws_last_candidate else None
+                ),
+                "dtw_acceleration": (
+                    "wavefront_experimental"
+                    if os.environ.get("MSDS_KWS_FAST_DTW", "0") == "1"
+                    else "baseline"
+                ),
                 "last_decision": self.kws_last_decision or None,
                 "original_kws_decision": self.kws_original_decision or None,
                 "far_recheck_mode": far_recheck_mode(),

@@ -10,6 +10,8 @@ param(
   [ValidateSet("normal", "far")][string]$HearingProfile = "far",
   # Additional HELP re-evaluation: default shadow never changes alert outcomes.
   [ValidateSet("off", "shadow", "strict")][string]$FarRecheck = "shadow",
+  # Optional NumPy wavefront DTW speed experiment; baseline remains default.
+  [switch]$FastDtw,
   [switch]$SkipInstall,
   [switch]$NoLaunch
 )
@@ -160,6 +162,7 @@ try {
   $env:MSDS_KWS_WEBRTC_VAD = "1"
   $env:MSDS_KWS_HEARING_PROFILE = $HearingProfile
   $env:MSDS_KWS_FAR_RECHECK = $FarRecheck
+  $env:MSDS_KWS_FAST_DTW = $(if ($FastDtw) { "1" } else { "0" })
   # WebRTC mode 1 listens more readily for quiet/far voices than mode 3.
   # Retain the prior strict mode 3 for maximum + normal, with a one-command rollback.
   $env:MSDS_KWS_WEBRTC_MODE = $(if ($HearingProfile -eq "far") { "1" } elseif ($NoiseProfile -eq "maximum") { "3" } else { "2" })
@@ -178,6 +181,7 @@ try {
     Write-Host "[MSDS] WARNING: Maximum FFT/VAD filtering can discard quiet emergency words and add A/V delay. Validate help/fire recall and lip-sync before relying on it." -ForegroundColor Yellow
   }
   Write-Host "[MSDS] Far-field keyword recheck=$FarRecheck (shadow is diagnostic-only; strict is experimental and needs holdout validation)." -ForegroundColor Cyan
+  Write-Host "[MSDS] Experimental fast DTW=$env:MSDS_KWS_FAST_DTW (identical matching policy, optimized wavefront calculation)." -ForegroundColor Cyan
   Write-Host "[MSDS] Stable DTW enrollment and source branch unchanged." -ForegroundColor Green
   if (-not $NoLaunch) {
     if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
