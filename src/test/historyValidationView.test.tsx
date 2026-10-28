@@ -140,6 +140,29 @@ describe('live validation and significant event history', () => {
     expect(screen.queryByText(/Last checked/)).not.toBeInTheDocument();
   });
 
+  it('does not display the old Fire detected (night vision) popup or thumbnail', () => {
+    mocks.events = [{
+      id: 'old-night-fire',
+      cameraId: 'slot-1',
+      cameraName: 'Kitchen camera',
+      type: 'fire',
+      label: 'Fire detected (night vision)',
+      fireConfirmed: true,
+      confidence: 1,
+      timestamp: '2026-10-29T04:18:13+08:00',
+      snapshot: 'data:image/jpeg;base64,night',
+      alertValidation: { status: 'pending', keyword: '', emotion: 'visual fire', reason: 'Waiting for accepted keyword' },
+    }];
+    render(<MemoryRouter><DashboardEvents /></MemoryRouter>);
+    const history = screen.getByRole('region', { name: 'Event history' });
+    expect(history).toHaveTextContent('No events yet.');
+    expect(within(history).queryByText('Fire detected (night vision)')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', {
+      name: 'View snapshot: Fire detected (night vision) from Kitchen camera',
+    })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('shows a significant confirmed smoke incident without showing its rejected audio validation', () => {
     mocks.events = [{
       id: 'recorded-check', cameraId: 'validation-history', cameraName: 'Kitchen camera',
