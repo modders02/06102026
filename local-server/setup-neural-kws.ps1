@@ -3,6 +3,9 @@
 # This script NEVER changes stable_branch_271026 or retrains DTW templates.
 param(
   [ValidateSet("shadow", "verify")][string]$Mode = "shadow",
+  # This explicit experimental launcher defaults to maximum noise filtering.
+  # For less aggressive KWS behavior, run -NoiseProfile strong/standard/off.
+  [ValidateSet("off", "standard", "strong", "maximum")][string]$NoiseProfile = "maximum",
   [switch]$SkipInstall,
   [switch]$NoLaunch
 )
@@ -137,15 +140,25 @@ try {
   } finally { Pop-Location }
 
   $env:MSDS_KWS_NEURAL_MODE = $Mode
+  # DeepFilterNet3 uses full model suppression (no attenuation limit) on
+  # neural shadow/verify segments. It does not run before the live VAD.
   $env:MSDS_KWS_NEURAL_DENOISE = "1"
-  $env:MSDS_KWS_ROBUST_MODE = "off"
-  $env:MSDS_KWS_AUDIO_DENOISE = "0"  # avoid double filtering; neural uses DeepFilterNet
+  $env:MSDS_KWS_NEURAL_STRENGTH = "maximum"
+  # The live DTW/VAD path reads these FFmpeg-filtered PCM samples.
+  # Maximum is opt-in to THIS experimental launcher, never stable_branch.
+  $env:MSDS_KWS_ROBUST_MODE = $NoiseProfile
+  $env:MSDS_KWS_AUDIO_DENOISE = "0" # robust_mode enables denoise when not off
+  $env:MSDS_KWS_NOISE_PROFILE = $NoiseProfile
   $env:MSDS_KWS_WEBRTC_VAD = "1"
-  $env:MSDS_KWS_WEBRTC_MODE = "2"
+  $env:MSDS_KWS_WEBRTC_MODE = $(if ($NoiseProfile -eq "maximum") { "3" } else { "2" })
   $env:MSDS_KWS_HELP_90_FAST_ACCEPT = "0" # do not mix acceptance shortcuts in this experiment
   $env:MSDS_SHERPA_KWS_MODEL_DIR = $modelDir
 
-  Write-Host "[MSDS] Neural pipeline configured. Mode=$Mode. Stable DTW templates unchanged." -ForegroundColor Green
+  Write-Host "[MSDS] Neural mode=$Mode, FFmpeg live noise profile=$NoiseProfile, neural enhancement=maximum, WebRTC VAD mode=$env:MSDS_KWS_WEBRTC_MODE." -ForegroundColor Green
+  if ($NoiseProfile -eq "maximum") {
+    Write-Host "[MSDS] WARNING: Maximum FFT/VAD filtering can discard quiet emergency words. Validate help/fire recall and false alarms before relying on it." -ForegroundColor Yellow
+  }
+  Write-Host "[MSDS] Stable DTW enrollment and source branch unchanged." -ForegroundColor Green
   if (-not $NoLaunch) {
     if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
       throw "Node.js/npm is missing. Install Node.js LTS, then rerun this script."
