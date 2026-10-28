@@ -3,6 +3,7 @@ bin/*
 !bin/.gitkeep
 
 .venv/
+.gpu-venv/
 __pycache__/
 *.pyc
 mediamtx.log
