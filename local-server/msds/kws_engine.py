@@ -501,11 +501,14 @@ class CustomKeywordEngine:
             # Every anti-diagonal is independent, enabling vectorized CUDA
             # updates. No NumPy/CPU fallback is used for the cost/DP matrix.
             for diagonal in range(2, n + m + 1):
-                rows = torch.arange(max(1, diagonal - m),
-                                    min(n, diagonal - 1) + 1, device="cuda:0")
+                # Compute band endpoints as integer indices on the host.
+                # All distance and DTW arithmetic remains on GPU.
+                low = max(1, diagonal - m, (diagonal - band + 1) // 2)
+                high = min(n, diagonal - 1, (diagonal + band) // 2)
+                if low > high:
+                    continue
+                rows = torch.arange(low, high + 1, device="cuda:0")
                 cols = diagonal - rows
-                mask = torch.abs(rows - cols) <= band
-                rows, cols = rows[mask], cols[mask]
                 if rows.numel():
                     acc[rows, cols] = costs[rows - 1, cols - 1] + torch.minimum(
                         torch.minimum(acc[rows, cols - 1], acc[rows - 1, cols]),
