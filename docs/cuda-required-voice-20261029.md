@@ -20,6 +20,41 @@ The launcher uses `local-server/.gpu-venv` (Python 3.12), leaving `local-server/
 
 **Prerequisites:** Windows 64-bit with Python 3.12, suitable NVIDIA GPU, current NVIDIA driver, working CUDA 12.x / cuDNN9 runtime for sherpa-onnx, sufficient VRAM and disk space, plus the original app build prerequisites. GPU availability alone does not guarantee the specific sherpa wheel and driver combination works; explicit initialization tests decide.
 
+## Resuming interrupted CUDA wheel downloads
+
+The official Windows Python 3.12 CUDA 12.4 torch wheel is approximately
+2.5 GB. Network timeouts during pip's temporary download previously restarted
+the installation from the beginning. The launcher now calls
+`local-server/install-cuda-torch.ps1`, which:
+
+- Downloads the wheel from the exact official PyTorch CDN URL using
+  `curl.exe --continue-at -` and connection retries.
+- Keeps partial data in `local-server/.gpu-wheel-cache/*.whl.part` across
+  launcher restarts, even if a transfer fails.
+- Checks the downloaded wheel ZIP CRC before renaming to `*.whl`.
+- Uses the verified local CUDA torch wheel with matching CUDA torchaudio.
+- Preserves the wheel cache across restarts, without changing CUDA-required
+  behavior or touching the existing CPU environment.
+
+**Important:** The 1.4 GB partial download from the earlier pip failure was
+in pip's temporary download area. It cannot reliably be recovered into the
+new persistent cache. The *first* new download may start from zero, but a later
+interruption can resume from its saved `.part` file.
+
+Run again **without** `-SkipInstall` after fetching the updated branch:
+
+```powershell
+git pull --ff-only
+.\start-neural-kws.cmd -Mode shadow -NoiseProfile voice -HearingProfile far -FarRecheck shadow
+```
+
+Do not delete `local-server/.gpu-wheel-cache` between attempts. Keep sufficient
+free disk space for the downloaded wheel, extraction and installed GPU packages.
+If the CDN does not support HTTP byte ranges on a particular connection, curl
+will report a resume error rather than silently create a malformed wheel.
+If a supposedly completed archive fails integrity validation, inspect the
+connection and cache before retrying.
+
 ## Initial setup
 
 Stop prior Electron/camera service. A server already occupying port 5000 may be CPU-based and must not be reused.
