@@ -441,8 +441,11 @@ class CustomKeywordEngine:
         if len(b) > 260:
             b = b[np.linspace(0, len(b) - 1, 260).astype(int)]
 
-        # Optional experimental wavefront acceleration. Stable default OFF.
-        # Preserve the original DTW matcher for short templates or rollback.
+        # Dedicated CUDA-required experiment: all LIVE DTW scoring is
+        # performed by CUDA tensors, even for short HELP templates.
+        # The CPU baseline below is retained for offline unit tests only.
+        if os.environ.get("MSDS_REQUIRE_CUDA") == "1":
+            return CustomKeywordEngine._dtw_distance_cuda(a, b)
         if (os.environ.get("MSDS_KWS_FAST_DTW", "0") == "1"
                 and max(len(a), len(b)) >= 75):
             return CustomKeywordEngine._dtw_distance_wavefront(a, b)
@@ -466,6 +469,52 @@ class CustomKeywordEngine:
                 )
             previous = current
         return float(previous[-1] / max(len(a), len(b)))
+
+    @staticmethod
+    def _dtw_distance_cuda(a: np.ndarray, b: np.ndarray) -> float:
+        """Sakoe-Chiba constrained DTW using CUDA arrays; never CPU fallback.
+
+        Keep float32 accumulation, the original 260-frame cap and window.
+        CUDA kernel launch overhead may outweigh gains for very short words;
+        measure latency on the actual GPU before calling it an upgrade.
+        """
+        import torch
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA-required DTW cannot run: NVIDIA GPU unavailable")
+        if a.size == 0 or b.size == 0:
+            return float("inf")
+        if len(a) > 260:
+            a = a[np.linspace(0, len(a) - 1, 260).astype(int)]
+        if len(b) > 260:
+            b = b[np.linspace(0, len(b) - 1, 260).astype(int)]
+        with torch.inference_mode():
+            aa = torch.as_tensor(np.ascontiguousarray(a), dtype=torch.float32,
+                                 device="cuda:0")
+            bb = torch.as_tensor(np.ascontiguousarray(b), dtype=torch.float32,
+                                 device="cuda:0")
+            n, m = aa.shape[0], bb.shape[0]
+            band = max(abs(n - m) + 2, int(max(n, m) * 0.30))
+            costs = (1.0 - aa @ bb.T).clamp_min(0.0)
+            acc = torch.full((n + 1, m + 1), float("inf"),
+                             dtype=torch.float32, device="cuda:0")
+            acc[0, 0] = 0.0
+            # Every anti-diagonal is independent, enabling vectorized CUDA
+            # updates. No NumPy/CPU fallback is used for the cost/DP matrix.
+            for diagonal in range(2, n + m + 1):
+                # Compute band endpoints as integer indices on the host.
+                # All distance and DTW arithmetic remains on GPU.
+                low = max(1, diagonal - m, (diagonal - band + 1) // 2)
+                high = min(n, diagonal - 1, (diagonal + band) // 2)
+                if low > high:
+                    continue
+                rows = torch.arange(low, high + 1, device="cuda:0")
+                cols = diagonal - rows
+                if rows.numel():
+                    acc[rows, cols] = costs[rows - 1, cols - 1] + torch.minimum(
+                        torch.minimum(acc[rows, cols - 1], acc[rows - 1, cols]),
+                        acc[rows - 1, cols - 1],
+                    )
+            return float((acc[n, m] / max(n, m)).item())
 
     @staticmethod
     def _dtw_distance_wavefront(a: np.ndarray, b: np.ndarray) -> float:
