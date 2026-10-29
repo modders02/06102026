@@ -74,8 +74,8 @@ try {
     Invoke-Checked "Installing DeepFilterNet, SciPy and English keyword dependencies" {
       & $venvPython -m pip install --timeout 120 --retries 10 deepfilternet scipy sentencepiece pypinyin
     }
-    Invoke-Checked "Installing required matched CUDA 12.4 torch/torchaudio 2.5.1" {
-      & $venvPython -m pip install --timeout 120 --retries 10 --index-url "https://download.pytorch.org/whl/cu124" "torch==2.5.1" "torchaudio==2.5.1"
+    Invoke-Checked "Installing CUDA 12.4 torch/torchaudio with resumable wheel cache" {
+      & (Join-Path $PSScriptRoot "install-cuda-torch.ps1") -PythonExe $venvPython
     }
     Invoke-Checked "Installing CUDA-enabled sherpa-onnx (CUDA 12 / cuDNN 9)" {
       & $venvPython -m pip install --timeout 120 --retries 10 "sherpa-onnx==2.0.1+cuda12.cudnn9" -f "https://k2-fsa.github.io/sherpa/onnx/cuda.html"
