@@ -471,6 +471,88 @@ class CustomKeywordEngine:
         return float(previous[-1] / max(len(a), len(b)))
 
     @staticmethod
+    def _dtw_distances_cuda_batched(
+        features: np.ndarray, templates: List[np.ndarray],
+    ) -> np.ndarray:
+        """Score every stored positive/UNKNOWN template in one GPU wavefront.
+
+        Previous code launched hundreds of tiny CUDA operations separately per
+        enrolled template, causing multi-second latency on a GTX 1650. Batch
+        templates, share a single query/cost-matrix launch and advance all
+        constrained DTW paths together. This is GPU-only: no CPU DP fallback.
+        Per-template length caps and Sakoe-Chiba bands remain unchanged.
+        """
+        import torch
+        if not torch.cuda.is_available():
+            raise RuntimeError("CUDA-required batched DTW cannot run: GPU unavailable")
+        result = np.full(len(templates), np.inf, dtype=np.float32)
+        valid = [i for i, t in enumerate(templates) if t.size]
+        if not valid or features.size == 0:
+            return result
+        if len(features) > 260:
+            features = features[np.linspace(0, len(features) - 1, 260).astype(int)]
+        trimmed = [
+            templates[i][np.linspace(0, len(templates[i]) - 1, 260).astype(int)]
+            if len(templates[i]) > 260 else templates[i]
+            for i in valid
+        ]
+        n = len(features)
+        max_m = max(len(t) for t in trimmed)
+        count = len(trimmed)
+        # Padding is not part of the recurrence: per-template masks keep
+        # padded cells at infinity and terminal distances at true lengths.
+        padded = np.zeros((count, max_m, features.shape[1]), dtype=np.float32)
+        lengths_host = np.array([len(t) for t in trimmed], dtype=np.int64)
+        for index, template in enumerate(trimmed):
+            padded[index, :len(template)] = template
+        bands_host = np.array([
+            max(abs(n - int(m)) + 2, int(max(n, int(m)) * 0.30))
+            for m in lengths_host
+        ], dtype=np.int64)
+
+        with torch.inference_mode():
+            device = "cuda:0"
+            aa = torch.as_tensor(np.ascontiguousarray(features), dtype=torch.float32,
+                                 device=device)
+            bb = torch.as_tensor(padded, dtype=torch.float32, device=device)
+            lengths = torch.as_tensor(lengths_host, device=device)
+            bands = torch.as_tensor(bands_host, device=device)
+            costs = (1.0 - torch.bmm(
+                aa.unsqueeze(0).expand(count, -1, -1),
+                bb.transpose(1, 2),
+            )).clamp_min(0.0)
+            acc = torch.full(
+                (count, n + 1, max_m + 1),
+                float("inf"), dtype=torch.float32, device=device,
+            )
+            acc[:, 0, 0] = 0.0
+            for diagonal in range(2, n + max_m + 1):
+                low = max(1, diagonal - max_m)
+                high = min(n, diagonal - 1)
+                if low > high:
+                    continue
+                rows = torch.arange(low, high + 1, device=device)
+                cols = diagonal - rows
+                within = ((cols.unsqueeze(0) <= lengths.unsqueeze(1)) &
+                          ((rows - cols).abs().unsqueeze(0) <= bands.unsqueeze(1)))
+                predecessor = torch.minimum(
+                    torch.minimum(acc[:, rows, cols - 1],
+                                  acc[:, rows - 1, cols]),
+                    acc[:, rows - 1, cols - 1],
+                )
+                proposed = costs[:, rows - 1, cols - 1] + predecessor
+                acc[:, rows, cols] = torch.where(
+                    within, proposed, float("inf"),
+                )
+            outputs = acc[torch.arange(count, device=device), n, lengths] / (
+                torch.maximum(torch.full_like(lengths, n), lengths)
+            )
+            distances = outputs.cpu().numpy()
+        for index, distance in zip(valid, distances):
+            result[index] = distance
+        return result
+
+    @staticmethod
     def _dtw_distance_cuda(a: np.ndarray, b: np.ndarray) -> float:
         """Sakoe-Chiba constrained DTW using CUDA arrays; never CPU fallback.
 
@@ -973,6 +1055,25 @@ class CustomKeywordEngine:
             }
             negative_templates = list(self.templates.get(NEGATIVE_CLASS, []))
 
+        gpu_distances = None
+        if os.environ.get("MSDS_REQUIRE_CUDA") == "1":
+            # All live KWS scores (including trained UNKNOWN examples) share
+            # ONE batched GPU evaluation. The classifier's gates are unchanged.
+            flat_templates = [
+                template
+                for group in positive_snapshot.values()
+                for template in group
+            ] + negative_templates
+            all_distances = self._dtw_distances_cuda_batched(
+                features, flat_templates,
+            )
+            gpu_distances = {}
+            start = 0
+            for key, group in positive_snapshot.items():
+                gpu_distances[key] = all_distances[start:start + len(group)]
+                start += len(group)
+            gpu_distances[NEGATIVE_CLASS] = all_distances[start:]
+
         ranked = []
         target_lengths = {}
         for keyword, templates in positive_snapshot.items():
@@ -980,7 +1081,11 @@ class CustomKeywordEngine:
             # matcher over the experimental v4 sequence matcher (14/18 vs
             # 12/18 leave-one-out correct). Keep v4 available in /kws/evaluate,
             # but use the stronger measured baseline for live recognition.
-            distances = sorted(self._dtw_distance(features, template) for template in templates)
+            distances = sorted(
+                float(v) for v in gpu_distances[keyword]
+            ) if gpu_distances is not None else sorted(
+                self._dtw_distance(features, template) for template in templates
+            )
             selected = distances[:min(2, len(distances))]
             distance = float(np.mean(selected))
             confidence = self._distance_to_confidence(distance)
@@ -1017,6 +1122,8 @@ class CustomKeywordEngine:
             # next-best scores visible so one anomalous UNKNOWN enrollment can
             # be distinguished from broad negative-class overlap before tuning.
             negative_distances = sorted(
+                float(v) for v in gpu_distances[NEGATIVE_CLASS]
+            ) if gpu_distances is not None else sorted(
                 self._dtw_distance(features, template)
                 for template in negative_templates
             )

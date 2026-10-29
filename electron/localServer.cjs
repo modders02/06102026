@@ -273,8 +273,16 @@ function probeStatus(timeoutMs = 1500) {
   });
 }
 
+/** CUDA model import + first-time GPU initialization can exceed 30 seconds.
+ * Retain the old 30s CPU budget; dedicated CUDA runtime receives 180s.
+ * The maximum is finite: a hung child still reports a startup error.
+ */
+function cameraReadyBudgetMs(env = process.env) {
+  return env.MSDS_REQUIRE_CUDA === '1' ? 180000 : 30000;
+}
+
 /** Poll /status until ready or the budget expires. Never blocks forever. */
-async function waitForReady(totalMs = 30000, intervalMs = 1000) {
+async function waitForReady(totalMs = cameraReadyBudgetMs(), intervalMs = 1000) {
   const deadline = Date.now() + totalMs;
   while (Date.now() < deadline) {
     if (await probeStatus()) return true;
@@ -387,16 +395,18 @@ async function startLocalServer() {
     child = null;
   });
 
-  const ready = await waitForReady();
+  const readyBudgetMs = cameraReadyBudgetMs();
+  log('camera readiness timeout:', readyBudgetMs, 'ms');
+  const ready = await waitForReady(readyBudgetMs);
   if (ready) {
     setPhase('ready', `ready at ${STATUS_URL}`);
     return { managed: true, running: true, error: null, pythonPath: python.exe, dir, bootstrap: getBootstrapStatus() };
   }
 
   const error = childError ||
-    'Local camera server did not answer /status within 30s. The app will open, but CCTV ' +
-    'streaming/custom keyword detection will be unavailable until it starts. Check the log above, or run ' +
-    'local-server\\start_server.bat manually.';
+    `Local camera server did not answer /status within ${readyBudgetMs / 1000}s. ` +
+    'CCTV streaming/custom keyword detection will be unavailable until it starts. ' +
+    'Check the backend logs and CUDA initialization; avoid starting a duplicate server.';
   logErr(error);
   bootstrap = { ...bootstrap, phase: 'error', message: error };
   return { managed: true, running: false, error, pythonPath: python.exe, dir, bootstrap: getBootstrapStatus() };
