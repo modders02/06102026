@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as faceapi from '@vladmandic/face-api';
 import { estimateHistoryExpression, measureExpressionGeometry } from '@/lib/facialExpressionGeometry';
+import {
+  advanceDistressFaceConfirmation, emptyDistressFaceConfirmation,
+  DISTRESS_FACE_CONFIRM_FRAMES,
+} from '@/lib/multimodalDistress';
 
 // Loads pretrained face detection + expression models from a CDN.
 // Models are trained on a massive FER+ / AffectNet-style dataset.
@@ -16,6 +20,8 @@ export type FaceDistress = {
   historyConfidence?: number;
   /** Geometry correction must be repeated on fresh frames before alarm fusion. */
   historyGeometryCorrected?: boolean;
+  /** Safety-only: repeated fresh Face-api observations (never geometry guesses). */
+  fusionConfirmed?: boolean;
   probability: number;           // 0..1
   distressScore: number;         // 0..100, how distressed the person is
   distressLevel: 'none' | 'mild' | 'severe';
@@ -47,10 +53,12 @@ export function useFaceDistress(active: boolean) {
   const [distress, setDistress] = useState<FaceDistress>(EMPTY);
   const busyRef = useRef(false);
   const historyRef = useRef<number[]>([]);
+  const confirmationRef = useRef(emptyDistressFaceConfirmation());
 
   useEffect(() => {
     if (!active) {
       historyRef.current = [];
+      confirmationRef.current = emptyDistressFaceConfirmation();
       setDistress(EMPTY);
       return;
     }
@@ -81,6 +89,7 @@ export function useFaceDistress(active: boolean) {
 
       if (!detections.length) {
         historyRef.current = [];
+        confirmationRef.current = emptyDistressFaceConfirmation();
         setDistress(EMPTY);
         return EMPTY;
       }
@@ -119,6 +128,11 @@ export function useFaceDistress(active: boolean) {
         if (v > dominantProb) { dominantProb = v; dominant = k; }
       }
 
+      // Surprise and neutral reset the safety observation sequence. Geometry
+      // corrections are for Event History only, never emergency validation.
+      confirmationRef.current = advanceDistressFaceConfirmation(
+        confirmationRef.current, dominant, dominantProb, Date.now(),
+      );
       const geometry = measureExpressionGeometry(main.landmarks?.positions);
       const historyEstimate = estimateHistoryExpression(expr, geometry);
       const result: FaceDistress = {
@@ -128,6 +142,7 @@ export function useFaceDistress(active: boolean) {
         historyExpression: historyEstimate.label,
         historyConfidence: historyEstimate.confidence,
         historyGeometryCorrected: historyEstimate.geometryCorrected,
+        fusionConfirmed: confirmationRef.current.count >= DISTRESS_FACE_CONFIRM_FRAMES,
         distressScore,
         distressLevel: distressScore > 55 ? 'severe' : distressScore > 25 ? 'mild' : 'none',
       };
