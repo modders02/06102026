@@ -52,6 +52,11 @@ class ShadowPCMFeed:
             except queue.Full:
                 self._subscriber = None
 
+    def disconnect(self) -> None:
+        """Invalidate any listener when a camera stops or is reconfigured."""
+        with self._lock:
+            self._subscriber = None
+
     def has_subscriber(self) -> bool:
         with self._lock:
             return self._subscriber is not None
