@@ -19,7 +19,6 @@ import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/mu
 import { useFaceDistress } from '@/hooks/useFaceDistress';
 import type { FinalSpeechResult } from '@/hooks/useSpeechRecognition';
 import { historyEmotionMeta } from '@/lib/emotionEvents';
-import { corroborateGeometryFear, emptyGeometryEvidenceState } from '@/lib/corroboratedFaceEvidence';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
 import {
   FIRE_FUSION_WINDOW_MS,
@@ -182,7 +181,6 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const fireValidationTimerRef = useRef<number | undefined>(undefined);
   const snapshotAnalysisKickRef = useRef<(() => void) | null>(null);
   const recentDistressFaceRef = useRef<DistressFaceSignal | null>(null);
-  const geometryEvidenceRef = useRef(emptyGeometryEvidenceState());
   const recentDistressSpeechRef = useRef<DistressSpeechSignal | null>(null);
   const recentFireVisualRef = useRef<FireVisualSignal | null>(null);
   const recentFireSpeechRef = useRef<FireSpeechSignal | null>(null);
@@ -270,7 +268,6 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   useEffect(() => {
     analysisRevisionRef.current += 1;
     faceAnalysisRevisionRef.current = null;
-    geometryEvidenceRef.current = emptyGeometryEvidenceState();
     if (!camera.enabled || !camera.aiEnabled) {
       prevFrameRef.current = null;
       fireStateRef.current = createFireState();
@@ -729,33 +726,17 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       const analyzedFace = await facePromise;
       if (cancelled()) return;
 
-      // Use the detector's RETURNED current-frame result, not delayed React
-      // state, so the four-second validation can accept a matching fresh face.
-      // Geometry-corrected fear labels require multiple corroborating frames;
-      // historical expression entries alone never create Camera Alerts.
+      // Only two consecutive, classifier-confirmed fresh Face-api frames
+      // may contribute to safety fusion. Surprised/shocked or geometry-based
+      // Frightened *display estimates* must never authorize an emergency.
+      // Use the analyzer's returned current frame (not delayed React state).
       if (analyzedFace) {
         const observedAt = Date.now();
-        const geometryResult = corroborateGeometryFear(
-          analyzedFace, geometryEvidenceRef.current, observedAt,
-        );
-        geometryEvidenceRef.current = geometryResult.state;
-        const rawFace = analyzedFace.hasFace
+        const confirmedFace = analyzedFace.hasFace && analyzedFace.fusionConfirmed === true
           ? makeDistressFaceSignal(analyzedFace.expression, analyzedFace.probability, observedAt)
           : null;
-        const activeSpeech = recentDistressSpeechRef.current;
-        const corroborated = activeSpeech && geometryResult.signal
-          && isKeywordFaceCompatible(activeSpeech.keyword, geometryResult.signal.label)
-          ? geometryResult.signal : null;
-        const currentFace = rawFace
-          && (!activeSpeech || isKeywordFaceCompatible(activeSpeech.keyword, rawFace.label))
-          ? rawFace : corroborated ?? rawFace;
-        if (currentFace) {
-          recentDistressFaceRef.current = currentFace;
-          maybeEmitVerifiedDistress();
-        } else {
-          // A fresh non-matching face invalidates older compatible evidence.
-          recentDistressFaceRef.current = null;
-        }
+        recentDistressFaceRef.current = confirmedFace;
+        if (confirmedFace) maybeEmitVerifiedDistress();
       } else {
         const previous = recentDistressFaceRef.current;
         if (previous && Date.now() - previous.at > DISTRESS_FACE_FRESHNESS_MS) {
@@ -1110,8 +1091,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
     const d = face.distress;
     const emotion = historyEmotionMeta(d.historyExpression ?? d.expression);
     const emotionConfidence = d.historyConfidence ?? d.probability;
-    const fusionExpression = d.hasFace && isMultimodalDistressExpression(d.expression);
-    const distressFace = d.hasFace ? makeDistressFaceSignal(d.expression, d.probability) : null;
+    const fusionExpression = d.hasFace && d.fusionConfirmed === true
+      && isMultimodalDistressExpression(d.expression);
+    const distressFace = fusionExpression
+      ? makeDistressFaceSignal(d.expression, d.probability) : null;
     const detected = !!distressFace;
 
     patch({
@@ -1160,10 +1143,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       return;
     }
 
-    if (d.hasFace && d.probability >= DISTRESS_FACE_MIN_CONFIDENCE) {
-      // Keep alert evidence synchronized with what the camera currently sees.
-      // This prevents a previous Angry frame from combining with later "help"
-      // while the displayed expression has already changed to Happy/Neutral/etc.
+    if (d.hasFace) {
+      // Any fresh non-confirmed expression (including Surprise, Neutral and
+      // uncertain faces) invalidates stale Angry/Frightened facial evidence.
+      // Otherwise an earlier fearful frame could pair with later "help".
       recentDistressFaceRef.current = null;
       return;
     }

@@ -84,11 +84,9 @@ export function normalizeDistressFaceLabel(
   const normalized = (expression ?? '').trim().toLowerCase();
   if (normalized === 'angry' || normalized === 'anger') return 'Angry';
   if (normalized === 'sad' || normalized === 'sadness') return 'Sad';
-  if (
-    normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
-    || normalized === 'surprised' || normalized === 'surprise'
-    || normalized === 'shock' || normalized === 'shocked'
-  ) return 'Frightened';
+  // Surprise / shock is not fear. Neither may satisfy a distress-word
+  // pairing, regardless of classifier confidence or spoken keyword.
+  if (normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened') return 'Frightened';
   return null;
 }
 
@@ -104,6 +102,41 @@ export function makeDistressFaceSignal(
   if (!Number.isFinite(confidence) || confidence < DISTRESS_FACE_MIN_CONFIDENCE) return null;
   const label = normalizeDistressFaceLabel(expression);
   return label ? { label, confidence, at } : null;
+}
+
+/** A fresh same-face-camera classifier estimate must be repeated before
+ * contributing to any speech+face Camera Alert. History/display is separate.
+ * This reduces one-frame surprise/fear misclassifications.
+ */
+export interface DistressFaceConfirmation {
+  label: DistressFaceLabel | null;
+  count: number;
+  lastAt: number;
+}
+
+export const DISTRESS_FACE_CONFIRM_FRAMES = 2;
+export const DISTRESS_FACE_CONFIRM_MAX_GAP_MS = 2500;
+
+export const emptyDistressFaceConfirmation = (): DistressFaceConfirmation => ({
+  label: null, count: 0, lastAt: 0,
+});
+
+export function advanceDistressFaceConfirmation(
+  previous: DistressFaceConfirmation,
+  expression: string | null | undefined,
+  confidence: number,
+  at: number,
+): DistressFaceConfirmation {
+  const face = makeDistressFaceSignal(expression, confidence, at);
+  if (!face || !Number.isFinite(at)) return emptyDistressFaceConfirmation();
+  const consecutive = previous.label === face.label
+    && at > previous.lastAt
+    && at - previous.lastAt <= DISTRESS_FACE_CONFIRM_MAX_GAP_MS;
+  return {
+    label: face.label,
+    count: consecutive ? Math.min(DISTRESS_FACE_CONFIRM_FRAMES, previous.count + 1) : 1,
+    lastAt: at,
+  };
 }
 
 /**
