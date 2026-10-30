@@ -2,9 +2,6 @@
 # The model is downloaded separately from the official sherpa-onnx releases.
 sherpa-onnx==1.12.26
 numpy>=1.26,<3
-# The sherpa-onnx-cli text2token entry point imports Click, but the 1.12.26
-# wheel does not declare it as a dependency. Needed to tokenize MSDS keywords.
-click>=8.1,<9
-# sherpa-onnx-cli uses SentencePiece for --tokens-type bpe, but its
-# wheel does not install this CLI dependency automatically on Windows.
+# Direct English BPE tokenization uses SentencePiece; the optional
+# sherpa-onnx-cli imports unused Chinese pypinyin and is NOT invoked.
 sentencepiece==0.2.2
