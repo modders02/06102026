@@ -86,8 +86,6 @@ export function normalizeDistressFaceLabel(
   if (normalized === 'sad' || normalized === 'sadness') return 'Sad';
   if (
     normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
-    || normalized === 'surprised' || normalized === 'surprise'
-    || normalized === 'shock' || normalized === 'shocked'
   ) return 'Frightened';
   return null;
 }
