@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as faceapi from '@vladmandic/face-api';
 import { estimateHistoryExpression, measureExpressionGeometry } from '@/lib/facialExpressionGeometry';
+import { classifyWithFer, FER_REQUEST_INTERVAL_MS, FER_RETRY_AFTER_ERROR_MS } from '@/lib/ferEmotion';
+import {
+  advanceDistressConfirmation, advanceEmotionStability,
+  emptyDistressConfirmation, emptyEmotionStability,
+  EMOTION_HISTORY_MAX_STALE_MS,
+} from '@/lib/emotionStability';
 
 // Loads pretrained face detection + expression models from a CDN.
 // Models are trained on a massive FER+ / AffectNet-style dataset.
@@ -16,6 +22,11 @@ export type FaceDistress = {
   historyConfidence?: number;
   /** Geometry correction must be repeated on fresh frames before alarm fusion. */
   historyGeometryCorrected?: boolean;
+  /** True after three confident, consecutive history observations. */
+  historyConfirmed?: boolean;
+  historySource?: 'fer' | 'faceapi';
+  /** Raw Face-api distress held across two consecutive fresh frames. */
+  fusionConfirmed?: boolean;
   probability: number;           // 0..1
   distressScore: number;         // 0..100, how distressed the person is
   distressLevel: 'none' | 'mild' | 'severe';
@@ -47,10 +58,21 @@ export function useFaceDistress(active: boolean) {
   const [distress, setDistress] = useState<FaceDistress>(EMPTY);
   const busyRef = useRef(false);
   const historyRef = useRef<number[]>([]);
+  const historyStabilityRef = useRef(emptyEmotionStability());
+  const fusionStabilityRef = useRef(emptyDistressConfirmation());
+  const ferInFlightRef = useRef(false);
+  const ferLastAttemptRef = useRef(0);
+  const ferRetryAfterRef = useRef(0);
+  const ferFreshUntilRef = useRef(0);
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   useEffect(() => {
     if (!active) {
       historyRef.current = [];
+      historyStabilityRef.current = emptyEmotionStability();
+      fusionStabilityRef.current = emptyDistressConfirmation();
+      ferFreshUntilRef.current = 0;
       setDistress(EMPTY);
       return;
     }
@@ -74,13 +96,16 @@ export function useFaceDistress(active: boolean) {
       const detections = (faceapi.nets.faceLandmark68TinyNet.isLoaded
         ? await faceapi.detectAllFaces(source, options).withFaceLandmarks(true).withFaceExpressions()
         : await faceapi.detectAllFaces(source, options).withFaceExpressions()) as unknown as Array<{
-          detection: { box: { area: number } };
+          detection: { box: { area: number; x: number; y: number; width: number; height: number } };
           expressions: Record<string, number>;
           landmarks?: { positions: { x: number; y: number }[] };
         }>;
 
       if (!detections.length) {
         historyRef.current = [];
+        historyStabilityRef.current = emptyEmotionStability();
+        fusionStabilityRef.current = emptyDistressConfirmation();
+        ferFreshUntilRef.current = 0;
         setDistress(EMPTY);
         return EMPTY;
       }
@@ -119,18 +144,89 @@ export function useFaceDistress(active: boolean) {
         if (v > dominantProb) { dominantProb = v; dominant = k; }
       }
 
+      const now = Date.now();
       const geometry = measureExpressionGeometry(main.landmarks?.positions);
       const historyEstimate = estimateHistoryExpression(expr, geometry);
+      const runnerUp = Object.entries(expr)
+        .filter(([label]) => label !== dominant)
+        .reduce((maximum, [, value]) => Math.max(maximum, Number.isFinite(value) ? value : 0), 0);
+
+      // Original Face-api results remain the only automatic distress-alert
+      // evidence. FER can improve Event History/display but cannot authorize
+      // a safety alert. Two successive fresh raw Face-api frames are required.
+      const rawDistressLabel = dominant === 'angry' || dominant === 'fearful' || dominant === 'sad'
+        ? dominant : null;
+      fusionStabilityRef.current = advanceDistressConfirmation(
+        fusionStabilityRef.current, rawDistressLabel, dominantProb, now,
+      );
+      const fusionConfirmed = fusionStabilityRef.current.count >= 2;
+
+      // FER is an optional observer, not a blocking dependency. When offline,
+      // use the same three-frame stability gate for the Face-api fallback.
+      const ferRecent = now < ferFreshUntilRef.current;
+      if (!ferRecent) {
+        historyStabilityRef.current = advanceEmotionStability(historyStabilityRef.current, {
+          label: historyEstimate.label, confidence: historyEstimate.confidence,
+          runnerUp, source: 'faceapi', at: now,
+        });
+      }
+      const historyState = historyStabilityRef.current;
+      const historyConfirmed = !!historyState.accepted
+        && now - historyState.acceptedAt <= EMOTION_HISTORY_MAX_STALE_MS;
       const result: FaceDistress = {
         hasFace: true,
         expression: dominant,
         probability: dominantProb,
-        historyExpression: historyEstimate.label,
-        historyConfidence: historyEstimate.confidence,
-        historyGeometryCorrected: historyEstimate.geometryCorrected,
+        historyExpression: historyConfirmed ? historyState.accepted! : undefined,
+        historyConfidence: historyConfirmed ? historyState.acceptedConfidence : undefined,
+        historyGeometryCorrected: !ferRecent && historyEstimate.geometryCorrected,
+        historyConfirmed,
+        historySource: ferRecent ? 'fer' : 'faceapi',
+        fusionConfirmed,
         distressScore,
         distressLevel: distressScore > 55 ? 'severe' : distressScore > 25 ? 'mild' : 'none',
       };
+      // Do not await TensorFlow inference in the camera's detection/alert loop.
+      // The sidecar response is asynchronously applied to history fields only.
+      if (!ferInFlightRef.current && now >= ferRetryAfterRef.current
+          && now - ferLastAttemptRef.current >= FER_REQUEST_INTERVAL_MS) {
+        ferInFlightRef.current = true;
+        ferLastAttemptRef.current = now;
+        void classifyWithFer(source, main.detection.box)
+          .then(fer => {
+            if (!activeRef.current) return;
+            if (!fer) {
+              // No FER face match: fall back to current Face-api observations.
+              ferFreshUntilRef.current = 0;
+              return;
+            }
+            const receivedAt = Date.now();
+            if (receivedAt - now > 2600) return;
+            ferFreshUntilRef.current = receivedAt + 5000;
+            historyStabilityRef.current = advanceEmotionStability(historyStabilityRef.current, {
+              label: fer.label, confidence: fer.confidence, runnerUp: fer.runnerUp,
+              source: 'fer', at: receivedAt,
+            });
+            const stable = historyStabilityRef.current;
+            const confirmed = !!stable.accepted
+              && receivedAt - stable.acceptedAt <= EMOTION_HISTORY_MAX_STALE_MS;
+            setDistress(previous => previous.hasFace ? {
+              ...previous,
+              historyExpression: confirmed ? stable.accepted! : undefined,
+              historyConfidence: confirmed ? stable.acceptedConfidence : undefined,
+              historyGeometryCorrected: false,
+              historyConfirmed: confirmed,
+              historySource: 'fer',
+            } : previous);
+          })
+          .catch(() => {
+            // Missing FER server, CORS failure, or slow optional model:
+            // back off without stalling video or existing camera alert logic.
+            ferRetryAfterRef.current = Date.now() + FER_RETRY_AFTER_ERROR_MS;
+            ferFreshUntilRef.current = 0;
+          })
+          .finally(() => { ferInFlightRef.current = false; });
+      }
       setDistress(result);
       return result;
     } catch (err) {
