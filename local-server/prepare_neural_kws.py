@@ -112,7 +112,15 @@ def prepare(root: Path = ROOT, download: bool = True) -> Path:
         str(raw), str(processed),
     ]
     print("[Neural KWS] Building English keyword tokens...", flush=True)
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    # Invoke Click-based sherpa-onnx CLI with Unicode support regardless of
+    # a legacy cp1252 Windows console (the CLI emits BPE/CJK examples).
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8",
+        errors="replace", env=env,
+    )
     if result.returncode != 0:
         raise RuntimeError("Keyword tokenization failed: " + (result.stderr or result.stdout)[-1200:])
     lines = [line.strip() for line in processed.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
