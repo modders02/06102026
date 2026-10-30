@@ -1,3 +1,5 @@
 # Optional FER sidecar only. Install in local-server/.fer-venv, NOT the KWS .venv
 # The 2025 stable API provides FER(mtcnn=False).detect_emotions(image).
 fer==25.10.3
+# FER 25.10.3 imports pkg_resources; newer setuptools releases omit it.
+setuptools==80.9.0
