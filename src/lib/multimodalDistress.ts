@@ -84,11 +84,9 @@ export function normalizeDistressFaceLabel(
   const normalized = (expression ?? '').trim().toLowerCase();
   if (normalized === 'angry' || normalized === 'anger') return 'Angry';
   if (normalized === 'sad' || normalized === 'sadness') return 'Sad';
-  if (
-    normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
-    || normalized === 'surprised' || normalized === 'surprise'
-    || normalized === 'shock' || normalized === 'shocked'
-  ) return 'Frightened';
+  // Surprise / shock is not fear. Neither may satisfy a distress-word
+  // pairing, regardless of classifier confidence or spoken keyword.
+  if (normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened') return 'Frightened';
   return null;
 }
 
