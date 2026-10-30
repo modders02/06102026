@@ -21,6 +21,12 @@ class FerSidecarTests(unittest.TestCase):
         self.assertEqual(result["label"], "surprise")
         self.assertEqual(result["confidence"], 0.75)
 
+    def test_accepts_numpy_float32_scores(self):
+        import numpy as np
+        payload = {"box": [0, 0, 120, 120],
+                   "emotions": {"happy": np.float32(0.9), "neutral": np.float32(0.1)}}
+        self.assertEqual(sanitize_predictions([payload])["label"], "happy")
+
     def test_rejects_invalid_results(self):
         self.assertIsNone(sanitize_predictions([]))
         self.assertIsNone(sanitize_predictions([{"box": [0, 0, 5, 5], "emotions": {}}]))
