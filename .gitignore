@@ -63,3 +63,9 @@ training/facial_distress/.venv/
 training/facial_distress/data/
 training/facial_distress/artifacts/
 training/facial_distress/__pycache__/
+
+# Optional neural keyword spotter and local test reports (no audio committed)
+local-server/.neural-kws-venv/
+local-server/neural-kws-models/
+local-server/neural-kws-results/
+local-server/neural-kws-data/
