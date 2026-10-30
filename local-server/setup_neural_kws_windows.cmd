@@ -14,6 +14,12 @@ if errorlevel 1 (
   echo [MSDS Neural KWS] Package installation failed.
   exit /b 1
 )
+echo [MSDS Neural KWS] Checking sherpa-onnx-cli keyword tokenization command...
+".neural-kws-venv\Scripts\sherpa-onnx-cli.exe" text2token --help >nul
+if errorlevel 1 (
+  echo [MSDS Neural KWS] sherpa-onnx-cli is missing a runtime dependency. Review the error above.
+  exit /b 1
+)
 ".neural-kws-venv\Scripts\python.exe" "prepare_neural_kws.py"
 if errorlevel 1 (
   echo [MSDS Neural KWS] Model/keyword preparation failed.
