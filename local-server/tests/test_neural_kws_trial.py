@@ -1,18 +1,23 @@
 """Read-only neural KWS test suite; no model, audio or FFmpeg required."""
 from __future__ import annotations
 import io
+import os
+import queue
+import threading
 from pathlib import Path
 import sys
 import tarfile
 import unittest
+from unittest.mock import Mock, patch
 
 HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
 from neural_kws_trial import (  # noqa: E402
     CHUNK_BYTES, dtw_snapshot, make_ffmpeg_args, normalize_word,
-    validate_camera,
+    validate_camera, make_bridge_request, pcm_bridge_enabled,
 )
 from prepare_neural_kws import MODEL_NAME, safe_members, KEYWORDS  # noqa: E402
+from msds.neural_shadow_pcm import ShadowPCMFeed, enabled as pcm_enabled  # noqa: E402
 
 
 def connected_camera(path="slot-1"):
@@ -94,6 +99,72 @@ class NeuralKwsShadowTests(unittest.TestCase):
         without_audio["cameras"][0]["audio"]["connected"] = False
         with self.assertRaises(RuntimeError):
             validate_camera(without_audio, "slot-1")
+
+    def test_bridge_transport_is_local_and_opt_in(self):
+        request = make_bridge_request("http://127.0.0.1:5000", "slot-1")
+        self.assertEqual(
+            request.full_url,
+            "http://127.0.0.1:5000/cameras/slot-1/experimental-neural-pcm",
+        )
+        self.assertEqual(request.get_header("X-msds-shadow-client"), "neural-kws-trial")
+        with self.assertRaises(ValueError):
+            make_bridge_request("http://127.0.0.1:5000", "../../credentials")
+        status = connected_camera()
+        self.assertFalse(pcm_bridge_enabled(status, "slot-1"))
+        status["cameras"][0]["audio"]["neural_shadow_pcm"] = {"enabled": True}
+        self.assertTrue(pcm_bridge_enabled(status, "slot-1"))
+        self.assertFalse(pcm_bridge_enabled(status, "slot-2"))
+        with patch.dict(os.environ, {"MSDS_KWS_SHADOW_PCM": "1"}):
+            self.assertTrue(pcm_enabled())
+        with patch.dict(os.environ, {"MSDS_KWS_SHADOW_PCM": "0"}):
+            self.assertFalse(pcm_enabled())
+
+    def test_shadow_audio_tap_never_blocks_dtw_and_rejects_overflow(self):
+        feed = ShadowPCMFeed(queue_size=1)
+        self.assertFalse(feed.has_subscriber())
+        subscriber = feed.subscribe()
+        self.assertIsNotNone(subscriber)
+        self.assertIsNone(feed.subscribe())  # Only one local observer.
+        feed.publish(b"\x00\x00" * 160)
+        self.assertEqual(subscriber.get_nowait(), b"\x00\x00" * 160)
+        feed.publish(b"\x01\x00" * 160)
+        # Publishing a second packet without consuming the first disconnects
+        # instead of injecting noncontiguous audio into the neural stream.
+        feed.publish(b"\x02\x00" * 160)
+        self.assertFalse(feed.has_subscriber())
+        self.assertEqual(subscriber.get_nowait(), b"\x01\x00" * 160)
+        with self.assertRaises(queue.Empty):
+            subscriber.get_nowait()
+        feed.unsubscribe(subscriber)
+        replacement = feed.subscribe()
+        self.assertIsNotNone(replacement)
+        feed.disconnect()
+        self.assertFalse(feed.has_subscriber())
+
+    def test_backend_pcm_endpoint_denies_lan_and_browser_origins(self):
+        from fastapi import HTTPException
+        from starlette.requests import Request
+        from msds.api import experimental_neural_pcm
+        def request(host: str, origin: str | None = None, client: str = "neural-kws-trial"):
+            hs = [(b"x-msds-shadow-client", client.encode("ascii"))]
+            if origin is not None:
+                hs.append((b"origin", origin.encode("ascii")))
+            return Request({"type": "http", "method": "GET", "path": "/",
+                            "headers": hs, "client": (host, 12345),
+                            "server": ("127.0.0.1", 5000), "scheme": "http"})
+        with patch.dict(os.environ, {"MSDS_KWS_SHADOW_PCM": "0"}):
+            with self.assertRaises(HTTPException) as err:
+                experimental_neural_pcm("slot-1", request("127.0.0.1"))
+            self.assertEqual(err.exception.status_code, 404)
+        with patch.dict(os.environ, {"MSDS_KWS_SHADOW_PCM": "1"}):
+            for host, origin, client in [
+                ("192.168.0.12", None, "neural-kws-trial"),
+                ("127.0.0.1", "http://localhost:8080", "neural-kws-trial"),
+                ("127.0.0.1", None, "browser"),
+            ]:
+                with self.assertRaises(HTTPException) as err:
+                    experimental_neural_pcm("slot-1", request(host, origin, client))
+                self.assertEqual(err.exception.status_code, 403)
 
     def test_neural_result_cannot_change_dtw_status(self):
         state = connected_camera()
