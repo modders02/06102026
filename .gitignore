@@ -63,3 +63,6 @@ training/facial_distress/.venv/
 training/facial_distress/data/
 training/facial_distress/artifacts/
 training/facial_distress/__pycache__/
+
+# Optional local facial-expression classifier environment
+local-server/.fer-venv/
