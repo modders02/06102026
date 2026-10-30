@@ -6,11 +6,7 @@ requirements-neural-kws.txt. This does NOT train or alter the custom DTW engine.
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
-import re
-import subprocess
-import sys
 import tarfile
 import urllib.request
 
@@ -71,13 +67,49 @@ def download_archive(destination: Path):
         temp.unlink(missing_ok=True)
 
 
-def cli_path() -> Path:
-    home = Path(sys.executable).resolve().parent
-    for candidate in ("sherpa-onnx-cli.exe", "sherpa-onnx-cli"):
-        path = home / candidate
-        if path.exists():
-            return path
-    raise RuntimeError("Cannot find sherpa-onnx-cli in this Python venv. Install requirements-neural-kws.txt first.")
+def load_vocabulary(tokens_path: Path) -> set[str]:
+    """Match sherpa-onnx's vocabulary validation for the English model."""
+    vocabulary = set()
+    for line in tokens_path.read_text(encoding="utf-8-sig").splitlines():
+        if not line.strip():
+            continue
+        parts = line.split()
+        if len(parts) != 2:
+            raise ValueError(f"Malformed token-table entry: {line[:80]!r}")
+        try:
+            int(parts[1])
+        except ValueError as exc:
+            raise ValueError(f"Non-numeric token ID: {line[:80]!r}") from exc
+        if parts[0] in vocabulary:
+            raise ValueError(f"Duplicate model token: {parts[0]!r}")
+        vocabulary.add(parts[0])
+    if not vocabulary:
+        raise ValueError("English model token table is empty")
+    return vocabulary
+
+
+def encode_english_keywords(processor, vocabulary: set[str],
+                            keywords: tuple[str, ...] = KEYWORDS) -> list[str]:
+    """Format English BPE keywords with the normal Sherpa metadata.
+
+    The sherpa-onnx 1.12.26 CLI imports pypinyin for all languages, even for
+    English-only BPE. Use SentencePiece directly, then reject tokens absent
+    from the official model's tokens.txt. Never silently skip a keyword.
+    """
+    lines = []
+    for word in keywords:
+        if not word.isascii() or not word.isalpha() or word.lower() != word:
+            raise ValueError(f"Expected lowercase ASCII keyword, got {word!r}")
+        pieces = processor.encode(word.upper(), out_type=str)
+        if not pieces or any(not isinstance(piece, str) or not piece for piece in pieces):
+            raise ValueError(f"SentencePiece returned no valid tokens for {word.upper()}")
+        unknown = [piece for piece in pieces if piece not in vocabulary or piece == "<unk>"]
+        if unknown:
+            raise ValueError(f"Keyword {word.upper()} has out-of-vocabulary BPE tokens: {unknown}")
+        lines.append(" ".join((*pieces, ":1.0", "#0.50", f"@{word}")))
+    if len(lines) != len(keywords):
+        raise RuntimeError("Not all keywords were tokenized")
+    return lines
 
 
 def prepare(root: Path = ROOT, download: bool = True) -> Path:
@@ -103,32 +135,30 @@ def prepare(root: Path = ROOT, download: bool = True) -> Path:
             raise RuntimeError("The downloaded model is incomplete; check the archive.")
     raw = models / "msds_keywords_raw.txt"
     processed = models / "msds_keywords.txt"
-    # @label ensures the resulting keyword text maps cleanly to the MSDS keys.
-    # Start conservatively; adjust thresholds only after measuring false alarms.
-    raw.write_text("".join(f"{word.upper()} :1.0 #0.50 @{word}\n" for word in KEYWORDS), encoding="utf-8")
-    cmd = [
-        str(cli_path()), "text2token", "--tokens", str(model / "tokens.txt"),
-        "--tokens-type", "bpe", "--bpe-model", str(model / "bpe.model"),
-        str(raw), str(processed),
-    ]
-    print("[Neural KWS] Building English keyword tokens...", flush=True)
-    # Invoke Click-based sherpa-onnx CLI with Unicode support regardless of
-    # a legacy cp1252 Windows console (the CLI emits BPE/CJK examples).
-    env = os.environ.copy()
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["PYTHONUTF8"] = "1"
-    result = subprocess.run(
-        cmd, capture_output=True, text=True, encoding="utf-8",
-        errors="replace", env=env,
+    # Sherpa's English BPE tokenizer uses SentencePiece. Avoid its CLI here:
+    # sherpa-onnx==1.12.26 imports Chinese pypinyin even with --tokens-type bpe.
+    import sentencepiece as spm
+
+    raw.write_text(
+        "".join(f"{word.upper()} :1.0 #0.50 @{word}\n" for word in KEYWORDS),
+        encoding="utf-8",
     )
-    if result.returncode != 0:
-        raise RuntimeError("Keyword tokenization failed: " + (result.stderr or result.stdout)[-1200:])
-    lines = [line.strip() for line in processed.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
-    if len(lines) != len(KEYWORDS):
-        raise RuntimeError(f"Expected {len(KEYWORDS)} keyword lines, got {len(lines)}")
-    for word, line in zip(KEYWORDS, lines):
-        if f"@{word}" not in line:
-            raise RuntimeError(f"Keyword tokenizer did not preserve @{word}: {line!r}")
+    print("[Neural KWS] Building English keyword tokens directly with SentencePiece...", flush=True)
+    processor = spm.SentencePieceProcessor(model_file=str(model / "bpe.model"))
+    vocabulary = load_vocabulary(model / "tokens.txt")
+    lines = encode_english_keywords(processor, vocabulary)
+    if len(lines) != len(KEYWORDS) or not all(
+        f"@{word}" in line.split() for word, line in zip(KEYWORDS, lines)
+    ):
+        raise RuntimeError("Keyword tokenization produced invalid or missing labels")
+    temp = processed.with_suffix(".txt.part")
+    try:
+        temp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        temp.replace(processed)
+    finally:
+        temp.unlink(missing_ok=True)
+    for word in KEYWORDS:
+        print(f"[Neural KWS] Prepared {word.upper()} (BPE tokens verified)")
     print(f"[Neural KWS] Ready: {model}")
     print("[Neural KWS] Seven keywords prepared; no DTW templates were modified.")
     return model
