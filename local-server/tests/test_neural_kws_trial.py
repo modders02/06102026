@@ -142,6 +142,10 @@ class NeuralKwsShadowTests(unittest.TestCase):
         self.assertFalse(feed.has_subscriber())
 
     def test_backend_pcm_endpoint_denies_lan_and_browser_origins(self):
+        try:
+            import fastapi  # noqa: F401
+        except ImportError:
+            self.skipTest("FastAPI is optional in the minimal shadow-only test workflow")
         from fastapi import HTTPException
         from starlette.requests import Request
         from msds.api import experimental_neural_pcm
