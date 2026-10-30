@@ -739,7 +739,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
           analyzedFace, geometryEvidenceRef.current, observedAt,
         );
         geometryEvidenceRef.current = geometryResult.state;
-        const rawFace = analyzedFace.hasFace
+        const rawFace = analyzedFace.hasFace && analyzedFace.fusionConfirmed === true
           ? makeDistressFaceSignal(analyzedFace.expression, analyzedFace.probability, observedAt)
           : null;
         const activeSpeech = recentDistressSpeechRef.current;
@@ -1108,17 +1108,19 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   useEffect(() => {
     if (!camera.enabled || !camera.aiEnabled || faceAnalysisRevisionRef.current !== analysisRevisionRef.current) return;
     const d = face.distress;
-    const emotion = historyEmotionMeta(d.historyExpression ?? d.expression);
-    const emotionConfidence = d.historyConfidence ?? d.probability;
-    const fusionExpression = d.hasFace && isMultimodalDistressExpression(d.expression);
-    const distressFace = d.hasFace ? makeDistressFaceSignal(d.expression, d.probability) : null;
+    const emotion = d.historyConfirmed ? historyEmotionMeta(d.historyExpression) : null;
+    const emotionConfidence = d.historyConfirmed ? (d.historyConfidence ?? 0) : 0;
+    const fusionExpression = d.hasFace && d.fusionConfirmed === true
+      && isMultimodalDistressExpression(d.expression);
+    const distressFace = d.hasFace && d.fusionConfirmed === true
+      ? makeDistressFaceSignal(d.expression, d.probability) : null;
     const detected = !!distressFace;
 
     patch({
       faceDistress: {
         detected,
-        label: distressFace?.label ?? d.expression ?? '',
-        confidence: distressFace?.confidence ?? d.probability,
+        label: emotion?.label ?? distressFace?.label ?? d.expression ?? '',
+        confidence: emotion ? emotionConfidence : (distressFace?.confidence ?? d.probability),
         observedAt: new Date().toISOString(),
       },
     });
@@ -1149,7 +1151,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       });
     }
 
-    if (d.hasFace && emotion && emotionConfidence >= DISTRESS_FACE_MIN_CONFIDENCE) {
+    if (d.hasFace && d.historyConfirmed && emotion && emotionConfidence >= DISTRESS_FACE_MIN_CONFIDENCE) {
       // Display-only geometry correction is excluded from emergency fusion.
       emit('emotion', emotion.label, emotionConfidence);
     }
