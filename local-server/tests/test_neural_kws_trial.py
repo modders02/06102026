@@ -30,16 +30,42 @@ class NeuralKwsShadowTests(unittest.TestCase):
         requirements = (HERE / "requirements-neural-kws.txt").read_text(encoding="utf-8")
         self.assertIn("sherpa-onnx==1.12.26", requirements)
         self.assertIn("sentencepiece==0.2.2", requirements)
-        self.assertRegex(requirements, r"(?m)^click(?:[<=>!~].*)?$")
         setup = (HERE / "setup_neural_kws_windows.cmd").read_text(encoding="utf-8")
-        self.assertIn("sherpa-onnx-cli.exe", setup)
-        self.assertIn("text2token --help", setup)
-        self.assertIn("import click, sentencepiece, sherpa_onnx", setup)
+        self.assertIn("import sentencepiece, sherpa_onnx", setup)
+        self.assertNotIn("sherpa-onnx-cli.exe", setup)
         self.assertIn('set "PYTHONIOENCODING=utf-8"', setup)
         self.assertIn('set "PYTHONUTF8=1"', setup)
         prepare = (HERE / "prepare_neural_kws.py").read_text(encoding="utf-8")
-        self.assertIn('env["PYTHONIOENCODING"] = "utf-8"', prepare)
-        self.assertIn('"--tokens-type", "bpe"', prepare)
+        self.assertIn("SentencePieceProcessor", prepare)
+        self.assertNotIn("subprocess.run", prepare)
+
+    def test_bpe_keyword_format_and_vocabulary_validation(self):
+        from prepare_neural_kws import encode_english_keywords, load_vocabulary
+        import tempfile
+
+        class FakeBpe:
+            def encode(self, word, out_type=str):
+                self.assertion = out_type
+                return ["▁" + word[:2], word[2:]]
+
+        pieces = {"▁" + w.upper()[:2] for w in KEYWORDS}
+        pieces.update(w.upper()[2:] for w in KEYWORDS)
+        lines = encode_english_keywords(FakeBpe(), pieces)
+        self.assertEqual(len(lines), len(KEYWORDS))
+        for word, line in zip(KEYWORDS, lines):
+            self.assertIn(":1.0 #0.50 @" + word, line)
+        self.assertIn("▁HE LP :1.0 #0.50 @help", lines)
+        with self.assertRaises(ValueError):
+            encode_english_keywords(FakeBpe(), {"▁HE"}, ("help",))
+        with self.assertRaises(ValueError):
+            encode_english_keywords(FakeBpe(), pieces, ("HELP",))
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "tokens.txt"
+            p.write_text("▁HE 1\nLP 2\n", encoding="utf-8")
+            self.assertEqual(load_vocabulary(p), {"▁HE", "LP"})
+            p.write_text("▁HE 1\n▁HE 2\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_vocabulary(p)
 
     def test_keywords_remain_enrolled_scope(self):
         self.assertEqual(KEYWORDS, ("help", "fire", "emergency", "danger",
