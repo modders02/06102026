@@ -2,7 +2,8 @@
 
 This program is an isolated shadow observer. It never calls the enrollment
 API, changes old DTW templates, or sends words into the Camera Alert path.
-It reads the local MediaMTX RTSP relay, which avoids exposing CCTV passwords.
+It normally uses the explicit, loopback-only audio tap on the existing
+MSDS backend PCM, avoiding MediaMTX relay audio incompatibilities.
 """
 from __future__ import annotations
 
@@ -15,9 +16,10 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
-from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from prepare_neural_kws import KEYWORDS, MODEL_NAME, ROOT, expected_model_files
 
@@ -161,6 +163,27 @@ def make_ffmpeg_args(executable: str, relay_path: str, rtsp_port: int) -> list[s
     ]
 
 
+def make_bridge_request(base: str, camera_id: str) -> Request:
+    """Fixed localhost path and identifying CLI header; no remote audio URLs."""
+    if not CAMERA_ID_RE.fullmatch(camera_id):
+        raise ValueError("Invalid camera ID")
+    return Request(
+        f"{base}/cameras/{camera_id}/experimental-neural-pcm",
+        headers={
+            "X-MSDS-Shadow-Client": "neural-kws-trial",
+            "Accept": "application/octet-stream",
+        },
+    )
+
+
+def pcm_bridge_enabled(status: dict, camera_id: str) -> bool:
+    for camera in status.get("cameras", []):
+        if camera.get("id") == camera_id:
+            info = (camera.get("audio") or {}).get("neural_shadow_pcm") or {}
+            return info.get("enabled") is True
+    return False
+
+
 def record_detection(file, word: str, camera_id: str, base: str, started_at: float):
     at = datetime.now(timezone.utc).isoformat()
     # Query the existing DTW diagnostics as the nearest available observation;
@@ -188,6 +211,8 @@ def main():
     parser.add_argument("--camera", default="slot-1")
     parser.add_argument("--msds-port", type=int, default=DEFAULT_MSDS_PORT)
     parser.add_argument("--rtsp-port", type=int, default=DEFAULT_RTSP_PORT)
+    parser.add_argument("--source", choices=("bridge", "rtsp"), default="bridge",
+                        help="bridge: existing backend PCM, recommended; rtsp: relay diagnostics")
     parser.add_argument("--seconds", type=int, default=0, help="Trial duration; 0 is unlimited")
     parser.add_argument("--output", type=Path, default=None, help="JSONL report (metadata only)")
     args = parser.parse_args()
@@ -200,8 +225,15 @@ def main():
     try:
         status = read_status(base)
         path = validate_camera(status, args.camera)
+        if args.source == "bridge" and not pcm_bridge_enabled(status, args.camera):
+            raise RuntimeError(
+                "The local MSDS backend does not have the neural PCM tap enabled. "
+                "Close MSDS and stop its camera_server.py process; then restart the "
+                "app from PowerShell using: $env:MSDS_KWS_SHADOW_PCM='1'; npm.cmd run electron:dev "
+                "and ensure /status reports audio.neural_shadow_pcm.enabled=True."
+            )
         kws = create_spotter(ROOT / "neural-kws-models")
-        ffmpeg = ffmpeg_executable()
+        ffmpeg = ffmpeg_executable() if args.source == "rtsp" else None
     except Exception as exc:
         print(f"[NEURAL SHADOW] Cannot start: {exc}", file=sys.stderr)
         return 1
@@ -209,7 +241,10 @@ def main():
     output = args.output or (ROOT / "neural-kws-results" /
                              ("trial-" + datetime.now().strftime("%Y%m%d-%H%M%S") + ".jsonl"))
     output.parent.mkdir(parents=True, exist_ok=True)
-    print("[NEURAL SHADOW] Using the same local MediaMTX camera relay; does not change MSDS audio or DTW templates.")
+    print("[NEURAL SHADOW] Using " + (
+        "the existing backend's local PCM (no extra RTSP)"
+        if args.source == "bridge" else "local MediaMTX RTSP audio (diagnostic)"
+    ) + "; never changes enrolled DTW templates.")
     print("[NEURAL SHADOW] Camera:", args.camera, " | Model:", MODEL_NAME)
     print("[NEURAL SHADOW] Monitoring seven English keywords, CPU mode.")
     print("[NEURAL SHADOW] Logs contain labels/DTW metadata only; no raw audio.")
@@ -220,51 +255,117 @@ def main():
     run_until = started + args.seconds if args.seconds else float("inf")
     with output.open("a", encoding="utf-8") as log:
         while time.monotonic() < run_until:
-            # Reconnect to the relay when the camera is restarted; drop neural
-            # decoding state between sessions rather than carry stale context.
             try:
                 status = read_status(base)
                 path = validate_camera(status, args.camera)
             except (OSError, URLError, ValueError, RuntimeError) as exc:
-                print(f"[NEURAL SHADOW] Waiting for CCTV audio: {exc}", flush=True)
+                print(f"[NEURAL SHADOW] Waiting for active camera PCM: {exc}", flush=True)
                 time.sleep(3)
                 continue
+
+            if args.source == "bridge" and not pcm_bridge_enabled(status, args.camera):
+                print(
+                    "[NEURAL SHADOW] Backend PCM tap is disabled. Restart the MSDS backend "
+                    "with MSDS_KWS_SHADOW_PCM=1; see docs/noise-robust-neural-kws-trial.md",
+                    file=sys.stderr, flush=True,
+                )
+                return 2
+
             stream = kws.create_stream()
-            cmd = make_ffmpeg_args(ffmpeg, path, args.rtsp_port)
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                    stdin=subprocess.DEVNULL, bufsize=0)
-            try:
-                print("[NEURAL SHADOW] Listening; test HELP/FIRE with fan or TV noise, then try neutral speech.", flush=True)
-                while time.monotonic() < run_until:
-                    assert proc.stdout is not None
-                    block = proc.stdout.read(CHUNK_BYTES)
-                    if not block:
-                        break
-                    stream, words = consume_pcm_chunk(kws, stream, block)
-                    for word in words:
-                        now = time.monotonic()
-                        if now - last_detection.get(word, -1e10) < DETECTION_COOLDOWN_S:
-                            continue
-                        last_detection[word] = now
-                        record_detection(log, word, args.camera, base, started)
-            except KeyboardInterrupt:
-                print("\n[NEURAL SHADOW] Stopped. Your active KWS is unchanged.")
-                return 0
-            finally:
-                if proc.poll() is None:
-                    proc.terminate()
+
+            def ingest(block: bytes):
+                nonlocal stream
+                stream, words = consume_pcm_chunk(kws, stream, block)
+                for word in words:
+                    now = time.monotonic()
+                    if now - last_detection.get(word, -1e10) < DETECTION_COOLDOWN_S:
+                        continue
+                    last_detection[word] = now
+                    record_detection(log, word, args.camera, base, started)
+
+            if args.source == "bridge":
+                try:
+                    req = make_bridge_request(base, args.camera)
+                    with urlopen(req, timeout=12) as response:
+                        print(
+                            "[NEURAL SHADOW] Listening to live backend PCM. "
+                            "Try HELP/FIRE, then fan or TV noise.", flush=True,
+                        )
+                        pcm_bytes = 0
+                        while time.monotonic() < run_until:
+                            block = response.read(CHUNK_BYTES)
+                            if not block:
+                                break
+                            pcm_bytes += len(block)
+                            ingest(block)
+                    print(f"[NEURAL SHADOW] PCM feed ended after {pcm_bytes} bytes; reconnecting.",
+                          flush=True)
+                except HTTPError as exc:
+                    if exc.code in (403, 404):
+                        print(
+                            f"[NEURAL SHADOW] PCM endpoint unavailable (HTTP {exc.code}). "
+                            "Restart the experimental backend with MSDS_KWS_SHADOW_PCM=1.",
+                            file=sys.stderr, flush=True,
+                        )
+                        return 2
+                    print(f"[NEURAL SHADOW] PCM feed HTTP {exc.code}; reconnecting.", flush=True)
+                except (OSError, URLError, TimeoutError) as exc:
+                    print(f"[NEURAL SHADOW] PCM feed interruption: {exc}; reconnecting.", flush=True)
+            else:
+                # Diagnostic legacy RTSP mode; capture FFmpeg stderr rather than
+                # hiding an unsupported option, missing track, or RTSP failure.
+                assert ffmpeg is not None
+                cmd = make_ffmpeg_args(ffmpeg, path, args.rtsp_port)
+                pcm_bytes = 0
+                with tempfile.TemporaryFile() as errors:
+                    proc = subprocess.Popen(
+                        cmd, stdout=subprocess.PIPE, stderr=errors,
+                        stdin=subprocess.DEVNULL, bufsize=0,
+                    )
                     try:
-                        proc.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                if proc.stdout:
-                    proc.stdout.close()
+                        print("[NEURAL SHADOW] Decoding RTSP relay audio (diagnostic mode).",
+                              flush=True)
+                        while time.monotonic() < run_until:
+                            assert proc.stdout is not None
+                            block = proc.stdout.read(CHUNK_BYTES)
+                            if not block:
+                                break
+                            pcm_bytes += len(block)
+                            ingest(block)
+                    finally:
+                        if proc.poll() is None:
+                            proc.terminate()
+                            try:
+                                proc.wait(timeout=3)
+                            except subprocess.TimeoutExpired:
+                                proc.kill()
+                                proc.wait(timeout=3)
+                        if proc.stdout:
+                            proc.stdout.close()
+                    errors.seek(0)
+                    error_text = errors.read().decode("utf-8", errors="replace").strip()
+                    print(
+                        "[NEURAL SHADOW] RTSP ended; code=" + str(proc.returncode)
+                        + f", PCM bytes={pcm_bytes}; "
+                        + ("FFmpeg error: " + error_text[-700:]
+                           if error_text else "no FFmpeg error"),
+                        flush=True,
+                    )
+                    if pcm_bytes == 0:
+                        print(
+                            "[NEURAL SHADOW] This can happen when MediaMTX has no audio "
+                            "even though the camera worker uses a direct camera audio source. "
+                            "Use --source bridge instead.", flush=True,
+                        )
             if time.monotonic() < run_until:
-                print("[NEURAL SHADOW] Local relay audio ended; retrying in 3 seconds.", flush=True)
                 time.sleep(3)
     print("[NEURAL SHADOW] Trial finished.")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        print("\n[NEURAL SHADOW] Stopped by user; active DTW model unchanged.")
+        raise SystemExit(0)
