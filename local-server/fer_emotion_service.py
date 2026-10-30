@@ -1,4 +1,4 @@
-"""Optional, loopback-only FER expression classifier for MSDS.
+r"""Optional, loopback-only FER expression classifier for MSDS.
 
 Run using a separate Python venv:
   py -3.12 -m venv local-server\.fer-venv
@@ -152,7 +152,9 @@ def main():
     try:
         import cv2 as cv
         import numpy as numpy
-        from fer import FER
+        # FER 25.10.3 does not export FER from its package __init__.py.
+        # Import the classifier from the actual implementation module.
+        from fer.fer import FER
         cv2, np = cv, numpy
         fer_detector = FER(mtcnn=False)
     except Exception as exc:
