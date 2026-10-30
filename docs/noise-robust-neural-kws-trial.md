@@ -25,12 +25,34 @@ Official release: https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models
        git fetch origin
        git switch --track origin/experiment/noise-robust-neural-kws-20261030
 
-2. Launch regular MSDS using npm.cmd run electron:dev (if not running).
-   Connect CCTV Camera 1 and verify its microphone in a separate PowerShell:
+2. First, stop the previous MSDS desktop AND the previous local camera
+   bridge listening on :5000. The updated backend is required for the
+   opt-in PCM feed; an Electron restart does not replace an already running
+   backend process. From a NEW PowerShell in the project root, start MSDS
+   with this explicit temporary experimental environment switch:
+
+       $env:MSDS_KWS_SHADOW_PCM = "1"
+       npm.cmd run electron:dev
+
+   This enables ONE localhost-only, read-only, 16 kHz mono PCM subscription
+   per camera. It is disabled by default on other runs and on other branches.
+   Connect CCTV Camera 1 and verify its microphone and tap:
 
        $s = Invoke-RestMethod "http://127.0.0.1:5000/status"
        ($s.cameras | Where-Object id -eq "slot-1").audio |
-         Select-Object connected, thread_running, has_audio_track, audio_source
+         Select-Object connected, thread_running, has_audio_track, audio_source, neural_shadow_pcm
+
+   Expected: connected=True, thread_running=True, neural_shadow_pcm.enabled=True.
+   If enabled is missing or False, the old camera backend is still running,
+   or MSDS was launched without the opt-in environment variable. Check
+   the owner of port 5000 and stop ONLY the old MSDS backend, not unrelated
+   Python processes:
+
+       Get-NetTCPConnection -LocalPort 5000 -State Listen |
+         Select-Object OwningProcess
+
+   Once the backend is fully stopped, relaunch from the PowerShell session
+   with MSDS_KWS_SHADOW_PCM=1 as shown above.
 
 3. Run ONCE, with Internet for installation and the official model download:
 
@@ -45,9 +67,21 @@ Official release: https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models
 
        .\local-server\start_neural_kws_shadow.cmd --seconds 180
 
-   Omit --seconds to listen until Ctrl+C. The observer connects to the
-   LOCAL MediaMTX relay (127.0.0.1:8554), not to the remote camera directly.
-   No CCTV passwords are exported, no raw audio is saved.
+   Omit --seconds to listen until Ctrl+C. By default, the observer
+   receives the SAME decoded microphone PCM used by the existing DTW engine,
+   through an opt-in loopback-only HTTP feed. This avoids opening a separate
+   RTSP session, and still works when the camera bridge uses direct RTSP
+   audio rather than MediaMTX. No CCTV passwords or raw audio are logged.
+   The bounded feed is discarded when the client disconnects and is never
+   stored on disk.
+
+   For diagnosing the OLD relay-only path explicitly, run:
+
+       .\local-server\start_neural_kws_shadow.cmd --source rtsp --seconds 20
+
+   This mode now prints FFmpeg's exit code, byte count, and final stderr
+   instead of an endless generic "audio ended" loop. It is diagnostic, not
+   recommended for routine comparisons.
 
 5. For comparison, test the same camera and distance in the following order:
    - 30 seconds quiet ordinary speech without emergency keywords
@@ -76,8 +110,15 @@ Official release: https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models
 
 - The neural model is PRETRAINED. This trial tests whether an existing
   model works better with noisy speech; it does not fine-tune a new model.
-- The local CCTV relay must contain audio. The extra FFmpeg decoder uses
-  additional CPU; if performance drops, stop the trial with Ctrl+C.
+- The backend PCM feed must be explicitly enabled when starting the
+  camera bridge. It is restricted to loopback CLI requests with no browser
+  Origin, one listener per camera, and no persisted audio; test only with
+  permission from any people whose audio is captured. It does not introduce
+  an additional FFmpeg decoder. When using --source rtsp, an audio-enabled
+  relay is still necessary and the extra decoder consumes CPU.
+- The stream endpoint is experimental and not a replacement for production
+  access controls. Disable it by clearing the environment variable and
+  restarting the backend after testing.
 - No result here changes HELP/POLICE/INTRUDER or other enrolled templates.
 - The main application continues to accept/reject DTW words with its own
   unknown veto and facial/visual validation. Shadow words cannot alert.
