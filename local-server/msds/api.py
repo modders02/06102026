@@ -13,7 +13,7 @@ from typing import Optional
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
 from .binaries import (install_hint, lan_ip, no_window_flags, pip_install_command,
                        resolve_exe)
@@ -84,6 +84,65 @@ def find_camera(camera_id: str):
         if cam.id.lower() in aliases or (cam.path or "").lower() in aliases:
             return cam
     return None
+
+
+@app.get("/cameras/{camera_id}/experimental-neural-pcm")
+def experimental_neural_pcm(camera_id: str, request: Request):
+    """Opt-in read-only PCM for a SINGLE local neural KWS shadow process.
+
+    Not intended for browser clients, LAN access, or any production deployment.
+    Audio is 16 kHz mono PCM16 little-endian with no file storage.
+    """
+    from .neural_shadow_pcm import enabled as shadow_pcm_enabled
+    import queue
+
+    if not shadow_pcm_enabled():
+        raise HTTPException(status_code=404, detail=(
+            "Neural PCM tap disabled. Restart the MSDS backend with "
+            "MSDS_KWS_SHADOW_PCM=1 to opt in."
+        ))
+    host = request.client.host if request.client else None
+    if host not in ("127.0.0.1", "::1") or request.headers.get("origin") \
+            or request.headers.get("x-msds-shadow-client") != "neural-kws-trial":
+        raise HTTPException(status_code=403, detail="Local CLI only, no browser Origin.")
+    cam = CAMERAS.get(camera_id)
+    if cam is None:
+        raise HTTPException(status_code=404, detail="Unknown camera")
+    if (not cam.enabled or cam.stop_flag.is_set() or
+            not cam.audio_thread or not cam.audio_thread.is_alive() or
+            not cam.audio_connected):
+        raise HTTPException(status_code=503, detail="CCTV audio worker is not connected")
+    subscriber = cam.neural_shadow_pcm.subscribe()
+    if subscriber is None:
+        raise HTTPException(status_code=409, detail="A neural shadow listener is already connected")
+
+    def generate():
+        try:
+            while cam.enabled and not cam.stop_flag.is_set():
+                # The camera audio worker remains the one authoritative source;
+                # this reader cannot inject or overwrite keyword decisions.
+                if not cam.neural_shadow_pcm.has_subscriber():
+                    break
+                try:
+                    block = subscriber.get(timeout=1.5)
+                except queue.Empty:
+                    if not cam.audio_connected or not (
+                        cam.audio_thread and cam.audio_thread.is_alive()
+                    ):
+                        break
+                    continue
+                yield block
+        finally:
+            cam.neural_shadow_pcm.unsubscribe(subscriber)
+
+    return StreamingResponse(
+        generate(), media_type="application/octet-stream",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-MSDS-PCM-Format": "s16le-16000-mono",
+        },
+    )
 
 
 @app.get("/cameras/{camera_id}/snapshot")
