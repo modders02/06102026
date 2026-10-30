@@ -1165,6 +1165,7 @@ class Camera:
         self.audio_thread.start()
 
     def stop(self):
+        self.neural_shadow_pcm.disconnect()
         # Serialize against the deferred restart so a late waiter can never
         # clear stop_flag after the user has disconnected the camera again.
         with self._audio_restart_lock:
