@@ -13,6 +13,7 @@ browser's existing face-api model remains responsible for alert evidence.
 from __future__ import annotations
 
 import json
+import math
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -57,10 +58,15 @@ def sanitize_predictions(detections):
     scores = {}
     for key in EMOTION_KEYS:
         value = face["emotions"].get(key, 0.0)
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        # FER commonly returns numpy.float32 scores, not plain Python float.
+        # Accept numeric scalar convertibles while rejecting NaN/infinity.
+        if isinstance(value, (bool, str, bytes)):
             return None
-        value = float(value)
-        if not 0 <= value <= 1 or not __import__("math").isfinite(value):
+        try:
+            value = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not 0 <= value <= 1 or not math.isfinite(value):
             return None
         scores[key] = value
     label = max(scores, key=scores.get)
