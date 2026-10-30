@@ -731,8 +731,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
 
       // Use the detector's RETURNED current-frame result, not delayed React
       // state, so the four-second validation can accept a matching fresh face.
-      // Geometry-corrected fear labels require multiple corroborating frames;
-      // historical expression entries alone never create Camera Alerts.
+      // FER and geometry estimates are display-only. Repeated raw Face-api
+      // distress observations alone can contribute to Camera Alerts.
       if (analyzedFace) {
         const observedAt = Date.now();
         const geometryResult = corroborateGeometryFear(
@@ -742,13 +742,11 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         const rawFace = analyzedFace.hasFace && analyzedFace.fusionConfirmed === true
           ? makeDistressFaceSignal(analyzedFace.expression, analyzedFace.probability, observedAt)
           : null;
-        const activeSpeech = recentDistressSpeechRef.current;
-        const corroborated = activeSpeech && geometryResult.signal
-          && isKeywordFaceCompatible(activeSpeech.keyword, geometryResult.signal.label)
-          ? geometryResult.signal : null;
-        const currentFace = rawFace
-          && (!activeSpeech || isKeywordFaceCompatible(activeSpeech.keyword, rawFace.label))
-          ? rawFace : corroborated ?? rawFace;
+        // Geometry (or FER) can help explain a displayed expression,
+        // but cannot promote a raw Sad/Surprised estimate to a verified
+        // Frightened face. Only repeated raw Face-api distress frames count
+        // toward a safety alert; speech compatibility is checked by fusion.
+        const currentFace = rawFace;
         if (currentFace) {
           recentDistressFaceRef.current = currentFace;
           maybeEmitVerifiedDistress();
