@@ -18,6 +18,12 @@ if errorlevel 1 (
   echo [MSDS Neural KWS] Package installation failed.
   exit /b 1
 )
+echo [MSDS Neural KWS] Checking Click, SentencePiece and sherpa-onnx imports...
+".neural-kws-venv\Scripts\python.exe" -c "import click, sentencepiece, sherpa_onnx; print('[MSDS Neural KWS] All tokenizer imports passed')"
+if errorlevel 1 (
+  echo [MSDS Neural KWS] Required tokenizer package missing; check pip output above.
+  exit /b 1
+)
 echo [MSDS Neural KWS] Checking sherpa-onnx-cli keyword tokenization command...
 ".neural-kws-venv\Scripts\sherpa-onnx-cli.exe" text2token --help >nul
 if errorlevel 1 (
