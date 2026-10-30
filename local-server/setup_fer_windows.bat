@@ -15,4 +15,10 @@ if errorlevel 1 (
   echo [MSDS FER] Dependency installation failed.
   exit /b 1
 )
+echo [MSDS FER] Checking FER 25.10.3 import...
+".fer-venv\Scripts\python.exe" -c "from fer.fer import FER; print('[MSDS FER] Import check passed')"
+if errorlevel 1 (
+  echo [MSDS FER] Import verification failed; check the Python error above.
+  exit /b 1
+)
 echo [MSDS FER] Dependencies installed. Run local-server\start_fer_windows.bat
