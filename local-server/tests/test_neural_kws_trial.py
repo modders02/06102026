@@ -29,10 +29,12 @@ class NeuralKwsShadowTests(unittest.TestCase):
     def test_tokenizer_runtime_dependency_declared(self):
         requirements = (HERE / "requirements-neural-kws.txt").read_text(encoding="utf-8")
         self.assertIn("sherpa-onnx==1.12.26", requirements)
+        self.assertIn("sentencepiece==0.2.2", requirements)
         self.assertRegex(requirements, r"(?m)^click(?:[<=>!~].*)?$")
         setup = (HERE / "setup_neural_kws_windows.cmd").read_text(encoding="utf-8")
         self.assertIn("sherpa-onnx-cli.exe", setup)
         self.assertIn("text2token --help", setup)
+        self.assertIn("import click, sentencepiece, sherpa_onnx", setup)
         self.assertIn('set "PYTHONIOENCODING=utf-8"', setup)
         self.assertIn('set "PYTHONUTF8=1"', setup)
         prepare = (HERE / "prepare_neural_kws.py").read_text(encoding="utf-8")
