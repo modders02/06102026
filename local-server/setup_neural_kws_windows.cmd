@@ -1,6 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+rem sherpa-onnx-cli --help contains Unicode BPE and CJK examples.
+rem Force UTF-8 for Python stdout even on Windows cp1252 PowerShell hosts.
+set "PYTHONIOENCODING=utf-8"
+set "PYTHONUTF8=1"
 echo [MSDS Neural KWS] Optional SHADOW experiment. Nothing changes in active DTW enrollments.
 if not exist ".neural-kws-venv\Scripts\python.exe" (
   py -3.12 -m venv ".neural-kws-venv"
