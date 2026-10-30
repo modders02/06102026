@@ -25,6 +25,7 @@ from .config import (AUDIO_CHUNK_SECONDS, AUDIO_ENGINE, HLS_PORT, HLS_PROBE_TTL,
                      RTSP_PORT, VIDEO_FPS, VIDEO_GOP, VIDEO_MAX_WIDTH,
                      VIDEO_THREADS, WEBRTC_PORT, match_distress)
 from .kws_engine import KWS_ENGINE, StreamingSpeechSegmenter
+from .neural_shadow_pcm import ShadowPCMFeed, enabled as shadow_pcm_enabled
 from .kws_audio_filters import denoise_enabled, selected_profile, pcm_audio_filter
 from . import kws_verifier
 
@@ -180,6 +181,7 @@ class Camera:
     audio_source: Optional[str] = None          # which URL/transport is working
     audio_sources_tried: List[str] = field(default_factory=list)
     kws_segmenter: StreamingSpeechSegmenter = field(default_factory=StreamingSpeechSegmenter)
+    neural_shadow_pcm: ShadowPCMFeed = field(default_factory=ShadowPCMFeed, repr=False)
     kws_pending_enrollment: Optional[str] = None
     kws_enrollment_status: Optional[dict] = None
     kws_last_keyword: str = ""
@@ -900,6 +902,8 @@ class Camera:
                     try:
                         block = pcm_queue.get(timeout=0.5)
                         if block:
+                            if shadow_pcm_enabled():
+                                self.neural_shadow_pcm.publish(block)
                             self._process_custom_kws_pcm(block)
                             pcm.extend(block)
                             last_pcm_at = time.time()
@@ -1306,6 +1310,11 @@ class Camera:
             "audio_sources_tried": list(self.audio_sources_tried),
             "chunk_seconds": AUDIO_CHUNK_SECONDS,
             "recognition_engine": AUDIO_ENGINE,
+            "neural_shadow_pcm": {
+                "enabled": shadow_pcm_enabled(),
+                "local_only": True,
+                "subscriber_connected": self.neural_shadow_pcm.has_subscriber(),
+            },
             "custom_kws": {
                 **KWS_ENGINE.status(),
                 "pending_enrollment": self.kws_pending_enrollment,
