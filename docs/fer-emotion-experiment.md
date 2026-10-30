@@ -71,3 +71,14 @@ recordings before merging with a stable safety-critical system.
 For a real-camera evaluation, temporarily disable external emergency
 notifications and do not use the experimental classifier as a sole
 safety monitor.
+
+## FER 25.10.3 import fix
+
+The installed version exposes the class through `from fer.fer import FER`,
+not `from fer import FER`. The setup script includes a startup import check,
+and `requirements-fer.txt` retains a setuptools release with `pkg_resources`.
+If you installed the FER environment before this fix, rerun setup once:
+
+    .\local-server\setup_fer_windows.bat
+
+Then start the sidecar with `start_fer_windows.bat` again.
