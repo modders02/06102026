@@ -33,6 +33,11 @@ class NeuralKwsShadowTests(unittest.TestCase):
         setup = (HERE / "setup_neural_kws_windows.cmd").read_text(encoding="utf-8")
         self.assertIn("sherpa-onnx-cli.exe", setup)
         self.assertIn("text2token --help", setup)
+        self.assertIn('set "PYTHONIOENCODING=utf-8"', setup)
+        self.assertIn('set "PYTHONUTF8=1"', setup)
+        prepare = (HERE / "prepare_neural_kws.py").read_text(encoding="utf-8")
+        self.assertIn('env["PYTHONIOENCODING"] = "utf-8"', prepare)
+        self.assertIn('"--tokens-type", "bpe"', prepare)
 
     def test_keywords_remain_enrolled_scope(self):
         self.assertEqual(KEYWORDS, ("help", "fire", "emergency", "danger",
