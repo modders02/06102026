@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import hashlib
+import io
 import json
 from pathlib import Path
 import sys
@@ -71,51 +72,52 @@ def capture_wav(response, destination_path: Path, seconds: float) -> tuple[int, 
 
 def capture_one_take(base: str, camera_id: str, folder: Path, seconds: float,
                      opener=urlopen, sleep=time.sleep) -> tuple[Path, int, str]:
-    """Record one WAV and explicitly release its subscriber immediately.
+    """Read an atomic 1-shot PCM take; retry only conflicts BEFORE recording.
 
-    The ASGI streaming generator can remain alive briefly after an HTTP client
-    reads exactly 1.8 seconds of a continuous response. A capability-protected
-    release is deterministic; limited 409 retries cover shutdown races or old
-    in-flight clients. Never restart the camera or evict an unrelated listener.
+    The server owns and releases the subscription within a single request.
+    Never stitch pieces of interrupted recordings together or automatically
+    accept silence after a failed speech take.
     """
-    request = make_bridge_request(base, camera_id)
+    base_request = make_bridge_request(base, camera_id)
+    request = Request(
+        base_request.full_url + f"/take?seconds={seconds:g}",
+        headers={
+            "X-MSDS-Shadow-Client": "neural-kws-trial",
+            "Accept": "application/octet-stream",
+        },
+    )
+    expected = int(SAMPLE_RATE * seconds) * 2
     for attempt in range(6):
         try:
-            with opener(request, timeout=12) as stream:
-                lease = stream.headers.get("X-MSDS-Shadow-Lease", "")
-                if not lease:
+            # The server captures the full take BEFORE sending a response.
+            # This avoids racing FastAPI StreamingResponse cleanup and lease
+            # release between two successive prompts.
+            print(f"[Noise capture] RECORDING NOW for {seconds:.1f} seconds...", flush=True)
+            with opener(request, timeout=max(12, seconds + 8)) as response:
+                if response.headers.get("X-MSDS-PCM-Format") != "s16le-16000-mono" \
+                        or response.headers.get("X-MSDS-Capture") != "complete":
                     raise RuntimeError(
-                        "PCM capture backend is outdated: missing lease header. "
-                        "Pull the new experimental branch and restart the camera bridge."
+                        "Backend does not support atomic PCM takes. Pull the "
+                        "branch and FULLY restart the local camera bridge."
                     )
-                try:
-                    if stream.headers.get("X-MSDS-PCM-Format") != "s16le-16000-mono":
-                        raise RuntimeError("Unexpected audio format from camera bridge")
-                    print(f"[Noise capture] RECORDING NOW for {seconds:.1f} seconds...", flush=True)
-                    path = folder / make_capture_filename()
-                    byte_count, digest = capture_wav(stream, path, seconds)
-                    return path, byte_count, digest
-                finally:
-                    # Close only OUR lease. Old StreamingResponse generator
-                    # cleanup may run asynchronously after this call.
-                    release = Request(
-                        f"{base}/cameras/{camera_id}/experimental-neural-pcm/release",
-                        headers={"X-MSDS-Shadow-Client": "neural-kws-trial",
-                                 "X-MSDS-Shadow-Lease": lease},
-                        method="POST",
-                    )
-                    try:
-                        with opener(release, timeout=4) as reply:
-                            reply.read()
-                    except (HTTPError, URLError, OSError, TimeoutError) as exc:
-                        print(f"[Noise capture] Lease release acknowledgement missing: {exc}",
-                              file=sys.stderr, flush=True)
+                pcm = response.read(expected + 1)
+            if len(pcm) != expected:
+                raise RuntimeError(
+                    f"Incomplete PCM response: {len(pcm)} of {expected} bytes; "
+                    "no WAV saved"
+                )
+            path = folder / make_capture_filename()
+            count, digest = capture_wav(io.BytesIO(pcm), path, seconds)
+            return path, count, digest
         except HTTPError as exc:
             if exc.code != 409 or attempt == 5:
                 raise
             wait = min(0.5 * (attempt + 1), 2.0)
-            print(f"[Noise capture] Previous audio listener still closing; "
-                  f"retrying in {wait:.1f}s ({attempt + 1}/5).", flush=True)
+            print(
+                f"[Noise capture] Audio tap busy BEFORE capture; "
+                f"retrying in {wait:.1f}s ({attempt + 1}/5).",
+                flush=True,
+            )
             sleep(wait)
     raise RuntimeError("Unable to acquire PCM subscription")
 
@@ -163,9 +165,13 @@ def main() -> int:
         print("[Noise capture] Speak natural non-keyword phrases; never say the seven emergency keywords.")
     if args.label == "noise":
         print("[Noise capture] Record real fan, air-conditioner or traffic noise WITHOUT keyword speech.")
+    saved = 0
     try:
-        for n in range(args.samples):
-            answer = input(f"[Noise capture] Press ENTER for take {n + 1}/{args.samples}; q then ENTER to stop: ")
+        while saved < args.samples:
+            answer = input(
+                f"[Noise capture] Press ENTER for take {saved + 1}/{args.samples}; "
+                "q then ENTER to stop: "
+            )
             if answer.strip().lower() == "q":
                 print("[Noise capture] Stopped without further recordings.")
                 break
@@ -173,15 +179,38 @@ def main() -> int:
                 path, byte_count, digest = capture_one_take(
                     base, args.camera, folder, args.seconds
                 )
-                print(f"[Noise capture] Saved: {path.name}, bytes={byte_count}, sha256={digest[:12]}")
+                saved += 1
+                print(
+                    f"[Noise capture] Saved: {path.name}, "
+                    f"bytes={byte_count}, sha256={digest[:12]}", flush=True,
+                )
             except HTTPError as exc:
-                print(f"[Noise capture] HTTP {exc.code}. If this persists, stop the neural "
-                      "shadow listener or restart the experimental camera backend.",
-                      file=sys.stderr)
+                if exc.code == 503:
+                    print(
+                        "[Noise capture] Microphone PCM interrupted (HTTP 503). "
+                        "No WAV saved. Check camera audio, then press ENTER to "
+                        "repeat this SAME take; q to stop.", file=sys.stderr,
+                    )
+                    continue
+                if exc.code == 404:
+                    print(
+                        "[Noise capture] Atomic take endpoint is missing. Pull "
+                        "the branch and fully restart the MSDS backend.",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        f"[Noise capture] HTTP {exc.code}. Close any separate "
+                        "neural shadow listener and verify the backend.",
+                        file=sys.stderr,
+                    )
                 return 3
             except (OSError, URLError, RuntimeError, ValueError) as exc:
-                print(f"[Noise capture] Recording failed; no WAV saved: {exc}", file=sys.stderr)
-                return 4
+                print(
+                    f"[Noise capture] Incomplete or invalid take: {exc}. "
+                    "No WAV saved; press ENTER to record the SAME take again.",
+                    file=sys.stderr,
+                )
     except (KeyboardInterrupt, EOFError):
         print("\n[Noise capture] Stopped by user.")
     return 0
