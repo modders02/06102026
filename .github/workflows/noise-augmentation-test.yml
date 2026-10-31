@@ -9,6 +9,7 @@ on:
       - experiment/kws-v4-crop-playback-audit-20261031
       - experiment/kws-v4-context-preservation-audit-20261031
       - experiment/kws-v41-context-preserving-train-20261031
+      - experiment/kws-v5-pretrained-zipformer-benchmark-20261031
   pull_request:
     paths:
       - "local-server/train_noise_augmented_kws.py"
@@ -26,6 +27,8 @@ on:
       - "local-server/train_noise_kws_v41.py"
       - "local-server/evaluate_noise_kws_v41.py"
       - "local-server/tests/test_noise_kws_v41.py"
+      - "local-server/benchmark_sherpa_kws_v5.py"
+      - "local-server/tests/test_sherpa_kws_v5.py"
       - "local-server/diagnose_noise_kws_v3.py"
       - "local-server/noise_kws_v3_groups.py"
       - "local-server/tests/test_noise_kws_v3.py"
@@ -57,5 +60,7 @@ jobs:
         run: python -m unittest discover -s local-server/tests -p test_noise_kws_v4_context.py -v
       - name: V4.1 uniform context and isolated training tests
         run: python -m unittest discover -s local-server/tests -p test_noise_kws_v41.py -v
+      - name: V5 pretrained model streaming and leakage-protection tests
+        run: python -m unittest discover -s local-server/tests -p test_sherpa_kws_v5.py -v
       - name: Compile optional training and comparison scripts
-        run: python -m py_compile local-server/train_noise_augmented_kws.py local-server/capture_noise_kws_wavs.py local-server/neural_kws_trial.py local-server/diagnose_noise_augmented_kws.py local-server/train_noise_kws_v3.py local-server/noise_kws_v3_groups.py local-server/diagnose_noise_kws_v3.py local-server/noise_kws_v4_audio.py local-server/noise_kws_v4_model.py local-server/train_noise_kws_v4.py local-server/evaluate_noise_kws_v4.py local-server/audit_noise_kws_v4_crops.py local-server/audit_noise_kws_v4_context.py local-server/noise_kws_v41_audio.py local-server/train_noise_kws_v41.py local-server/evaluate_noise_kws_v41.py
+        run: python -m py_compile local-server/train_noise_augmented_kws.py local-server/capture_noise_kws_wavs.py local-server/neural_kws_trial.py local-server/diagnose_noise_augmented_kws.py local-server/train_noise_kws_v3.py local-server/noise_kws_v3_groups.py local-server/diagnose_noise_kws_v3.py local-server/noise_kws_v4_audio.py local-server/noise_kws_v4_model.py local-server/train_noise_kws_v4.py local-server/evaluate_noise_kws_v4.py local-server/audit_noise_kws_v4_crops.py local-server/audit_noise_kws_v4_context.py local-server/noise_kws_v41_audio.py local-server/train_noise_kws_v41.py local-server/evaluate_noise_kws_v41.py local-server/benchmark_sherpa_kws_v5.py
