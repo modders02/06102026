@@ -5,6 +5,7 @@ No camera, pretrained model, enrollment data or external network is required.
 from __future__ import annotations
 
 import io
+from urllib.error import HTTPError
 from pathlib import Path
 import tempfile
 import unittest
@@ -15,13 +16,14 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
-from capture_noise_kws_wavs import capture_wav, destination
+from capture_noise_kws_wavs import capture_wav, capture_one_take, destination
 from train_noise_augmented_kws import (
     ACCEPT_THRESHOLD, DIM, LABELS, SAMPLE_RATE, augment_audio, check_disjoint,
     encode_dataset, evaluate_holdout, feature_vector, infer_probs, inventory,
     load_model, noise_window, predict_one, read_audio, save_model, train_mlp,
 )
 from msds.kws_engine import CustomKeywordEngine
+from msds.neural_shadow_pcm import ShadowPCMFeed
 
 
 def write_wav(path: Path, samples: np.ndarray, rate: int = SAMPLE_RATE):
@@ -104,6 +106,84 @@ class NoiseAugmentedKWSTests(unittest.TestCase):
             np.testing.assert_allclose(infer_probs(x, loaded), prob, atol=1e-6)
             self.assertFalse((root / "not-active-templates").exists()
                              and list((root / "not-active-templates").glob("*.npy")))
+
+    def test_repeated_capture_takes_release_pcm_and_retry_409(self):
+        samples = (np.sin(np.linspace(0, 30 * np.pi, SAMPLE_RATE, dtype=np.float32))
+                   * 0.25).astype(np.float32)
+        pcm = (samples * 32767).astype("<i2").tobytes()
+        feed = ShadowPCMFeed(queue_size=16)
+        requests = []
+
+        class Stream(io.BytesIO):
+            def __init__(self, data, token):
+                super().__init__(data)
+                self.headers = {
+                    "X-MSDS-Shadow-Lease": token,
+                    "X-MSDS-PCM-Format": "s16le-16000-mono",
+                }
+
+        def opener(request, timeout):
+            requests.append(request)
+            if request.get_method() == "POST":
+                lease = request.get_header("X-msds-shadow-lease")
+                self.assertTrue(feed.release_lease(lease))
+                return io.BytesIO(b'{"released":true}')
+            subscriber = feed.subscribe()
+            if subscriber is None:
+                raise HTTPError(request.full_url, 409, "in use", None, None)
+            return Stream(pcm, feed.lease_for(subscriber))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / "train" / "help"
+            for _ in range(3):
+                path, count, digest = capture_one_take(
+                    "http://127.0.0.1:5000", "slot-1", dest, 1.0,
+                    opener=opener, sleep=lambda _: None,
+                )
+                self.assertTrue(path.is_file())
+                self.assertEqual(count, SAMPLE_RATE * 2)
+                self.assertEqual(len(digest), 64)
+                self.assertFalse(feed.has_subscriber())
+            self.assertEqual(len(list(dest.glob("*.wav"))), 3)
+            self.assertEqual(len([x for x in requests if x.get_method() == "POST"]), 3)
+
+            # Simulate a still-live old streaming request. A 409 must be
+            # retried, never evict the other client or overwrite recordings.
+            old = feed.subscribe()
+            self.assertIsNotNone(old)
+            waits = []
+            def release_during_wait(seconds):
+                waits.append(seconds)
+                feed.unsubscribe(old)
+            path, count, _ = capture_one_take(
+                "http://127.0.0.1:5000", "slot-1", dest, 1.0,
+                opener=opener, sleep=release_during_wait,
+            )
+            self.assertTrue(path.exists())
+            self.assertEqual(count, SAMPLE_RATE * 2)
+            self.assertEqual(waits, [0.5])
+            self.assertFalse(feed.has_subscriber())
+
+    def test_pcm_lease_isolation_and_explicit_release(self):
+        feed = ShadowPCMFeed(queue_size=2)
+        a = feed.subscribe()
+        first_token = feed.lease_for(a)
+        self.assertTrue(first_token)
+        self.assertTrue(feed.is_current(a))
+        self.assertFalse(feed.release_lease("wrong-token"))
+        self.assertTrue(feed.is_current(a))
+        self.assertTrue(feed.release_lease(first_token))
+        self.assertFalse(feed.has_subscriber())
+        b = feed.subscribe()
+        self.assertTrue(feed.is_current(b))
+        self.assertFalse(feed.is_current(a))
+        self.assertFalse(feed.release_lease(first_token))
+        self.assertTrue(feed.has_subscriber())
+        feed.unsubscribe(a)  # Old async generator cleanup cannot evict B.
+        self.assertTrue(feed.is_current(b))
+        self.assertTrue(feed.release_lease(feed.lease_for(b)))
+        self.assertFalse(feed.has_subscriber())
 
     def test_local_capture_writes_only_explicit_split_and_valid_wav(self):
         with tempfile.TemporaryDirectory() as tmp:
