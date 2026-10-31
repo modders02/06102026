@@ -32,20 +32,29 @@ on port 5000. Stop only the old MSDS camera backend and restart with the
 environment variable above.
 
 The capture tool subscribes to the same decoded camera PCM stream as DTW.
-Each recording now releases its own short-lived subscription explicitly, so
-sequential recordings should not fail with HTTP 409 due to lingering
-StreamingResponse cleanup. A true second active shadow listener still gets
-409 and is not forcibly disconnected. If updating from an earlier build, pull
-the branch and FULLY restart the local camera backend to activate the new
-lease-release endpoint; restarting only this capture CLI is not enough.
-Previously recorded WAVs are retained, and no capture command resets counts.
-To check how many are already saved:
+The recorder now uses an ATOMIC fixed-duration PCM take endpoint, instead
+of starting and stopping an endless streaming response for each WAV. The
+backend collects exactly the requested number of 16 kHz mono PCM samples,
+releases its subscriber, and only then returns a complete response.
+If audio is interrupted or the in-memory PCM queue overflows, the backend
+rejects that take (HTTP 503) rather than returning a partial WAV. The
+recorder asks the user to press Enter to re-record the SAME take; it never
+silently stitches audio across camera disconnections. HTTP 409 when
+another genuine subscriber is active is retried only before taking audio.
+The standalone neural shadow listener must remain stopped during recording.
+
+IMPORTANT: Pull the branch and FULLY restart the camera backend to activate
+the new /experimental-neural-pcm/take endpoint; restarting just the recorder
+is not enough. No existing WAV is overwritten or deleted.
+
+Check local counts:
 
     (Get-ChildItem .\local-server\neural-kws-data\train\help\*.wav -ErrorAction SilentlyContinue).Count
     (Get-ChildItem .\local-server\neural-kws-data\holdout\help\*.wav -ErrorAction SilentlyContinue).Count
 
-Resume only missing takes; for example, three successful HELP train files
-mean you need TWO more instead of rerecording five.
+From the reported 2026-10-31 trial, FIVE training HELP WAVs already exist
+and ONE holdout HELP WAV was saved. Collect TWO more holdout HELP recordings,
+not a fresh training dataset.
 Stop the ordinary neural shadow process while recording: only one subscriber
 per camera is allowed.
 
