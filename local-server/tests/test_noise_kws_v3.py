@@ -17,7 +17,10 @@ sys.path.insert(0, str(HERE))
 from noise_kws_v3_groups import (
     load_group_manifest, refresh_group_manifest, split_grouped,
 )
-from diagnose_noise_kws_v3 import decision_from_probabilities, diagnose, summarize
+from diagnose_noise_kws_v3 import (
+    acoustic_signature, decision_from_probabilities, diagnose,
+    session_acoustic_comparison, summarize,
+)
 from train_noise_kws_v3 import (
     HIDDEN_V3, MODEL_VERSION, assemble_train_validation, balanced_ids,
     get_feature_engine, load_v3, save_v3, train_v3,
@@ -167,6 +170,30 @@ class KwsV3Tests(unittest.TestCase):
             np.testing.assert_array_equal(loaded["w2"], w["w2"])
             self.assertFalse((root / "artifacts" / "noise_augmented_shadow.npz").exists())
 
+    def test_acoustic_session_comparison_exposes_level_and_feature_shift(self):
+        from train_noise_augmented_kws import DIM
+        weights = {
+            "mean": np.zeros(DIM, dtype=np.float32),
+            "scale": np.ones(DIM, dtype=np.float32),
+        }
+        samples = np.zeros(SAMPLE_RATE, dtype=np.float32)
+        samples[int(0.3 * SAMPLE_RATE):int(0.7 * SAMPLE_RATE)] = 0.2
+        signature = acoustic_signature(samples, np.ones(DIM, np.float32), weights)
+        self.assertGreater(signature["rms_dynamic_range_db"], 20)
+        self.assertGreater(signature["middle_300ms_rms"], 0)
+        self.assertEqual(signature["first_300ms_rms"], 1e-6)
+        self.assertAlmostEqual(signature["normalized_feature_distance"], 1, places=4)
+        train = [{"expected": "fire", "rms": 0.04,
+                  "energy_trimmed_duration_s": 0.8,
+                  "trimmed_fraction": 0.45, **signature}]
+        validation = [{"expected": "fire", "rms": 0.08,
+                       "energy_trimmed_duration_s": 1.6,
+                       "trimmed_fraction": 0.95, **signature}]
+        comparison = session_acoustic_comparison(train, validation)
+        self.assertEqual(comparison["validation_to_training_median_rms_ratio"], 2)
+        self.assertEqual(comparison["per_label"]["fire"]["train"]["rms"], 0.04)
+        self.assertEqual(comparison["per_label"]["fire"]["validation"]["rms"], 0.08)
+
     def test_v3_diagnostic_separates_raw_class_from_fixed_gate(self):
         # These are synthetic outputs of the saved softmax, not trained WAVs.
         accepted = np.array([0.86, 0.02, 0.01, 0.01, 0.01, 0.01, 0.02, 0.06])
@@ -236,6 +263,8 @@ class KwsV3Tests(unittest.TestCase):
             self.assertEqual(result["summary"]["validation"]["source_wavs"], 8)
             self.assertEqual(result["summary"]["training"]["source_wavs"], 8)
             self.assertEqual(len(result["fire_validation"]), 1)
+            self.assertIn("acoustic_session_comparison", result)
+            self.assertIn("logmel_vector_mean", result["acoustic_session_comparison"]["train_medians"])
             self.assertEqual(before, hashlib.sha256(candidate.read_bytes()).hexdigest())
             self.assertFalse((root / "artifacts" / "noise_augmented_shadow.npz").exists())
             with self.assertRaisesRegex(ValueError, "different split seed"):
