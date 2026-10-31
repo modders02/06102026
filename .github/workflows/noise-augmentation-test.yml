@@ -5,10 +5,16 @@ on:
     branches:
       - experiment/noise-augment-training-20261031
       - experiment/noise-kws-v3-validation-20261031
+      - experiment/neural-kws-v4-temporal-cnn-20261031
   pull_request:
     paths:
       - "local-server/train_noise_augmented_kws.py"
       - "local-server/train_noise_kws_v3.py"
+      - "local-server/train_noise_kws_v4.py"
+      - "local-server/evaluate_noise_kws_v4.py"
+      - "local-server/noise_kws_v4_audio.py"
+      - "local-server/noise_kws_v4_model.py"
+      - "local-server/tests/test_noise_kws_v4.py"
       - "local-server/diagnose_noise_kws_v3.py"
       - "local-server/noise_kws_v3_groups.py"
       - "local-server/tests/test_noise_kws_v3.py"
@@ -32,5 +38,7 @@ jobs:
         run: python -m unittest discover -s local-server/tests -p test_noise_augmented_kws.py -v
       - name: V3 grouped-validation, regularization and isolation tests
         run: python -m unittest discover -s local-server/tests -p test_noise_kws_v3.py -v
+      - name: V4 offline temporal CNN and audio localization tests
+        run: python -m unittest discover -s local-server/tests -p test_noise_kws_v4.py -v
       - name: Compile optional training and comparison scripts
-        run: python -m py_compile local-server/train_noise_augmented_kws.py local-server/capture_noise_kws_wavs.py local-server/neural_kws_trial.py local-server/diagnose_noise_augmented_kws.py local-server/train_noise_kws_v3.py local-server/noise_kws_v3_groups.py local-server/diagnose_noise_kws_v3.py
+        run: python -m py_compile local-server/train_noise_augmented_kws.py local-server/capture_noise_kws_wavs.py local-server/neural_kws_trial.py local-server/diagnose_noise_augmented_kws.py local-server/train_noise_kws_v3.py local-server/noise_kws_v3_groups.py local-server/diagnose_noise_kws_v3.py local-server/noise_kws_v4_audio.py local-server/noise_kws_v4_model.py local-server/train_noise_kws_v4.py local-server/evaluate_noise_kws_v4.py
