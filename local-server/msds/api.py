@@ -86,6 +86,33 @@ def find_camera(camera_id: str):
     return None
 
 
+@app.post("/cameras/{camera_id}/experimental-neural-pcm/release")
+def release_experimental_neural_pcm(camera_id: str, request: Request):
+    """Release only the matching local capture session's subscriber lease.
+
+    Recording clients close streams after a fixed number of bytes; the
+    StreamingResponse generator's finally may run later on Windows. A
+    per-session capability prevents one client from evicting another.
+    """
+    from .neural_shadow_pcm import enabled as shadow_pcm_enabled
+
+    if not shadow_pcm_enabled():
+        raise HTTPException(status_code=404, detail="Neural PCM tap disabled")
+    host = request.client.host if request.client else None
+    if (host not in ("127.0.0.1", "::1") or request.headers.get("origin")
+            or request.headers.get("x-msds-shadow-client") != "neural-kws-trial"):
+        raise HTTPException(status_code=403, detail="Local CLI only, no browser Origin.")
+    cam = CAMERAS.get(camera_id)
+    if cam is None:
+        raise HTTPException(status_code=404, detail="Unknown camera")
+    lease = request.headers.get("x-msds-shadow-lease", "")
+    if not lease or len(lease) > 128:
+        raise HTTPException(status_code=400, detail="Missing or invalid PCM lease")
+    if not cam.neural_shadow_pcm.release_lease(lease):
+        raise HTTPException(status_code=409, detail="PCM lease expired or not owned by client")
+    return {"ok": True, "released": True}
+
+
 @app.get("/cameras/{camera_id}/experimental-neural-pcm")
 def experimental_neural_pcm(camera_id: str, request: Request):
     """Opt-in read-only PCM for a SINGLE local neural KWS shadow process.
@@ -115,13 +142,17 @@ def experimental_neural_pcm(camera_id: str, request: Request):
     subscriber = cam.neural_shadow_pcm.subscribe()
     if subscriber is None:
         raise HTTPException(status_code=409, detail="A neural shadow listener is already connected")
+    lease = cam.neural_shadow_pcm.lease_for(subscriber)
+    if lease is None:
+        cam.neural_shadow_pcm.unsubscribe(subscriber)
+        raise HTTPException(status_code=503, detail="PCM subscription changed unexpectedly")
 
     def generate():
         try:
             while cam.enabled and not cam.stop_flag.is_set():
                 # The camera audio worker remains the one authoritative source;
                 # this reader cannot inject or overwrite keyword decisions.
-                if not cam.neural_shadow_pcm.has_subscriber():
+                if not cam.neural_shadow_pcm.is_current(subscriber):
                     break
                 try:
                     block = subscriber.get(timeout=1.5)
@@ -131,6 +162,8 @@ def experimental_neural_pcm(camera_id: str, request: Request):
                     ):
                         break
                     continue
+                if not cam.neural_shadow_pcm.is_current(subscriber):
+                    break
                 yield block
         finally:
             cam.neural_shadow_pcm.unsubscribe(subscriber)
@@ -141,6 +174,7 @@ def experimental_neural_pcm(camera_id: str, request: Request):
             "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
             "X-MSDS-PCM-Format": "s16le-16000-mono",
+            "X-MSDS-Shadow-Lease": lease,
         },
     )
 
