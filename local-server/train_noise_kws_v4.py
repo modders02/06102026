@@ -56,8 +56,7 @@ def inspect_all(root: Path, rows: list[dict], extractor) -> dict:
             _, segment = read_source(root, item, extractor)
             details.append({
                 "label": item["label"],
-                "selected_duration_s": segment.get("duration_s",
-                                                   len(read_audio(root / item["relative_path"], extractor)) / SAMPLE_RATE),
+                "selected_duration_s": segment["duration_s"],
                 "selection_reason": segment["reason"],
             })
         except (ValueError, OSError, RuntimeError) as exc:
