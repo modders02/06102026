@@ -201,6 +201,68 @@ class NoiseAugmentedKWSTests(unittest.TestCase):
             self.assertEqual(ctx.exception.code, 503)
             self.assertFalse(folder.exists())
 
+    def test_atomic_backend_route_cleans_up_and_blocks_nonlocal_clients(self):
+        try:
+            from fastapi import HTTPException
+            from starlette.requests import Request
+            from msds.api import experimental_neural_pcm_take
+            from msds.manager import CAMERAS
+        except ImportError:
+            self.skipTest("Full FastAPI backend required for endpoint test")
+        from unittest.mock import patch
+        import os
+        import threading
+        from types import SimpleNamespace
+
+        feed = ShadowPCMFeed(queue_size=4)
+        camera = SimpleNamespace(
+            id="slot-1", enabled=True, stop_flag=threading.Event(),
+            audio_connected=True,
+            audio_thread=SimpleNamespace(is_alive=lambda: True),
+            neural_shadow_pcm=feed,
+        )
+
+        def request(host="127.0.0.1", origin=None):
+            headers = [(b"x-msds-shadow-client", b"neural-kws-trial")]
+            if origin:
+                headers.append((b"origin", origin.encode("utf-8")))
+            return Request({
+                "type": "http", "method": "GET", "path": "/",
+                "headers": headers, "client": (host, 5555),
+                "server": ("127.0.0.1", 5000), "scheme": "http",
+            })
+
+        with patch.dict(os.environ, {"MSDS_KWS_SHADOW_PCM": "1"}):
+            with patch.dict(CAMERAS, {"slot-1": camera}):
+                for host, origin in [("192.168.0.3", None),
+                                     ("127.0.0.1", "http://localhost:8080")]:
+                    with self.assertRaises(HTTPException) as err:
+                        experimental_neural_pcm_take("slot-1", request(host, origin),
+                                                     seconds=0.5)
+                    self.assertEqual(err.exception.status_code, 403)
+                with self.assertRaises(HTTPException) as err:
+                    experimental_neural_pcm_take("slot-1", request(), seconds=100)
+                self.assertEqual(err.exception.status_code, 422)
+
+                def publish_pcm():
+                    # The route acquires the subscriber before its blocking
+                    # read. A short producer thread simulates existing DTW PCM.
+                    import time
+                    until = time.monotonic() + 1.0
+                    while not feed.has_subscriber() and time.monotonic() < until:
+                        time.sleep(0.001)
+                    feed.publish(b"\x04\x00" * 8000)
+
+                thread = threading.Thread(target=publish_pcm, daemon=True)
+                thread.start()
+                response = experimental_neural_pcm_take(
+                    "slot-1", request(), seconds=0.5,
+                )
+                thread.join(timeout=2)
+                self.assertEqual(len(response.body), 16000)
+                self.assertEqual(response.headers["x-msds-capture"], "complete")
+                self.assertFalse(feed.has_subscriber())
+
     def test_pcm_lease_isolation_and_explicit_release(self):
         feed = ShadowPCMFeed(queue_size=2)
         a = feed.subscribe()
