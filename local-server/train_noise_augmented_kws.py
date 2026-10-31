@@ -217,6 +217,71 @@ def encode_dataset(root: Path, extractor: CustomKeywordEngine,
             np.stack(x_test), np.asarray(y_test, dtype=np.int64), manifest)
 
 
+def audit_dataset(root: Path, extractor: CustomKeywordEngine) -> dict:
+    """Inspect real audio (not just counts) without verifying spoken words."""
+    train = {label: wavs(root / "train" / label) for label in LABELS}
+    holdout = {label: wavs(root / "holdout" / label) for label in LABELS}
+    noise = wavs(root / "noise")
+    issues = []
+    inspected = 0
+    try:
+        check_disjoint(train, holdout, noise)
+    except (OSError, ValueError) as exc:
+        issues.append({"file": "(dataset)", "reason": str(exc)})
+    for subset, sources in (("train", train), ("holdout", holdout)):
+        for label, paths in sources.items():
+            for path in paths:
+                inspected += 1
+                try:
+                    raw = read_audio(path, extractor)
+                    feature_vector(raw, extractor)
+                except (OSError, ValueError, RuntimeError) as exc:
+                    issues.append({
+                        "file": f"{subset}/{label}/{path.name}",
+                        "reason": str(exc),
+                        "action": "Listen to WAV and re-record if silent, clipped or transient-only.",
+                    })
+    for path in noise:
+        inspected += 1
+        try:
+            read_audio(path, extractor, background=True)
+        except (OSError, ValueError, RuntimeError) as exc:
+            issues.append({
+                "file": f"noise/{path.name}", "reason": str(exc),
+                "action": "Replace with continuous background-only noise.",
+            })
+    return {
+        "passed": not issues,
+        "recordings_scanned": inspected,
+        "issues": issues,
+        "speech_labels_not_verified": True,
+    }
+
+
+def build_variant(clean: np.ndarray, noise_pool: list[np.ndarray],
+                  rng: np.random.Generator, extractor: CustomKeywordEngine,
+                  description: str, *, background: bool = False,
+                  max_attempts: int = 12) -> tuple[np.ndarray, int]:
+    """Retry short transient-only synthetic windows, never bad real WAVs."""
+    last_error = None
+    for attempt in range(max_attempts):
+        try:
+            sound = (
+                noise_window(clean, SAMPLE_RATE, rng)
+                if background else augment_audio(clean, noise_pool, rng)
+            )
+            return feature_vector(sound, extractor), attempt
+        except ValueError as exc:
+            if "No valid speech features detected" not in str(exc):
+                raise ValueError(f"{description}: {exc}") from exc
+            last_error = exc
+    raise ValueError(
+        f"{description}: all {max_attempts} synthetic attempts had "
+        f"unusable acoustic features ({last_error}); "
+        "inspect the source WAV or record longer continuous noise."
+    )
+
+
 def softmax(logits: np.ndarray) -> np.ndarray:
     centered = logits - logits.max(axis=1, keepdims=True)
     exp = np.exp(centered)
