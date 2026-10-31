@@ -186,29 +186,49 @@ def encode_dataset(root: Path, extractor: CustomKeywordEngine,
     noise_paths = wavs(root / "noise")
     check_disjoint(train_paths, holdout_paths, noise_paths)
 
-    noise_pool = [read_audio(p, extractor, background=True) for p in noise_paths]
+    noise_pool = [
+        (path, read_audio(path, extractor, background=True))
+        for path in noise_paths
+    ]
+    noise_samples = [sound for _, sound in noise_pool]
     x_train, y_train, x_test, y_test = [], [], [], []
-    # For reproducibility, every augmented variant is derived from a TRAIN source only.
+    total_retries = 0
     for label_idx, label in enumerate(LABELS):
         for path in train_paths[label]:
-            clean = read_audio(path, extractor)
-            x_train.append(feature_vector(clean, extractor))
+            try:
+                clean = read_audio(path, extractor)
+                x_train.append(feature_vector(clean, extractor))
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise ValueError(f"train/{label}/{path.name}: {exc}") from exc
             y_train.append(label_idx)
-            for _ in range(variants):
-                mixed = augment_audio(clean, noise_pool, rng)
-                x_train.append(feature_vector(mixed, extractor))
+            for v in range(variants):
+                feat, retries = build_variant(
+                    clean, noise_samples, rng, extractor,
+                    f"train/{label}/{path.name} variant #{v + 1}",
+                )
+                total_retries += retries
+                x_train.append(feat)
                 y_train.append(label_idx)
-        # Actual holdout files are evaluated exactly as provided.
         for path in holdout_paths[label]:
-            clean = read_audio(path, extractor)
-            x_test.append(feature_vector(clean, extractor))
+            try:
+                clean = read_audio(path, extractor)
+                feat = feature_vector(clean, extractor)
+            except (OSError, ValueError, RuntimeError) as exc:
+                raise ValueError(f"holdout/{label}/{path.name}: {exc}") from exc
+            x_test.append(feat)
             y_test.append(label_idx)
 
-    # Noise without any keyword is additionally taught as a negative class.
-    for noise in noise_pool:
-        for _ in range(3):
-            background = noise_window(noise, SAMPLE_RATE, rng)
-            x_train.append(feature_vector(background, extractor))
+    # Real background-only noise is also a negative class. A 1s crop may
+    # capture just a tap; resample until it contains enough Mel frames.
+    for path, noise in noise_pool:
+        for v in range(3):
+            feat, retries = build_variant(
+                noise, [], rng, extractor,
+                f"noise/{path.name} negative crop #{v + 1}",
+                background=True,
+            )
+            total_retries += retries
+            x_train.append(feat)
             y_train.append(len(LABELS) - 1)
 
     manifest = {
@@ -216,6 +236,8 @@ def encode_dataset(root: Path, extractor: CustomKeywordEngine,
         "heldout_source_files": {label: len(files) for label, files in holdout_paths.items()},
         "noise_sources": len(noise_pool),
         "variants_per_train_source": variants,
+        "synthetic_noise_negative_clips": len(noise_pool) * 3,
+        "resampled_invalid_synthetic_windows": total_retries,
         "evaluation_augmentations": 0,
     }
     return (np.stack(x_train), np.asarray(y_train, dtype=np.int64),
