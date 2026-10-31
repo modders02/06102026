@@ -86,6 +86,64 @@ def find_camera(camera_id: str):
     return None
 
 
+@app.get("/cameras/{camera_id}/experimental-neural-pcm/take")
+def experimental_neural_pcm_take(camera_id: str, request: Request, seconds: float = 1.8):
+    """Capture exactly N seconds of existing backend PCM in one HTTP response.
+
+    Unlike the streaming trial feed, this request owns, reads and releases
+    its bounded audio subscription before returning. Incomplete/interrupted
+    takes are rejected and never returned to the training recorder.
+    """
+    import math
+    from .neural_shadow_pcm import (
+        PCMGapError, collect_pcm_take, enabled as shadow_pcm_enabled,
+    )
+
+    if not shadow_pcm_enabled():
+        raise HTTPException(status_code=404, detail="Experimental PCM capture is disabled")
+    host = request.client.host if request.client else None
+    if (host not in ("127.0.0.1", "::1") or request.headers.get("origin")
+            or request.headers.get("x-msds-shadow-client") != "neural-kws-trial"):
+        raise HTTPException(status_code=403, detail="Local CLI only, no browser Origin")
+    if not math.isfinite(seconds) or not 0.5 <= seconds <= 30:
+        raise HTTPException(status_code=422, detail="Capture length must be 0.5–30 seconds")
+    cam = CAMERAS.get(camera_id)
+    if cam is None:
+        raise HTTPException(status_code=404, detail="Unknown camera")
+    if (not cam.enabled or cam.stop_flag.is_set()
+            or not cam.audio_connected or not cam.audio_thread
+            or not cam.audio_thread.is_alive()):
+        raise HTTPException(status_code=503, detail="CCTV microphone audio is not connected")
+    subscriber = cam.neural_shadow_pcm.subscribe()
+    if subscriber is None:
+        raise HTTPException(status_code=409, detail="Another audio listener is using this camera")
+
+    def active():
+        return bool(cam.enabled and not cam.stop_flag.is_set()
+                    and cam.audio_connected and cam.audio_thread
+                    and cam.audio_thread.is_alive())
+
+    try:
+        pcm = collect_pcm_take(
+            cam.neural_shadow_pcm, subscriber,
+            int(seconds * 16000) * 2, active,
+        )
+    except PCMGapError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    finally:
+        cam.neural_shadow_pcm.unsubscribe(subscriber)
+    return Response(
+        content=pcm,
+        media_type="application/octet-stream",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-MSDS-PCM-Format": "s16le-16000-mono",
+            "X-MSDS-Capture": "complete",
+        },
+    )
+
+
 @app.post("/cameras/{camera_id}/experimental-neural-pcm/release")
 def release_experimental_neural_pcm(camera_id: str, request: Request):
     """Release only the matching local capture session's subscriber lease.
