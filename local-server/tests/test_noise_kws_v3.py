@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -15,6 +17,7 @@ sys.path.insert(0, str(HERE))
 from noise_kws_v3_groups import (
     load_group_manifest, refresh_group_manifest, split_grouped,
 )
+from diagnose_noise_kws_v3 import decision_from_probabilities, diagnose, summarize
 from train_noise_kws_v3 import (
     HIDDEN_V3, MODEL_VERSION, assemble_train_validation, balanced_ids,
     get_feature_engine, load_v3, save_v3, train_v3,
@@ -163,6 +166,86 @@ class KwsV3Tests(unittest.TestCase):
             self.assertEqual(metadata["version"], MODEL_VERSION)
             np.testing.assert_array_equal(loaded["w2"], w["w2"])
             self.assertFalse((root / "artifacts" / "noise_augmented_shadow.npz").exists())
+
+    def test_v3_diagnostic_separates_raw_class_from_fixed_gate(self):
+        # These are synthetic outputs of the saved softmax, not trained WAVs.
+        accepted = np.array([0.86, 0.02, 0.01, 0.01, 0.01, 0.01, 0.02, 0.06])
+        strong = decision_from_probabilities(accepted, LABELS[0])
+        self.assertEqual(strong["decision_reason"], "accepted")
+        self.assertTrue(strong["accepted_correctly"])
+        self.assertEqual(strong["raw_top_class"], LABELS[0])
+        rejected = np.array([0.42, 0.12, 0.08, 0.08, 0.06, 0.05, 0.04, 0.15])
+        weak = decision_from_probabilities(rejected, LABELS[0])
+        self.assertEqual(weak["decision_reason"], "below_fixed_threshold")
+        self.assertTrue(weak["raw_top_matches_label"])
+        self.assertEqual(weak["predicted_after_safety_gate"], "unknown")
+        other = np.array([0.02, 0.01, 0.01, 0.01, 0.01, 0.02, 0.02, 0.90])
+        unknown = decision_from_probabilities(other, LABELS[0])
+        self.assertEqual(unknown["decision_reason"], "top_class_unknown")
+        self.assertFalse(unknown["raw_top_matches_label"])
+        with self.assertRaisesRegex(ValueError, "Invalid class probability"):
+            decision_from_probabilities(np.ones(8), LABELS[0])
+
+        samples = []
+        for label, result in [(LABELS[0], weak), (LABELS[0], strong),
+                              ("unknown", decision_from_probabilities(other, "unknown"))]:
+            item = dict(result)
+            item["expected"] = label
+            item.update({"rms": 0.01, "energy_trimmed_duration_s": 0.7,
+                         "trimmed_fraction": 0.3})
+            samples.append(item)
+        overview = summarize(samples, "fake_validation")
+        self.assertEqual(overview["raw_top_positive_accuracy"], 1.0)
+        self.assertEqual(overview["fixed_gate_positive_recall"], 0.5)
+        self.assertEqual(overview["unknown_false_positive_fraction"], 0)
+
+    def test_saved_v3_diagnostic_preserves_audio_and_checks_split_fingerprint(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = make_group_corpus(root)
+            rows = load_group_manifest(root, manifest)
+            train, validation, _ = split_grouped(rows, group_by="speaker", seed=42)
+            engine = get_feature_engine(root)
+            tx, y, vx, vy, _ = assemble_train_validation(
+                root, train, validation, engine, variants=0, seed=42
+            )
+            weights, _ = train_v3(tx, y, vx, vy, seed=42, epochs=3, patience=2)
+            metadata = {
+                "version": MODEL_VERSION,
+                "labels": LABELS,
+                "seed": 42,
+                "group_by": "speaker",
+            }
+            candidate = root / "artifacts" / "noise_augmented_shadow_v3.npz"
+            save_v3(candidate, weights, metadata)
+            report = {
+                "model_metadata": metadata,
+                "dataset": {
+                    "train_original_files": len(train),
+                    "validation_file_manifest_sha256": hashlib.sha256(
+                        "\n".join(sorted(r["relative_path"] for r in validation))
+                        .encode("utf-8")
+                    ).hexdigest(),
+                },
+            }
+            candidate.with_suffix(".report.json").write_text(
+                json.dumps(report), encoding="utf-8"
+            )
+            before = hashlib.sha256(candidate.read_bytes()).hexdigest()
+            result = diagnose(root, manifest, candidate)
+            self.assertEqual(result["summary"]["validation"]["source_wavs"], 8)
+            self.assertEqual(result["summary"]["training"]["source_wavs"], 8)
+            self.assertEqual(len(result["fire_validation"]), 1)
+            self.assertEqual(before, hashlib.sha256(candidate.read_bytes()).hexdigest())
+            self.assertFalse((root / "artifacts" / "noise_augmented_shadow.npz").exists())
+            with self.assertRaisesRegex(ValueError, "different split seed"):
+                diagnose(root, manifest, candidate, seed=15)
+            report["dataset"]["validation_file_manifest_sha256"] = "bad-hash"
+            candidate.with_suffix(".report.json").write_text(
+                json.dumps(report), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(ValueError, "membership changed"):
+                diagnose(root, manifest, candidate)
 
     def test_hard_negative_capture_is_training_only(self):
         with tempfile.TemporaryDirectory() as tmp:
