@@ -40,6 +40,11 @@ def evaluate_fresh(root: Path, manifest: Path,
                    model_path: Path, test_root: Path) -> dict:
     test_root = resolve_test_root(root, test_root)
     w, metadata = load_model(model_path)
+    if (metadata.get("model_variant") != "v41_context_preserving"
+            or metadata.get("context_seconds_per_side") != 0.55
+            or not metadata.get("research_only")
+            or metadata.get("alerts_authorized") is not False):
+        raise ValueError("Candidate is not a frozen V4.1 context-only research model")
     # The training manifest verifies original train WAVs and catches duplicate
     # files; never inspect legacy holdout during independent evaluation.
     old = load_group_manifest(root, manifest)
