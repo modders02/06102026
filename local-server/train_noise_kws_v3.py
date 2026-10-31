@@ -13,6 +13,7 @@ from collections import Counter
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 from pathlib import Path
 import sys
 
@@ -368,6 +369,8 @@ def main() -> int:
     parser.add_argument("--patience", type=int, default=12)
     parser.add_argument("--variants", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--candidate-name", default="noise_augmented_shadow_v3.npz",
+                        help="Explicit isolated NPZ basename; never overwrite any existing artifact")
     parser.add_argument("--exploratory-legacy-holdout", action="store_true",
                         help="Opt-in only: do NOT use this result for checkpoint selection")
     args = parser.parse_args()
@@ -414,6 +417,20 @@ def main() -> int:
     }, indent=2))
     if args.check:
         return 0
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,90}\.npz", args.candidate_name):
+        print("[Noise V3] Unsafe candidate-name; use only a simple .npz filename",
+              file=sys.stderr)
+        return 2
+    target = root / "artifacts" / args.candidate_name
+    report_path = target.with_suffix(".report.json")
+    if target.exists() or report_path.exists():
+        print(
+            f"[Noise V3] Preserving existing candidate/report: {target}. "
+            "Use --candidate-name noise_augmented_shadow_v3_control.npz "
+            "for a NEW research experiment; do not overwrite original V3.",
+            file=sys.stderr,
+        )
+        return 2
     try:
         x, y, vx, vy, data_summary = assemble_train_validation(
             root, training, validation, extractor, args.variants, args.seed,
@@ -436,7 +453,6 @@ def main() -> int:
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"[Noise V3] Training rejected: {exc}", file=sys.stderr)
         return 3
-    target = root / "artifacts" / "noise_augmented_shadow_v3.npz"
     metadata = {
         "version": MODEL_VERSION, "labels": LABELS,
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -462,7 +478,6 @@ def main() -> int:
             "influenced experiments. Collect new disjoint final test WAVs."
         ),
     }
-    report_path = target.with_suffix(".report.json")
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps({
         "saved_candidate": str(target),
