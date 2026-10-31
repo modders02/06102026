@@ -7,6 +7,7 @@ on:
   pull_request:
     paths:
       - "local-server/train_noise_augmented_kws.py"
+      - "local-server/diagnose_noise_augmented_kws.py"
       - "local-server/capture_noise_kws_wavs.py"
       - "local-server/neural_kws_trial.py"
       - "local-server/tests/test_noise_augmented_kws.py"
@@ -25,4 +26,4 @@ jobs:
       - name: Exercise clean/noisy augmentation, supervised training, WAV recorder and model round-trip
         run: python -m unittest discover -s local-server/tests -p test_noise_augmented_kws.py -v
       - name: Compile optional training and comparison scripts
-        run: python -m py_compile local-server/train_noise_augmented_kws.py local-server/capture_noise_kws_wavs.py local-server/neural_kws_trial.py
+        run: python -m py_compile local-server/train_noise_augmented_kws.py local-server/capture_noise_kws_wavs.py local-server/neural_kws_trial.py local-server/diagnose_noise_augmented_kws.py
