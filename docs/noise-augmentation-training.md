@@ -124,6 +124,26 @@ source should not be copied or renamed between splits.
 
 ## 3. Train an isolated candidate and evaluate
 
+First inspect sample coverage AND every original WAV's acoustic features
+(no training runs). Unlike the initial implementation, the check now flags
+short transient-only, truncated or silent clips with their exact relative
+filenames under audio_audit.issues:
+
+    .\local-server\train_noise_augmented_kws.cmd --check
+
+If you see ready=false and audio_audit.issues entries, listen to the named
+recordings locally. Re-record only the incorrect or unusable source files;
+never rename a training take into the holdout split, and do not delete a
+recording without verifying which one failed. WAV labels must still be
+manually verified: feature checks cannot prove which word was spoken.
+
+Synthetic training variants and 1-second background-noise negative crops may
+occasionally be dominated by a brief impact, causing the speech-trimming
+frontend to return fewer than 12 Mel frames. The training script now retries
+such synthetic windows up to 12 times. If all attempts fail, it reports the
+source file and variant number; this is not an authorization to ignore low-
+quality input or to modify holdout labels.
+
 First inspect sample coverage (no training runs):
 
     .\local-server\train_noise_augmented_kws.cmd --check
