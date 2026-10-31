@@ -23,7 +23,7 @@ from train_noise_augmented_kws import (
     load_model, noise_window, predict_one, read_audio, save_model, train_mlp,
 )
 from msds.kws_engine import CustomKeywordEngine
-from msds.neural_shadow_pcm import ShadowPCMFeed
+from msds.neural_shadow_pcm import ShadowPCMFeed, PCMGapError, collect_pcm_take
 
 
 def write_wav(path: Path, samples: np.ndarray, rate: int = SAMPLE_RATE):
@@ -107,35 +107,52 @@ class NoiseAugmentedKWSTests(unittest.TestCase):
             self.assertFalse((root / "not-active-templates").exists()
                              and list((root / "not-active-templates").glob("*.npy")))
 
-    def test_repeated_capture_takes_release_pcm_and_retry_409(self):
+    def test_atomic_pcm_take_owns_subscription_and_detects_gaps(self):
+        feed = ShadowPCMFeed(queue_size=2)
+        subscriber = feed.subscribe()
+        feed.publish(b"\x01\x00" * 400)
+        pcm = collect_pcm_take(feed, subscriber, 800, lambda: True)
+        self.assertEqual(pcm, b"\x01\x00" * 400)
+        feed.unsubscribe(subscriber)
+        self.assertFalse(feed.has_subscriber())
+
+        # If the camera drops audio after a partial packet, do not
+        # combine two unrelated recording sessions into one training WAV.
+        subscriber = feed.subscribe()
+        feed.publish(b"\x01\x00" * 100)
+        feed.publish(b"\x02\x00" * 100)
+        feed.publish(b"\x03\x00" * 100)  # Overflow disconnects subscriber.
+        self.assertFalse(feed.has_subscriber())
+        with self.assertRaisesRegex(PCMGapError, "overflowed"):
+            collect_pcm_take(feed, subscriber, 400, lambda: True)
+        feed.unsubscribe(subscriber)
+
+    def test_repeated_atomic_capture_and_conflict_retries(self):
         samples = (np.sin(np.linspace(0, 30 * np.pi, SAMPLE_RATE, dtype=np.float32))
                    * 0.25).astype(np.float32)
         pcm = (samples * 32767).astype("<i2").tobytes()
-        feed = ShadowPCMFeed(queue_size=16)
-        requests = []
+        request_urls = []
+        pending_conflicts = [0]
 
-        class Stream(io.BytesIO):
-            def __init__(self, data, token):
-                super().__init__(data)
+        class CaptureStream(io.BytesIO):
+            def __init__(self, body):
+                super().__init__(body)
                 self.headers = {
-                    "X-MSDS-Shadow-Lease": token,
                     "X-MSDS-PCM-Format": "s16le-16000-mono",
+                    "X-MSDS-Capture": "complete",
                 }
 
         def opener(request, timeout):
-            requests.append(request)
-            if request.get_method() == "POST":
-                lease = request.get_header("X-msds-shadow-lease")
-                self.assertTrue(feed.release_lease(lease))
-                return io.BytesIO(b'{"released":true}')
-            subscriber = feed.subscribe()
-            if subscriber is None:
+            request_urls.append(request.full_url)
+            self.assertEqual(request.get_method(), "GET")
+            self.assertTrue(request.full_url.endswith("/take?seconds=1"))
+            if pending_conflicts[0]:
+                pending_conflicts[0] -= 1
                 raise HTTPError(request.full_url, 409, "in use", None, None)
-            return Stream(pcm, feed.lease_for(subscriber))
+            return CaptureStream(pcm)
 
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            dest = root / "train" / "help"
+            dest = Path(tmp) / "train" / "help"
             for _ in range(3):
                 path, count, digest = capture_one_take(
                     "http://127.0.0.1:5000", "slot-1", dest, 1.0,
@@ -144,26 +161,45 @@ class NoiseAugmentedKWSTests(unittest.TestCase):
                 self.assertTrue(path.is_file())
                 self.assertEqual(count, SAMPLE_RATE * 2)
                 self.assertEqual(len(digest), 64)
-                self.assertFalse(feed.has_subscriber())
             self.assertEqual(len(list(dest.glob("*.wav"))), 3)
-            self.assertEqual(len([x for x in requests if x.get_method() == "POST"]), 3)
-
-            # Simulate a still-live old streaming request. A 409 must be
-            # retried, never evict the other client or overwrite recordings.
-            old = feed.subscribe()
-            self.assertIsNotNone(old)
+            pending_conflicts[0] = 1
             waits = []
-            def release_during_wait(seconds):
-                waits.append(seconds)
-                feed.unsubscribe(old)
             path, count, _ = capture_one_take(
                 "http://127.0.0.1:5000", "slot-1", dest, 1.0,
-                opener=opener, sleep=release_during_wait,
+                opener=opener, sleep=waits.append,
             )
-            self.assertTrue(path.exists())
-            self.assertEqual(count, SAMPLE_RATE * 2)
             self.assertEqual(waits, [0.5])
-            self.assertFalse(feed.has_subscriber())
+            self.assertEqual(count, SAMPLE_RATE * 2)
+            self.assertTrue(path.exists())
+            self.assertEqual(len(list(dest.glob("*.wav"))), 4)
+            self.assertEqual(len(request_urls), 5)
+
+    def test_incomplete_atomic_response_or_503_never_saves_wav(self):
+        samples = b"\x01\x00" * SAMPLE_RATE
+
+        class CaptureStream(io.BytesIO):
+            def __init__(self, body):
+                super().__init__(body)
+                self.headers = {
+                    "X-MSDS-PCM-Format": "s16le-16000-mono",
+                    "X-MSDS-Capture": "complete",
+                }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "holdout" / "help"
+            with self.assertRaisesRegex(RuntimeError, "Incomplete PCM response"):
+                capture_one_take(
+                    "http://127.0.0.1:5000", "slot-1", folder, 1.0,
+                    opener=lambda req, timeout: CaptureStream(samples[:3000]),
+                )
+            self.assertFalse(folder.exists())
+            def fail_503(req, timeout):
+                raise HTTPError(req.full_url, 503, "PCM stalled", None, None)
+            with self.assertRaises(HTTPError) as ctx:
+                capture_one_take("http://127.0.0.1:5000", "slot-1",
+                                 folder, 1.0, opener=fail_503)
+            self.assertEqual(ctx.exception.code, 503)
+            self.assertFalse(folder.exists())
 
     def test_pcm_lease_isolation_and_explicit_release(self):
         feed = ShadowPCMFeed(queue_size=2)
