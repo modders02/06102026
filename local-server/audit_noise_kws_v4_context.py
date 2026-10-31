@@ -48,8 +48,10 @@ def expand_crop_bounds(
     signal = np.asarray(original, np.float32)
     if signal.ndim != 1 or not len(signal) or not np.isfinite(signal).all():
         raise ValueError("Expected nonempty finite mono audio")
+    if sample_rate <= 0:
+        raise ValueError("Invalid baseline crop or symmetric context")
     total_seconds = len(signal) / sample_rate
-    if (sample_rate <= 0 or not np.isfinite(baseline_start_s)
+    if (not np.isfinite(baseline_start_s)
             or not np.isfinite(baseline_end_s)
             or not 0 <= baseline_start_s < baseline_end_s <= total_seconds + 0.001
             or not 0 < padding_seconds <= 1.0):
