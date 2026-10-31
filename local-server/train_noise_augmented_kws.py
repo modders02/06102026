@@ -161,7 +161,12 @@ def feature_vector(samples: np.ndarray, extractor: CustomKeywordEngine) -> np.nd
     pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
     mel = extractor.extract_features(pcm)
     if mel.ndim != 2 or mel.shape[1] != N_MELS or len(mel) < 12:
-        raise ValueError("No valid speech features detected")
+        raise ValueError(
+            "No valid speech features detected "
+            f"(log-Mel frames={len(mel) if mel.ndim == 2 else 'invalid'}, "
+            f"input_duration={len(samples) / SAMPLE_RATE:.2f}s; "
+            "may be truncated speech, a short impact or sparse background)"
+        )
     # Linear time resampling to fixed 16 x 32; retain phoneme transitions.
     pos = np.linspace(0, len(mel) - 1, STEPS, dtype=np.float32)
     low = np.floor(pos).astype(np.int32)
