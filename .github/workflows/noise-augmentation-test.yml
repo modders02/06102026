@@ -1,0 +1,29 @@
+name: Noise-augmented KWS training checks
+
+on:
+  push:
+    branches:
+      - experiment/noise-augment-training-20261031
+  pull_request:
+    paths:
+      - "local-server/train_noise_augmented_kws.py"
+      - "local-server/diagnose_noise_augmented_kws.py"
+      - "local-server/capture_noise_kws_wavs.py"
+      - "local-server/neural_kws_trial.py"
+      - "local-server/tests/test_noise_augmented_kws.py"
+      - ".github/workflows/noise-augmentation-test.yml"
+
+jobs:
+  noise-training-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install lightweight NumPy only
+        run: python -m pip install "numpy>=1.26,<3"
+      - name: Exercise clean/noisy augmentation, supervised training, WAV recorder and model round-trip
+        run: python -m unittest discover -s local-server/tests -p test_noise_augmented_kws.py -v
+      - name: Compile optional training and comparison scripts
+        run: python -m py_compile local-server/train_noise_augmented_kws.py local-server/capture_noise_kws_wavs.py local-server/neural_kws_trial.py local-server/diagnose_noise_augmented_kws.py
