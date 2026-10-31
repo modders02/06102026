@@ -32,6 +32,20 @@ on port 5000. Stop only the old MSDS camera backend and restart with the
 environment variable above.
 
 The capture tool subscribes to the same decoded camera PCM stream as DTW.
+Each recording now releases its own short-lived subscription explicitly, so
+sequential recordings should not fail with HTTP 409 due to lingering
+StreamingResponse cleanup. A true second active shadow listener still gets
+409 and is not forcibly disconnected. If updating from an earlier build, pull
+the branch and FULLY restart the local camera backend to activate the new
+lease-release endpoint; restarting only this capture CLI is not enough.
+Previously recorded WAVs are retained, and no capture command resets counts.
+To check how many are already saved:
+
+    (Get-ChildItem .\local-server\neural-kws-data\train\help\*.wav -ErrorAction SilentlyContinue).Count
+    (Get-ChildItem .\local-server\neural-kws-data\holdout\help\*.wav -ErrorAction SilentlyContinue).Count
+
+Resume only missing takes; for example, three successful HELP train files
+mean you need TWO more instead of rerecording five.
 Stop the ordinary neural shadow process while recording: only one subscriber
 per camera is allowed.
 
