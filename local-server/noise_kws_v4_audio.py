@@ -46,7 +46,8 @@ def localize_speech_candidate(
     if total <= minimum:
         return signal.copy(), {
             "start_s": 0.0, "end_s": round(total / sample_rate, 4),
-            "reason": "short_original", "active_duration_s": round(total / sample_rate, 4),
+            "reason": "short_original", "duration_s": round(total / sample_rate, 4),
+            "active_duration_s": round(total / sample_rate, 4),
         }
 
     frame = max(1, round(0.025 * sample_rate))
@@ -54,7 +55,8 @@ def localize_speech_candidate(
     if total < frame:
         return signal.copy(), {
             "start_s": 0.0, "end_s": round(total / sample_rate, 4),
-            "reason": "short_original", "active_duration_s": round(total / sample_rate, 4),
+            "reason": "short_original", "duration_s": round(total / sample_rate, 4),
+            "active_duration_s": round(total / sample_rate, 4),
         }
     starts = np.arange(0, total - frame + 1, hop, dtype=np.int64)
     squares = np.asarray(signal, dtype=np.float64) ** 2
