@@ -54,6 +54,19 @@ def wav_bytes(samples: np.ndarray, sample_rate: int = SAMPLE_RATE) -> bytes:
     return memory.getvalue()
 
 
+def play_original_then_crop(winsound_module, original_wav: bytes, crop_wav: bytes) -> None:
+    """Play two WAV buffers synchronously without writing temporary audio files.
+
+    The winsound PlaySound() default is synchronous. Python's winsound does
+    not export SND_SYNC; passing SND_MEMORY *without* SND_ASYNC is sufficient.
+    """
+    flags = winsound_module.SND_MEMORY
+    print("[Crop review] Playing ORIGINAL...")
+    winsound_module.PlaySound(original_wav, flags)
+    print("[Crop review] Playing V4 CROP...")
+    winsound_module.PlaySound(crop_wav, flags)
+
+
 def report_and_validation(root: Path, model_path: Path, manifest: Path):
     """Require unchanged saved model, grouped train/validation membership and WAVs."""
     model, meta = load_model(model_path)
@@ -222,14 +235,7 @@ def main() -> int:
             )
             original_bytes, crop_bytes = wav_bytes(samples), wav_bytes(crop)
             while True:
-                print("[Crop review] Playing ORIGINAL...")
-                winsound.PlaySound(
-                    original_bytes, winsound.SND_MEMORY | winsound.SND_SYNC
-                )
-                print("[Crop review] Playing V4 CROP...")
-                winsound.PlaySound(
-                    crop_bytes, winsound.SND_MEMORY | winsound.SND_SYNC
-                )
+                play_original_then_crop(winsound, original_bytes, crop_bytes)
                 decision = input(
                     "Does the CROP retain the COMPLETE expected word? "
                     "[Y/N/U/R/Q] "
