@@ -184,6 +184,50 @@ def pcm_bridge_enabled(status: dict, camera_id: str) -> bool:
     return False
 
 
+def np_from_pcm(pcm: bytes):
+    import numpy as np
+    return np.frombuffer(pcm[:len(pcm) - (len(pcm) % 2)],
+                         dtype="<i2").astype(np.float32) / 32768.0
+
+
+def prepare_trained_candidate(candidate_path: Path):
+    """Isolated candidate is advisory ONLY; never publish to the KWS engine."""
+    from msds.kws_engine import CustomKeywordEngine, StreamingSpeechSegmenter
+    from train_noise_augmented_kws import load_model
+    weights, metadata = load_model(candidate_path)
+    # Separate feature extractor; do not read or alter existing enrollments.
+    extractor = CustomKeywordEngine(data_dir=str(
+        ROOT / "neural-kws-data" / "_feature-only-no-enrollments"
+    ))
+    return weights, metadata, extractor, StreamingSpeechSegmenter()
+
+
+def record_trained_detection(file, word: str, confidence: float,
+                             margin: float, camera_id: str, base: str):
+    """Independent MLP shadow prediction; never enters emergency event routing."""
+    if word == "unknown":
+        return
+    try:
+        old = dtw_snapshot(read_status(base, timeout=1.5), camera_id)
+    except (OSError, URLError, ValueError, RuntimeError):
+        old = {}
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "camera_id": camera_id, "trained_word": word,
+        "trained_confidence": round(confidence, 4),
+        "trained_margin": round(margin, 4),
+        "dtw_latest_snapshot": old,
+        "mode": "noise_augmented_classifier_shadow_read_only",
+    }
+    file.write(json.dumps(entry) + "\n")
+    file.flush()
+    print(
+        f"[NOISE TRAINED SHADOW] {word.upper()} confidence={confidence:.3f} "
+        f"margin={margin:.3f} | DTW latest={old.get('candidate') or 'none'}",
+        flush=True,
+    )
+
+
 def record_detection(file, word: str, camera_id: str, base: str, started_at: float):
     at = datetime.now(timezone.utc).isoformat()
     # Query the existing DTW diagnostics as the nearest available observation;
@@ -215,6 +259,8 @@ def main():
                         help="bridge: existing backend PCM, recommended; rtsp: relay diagnostics")
     parser.add_argument("--seconds", type=int, default=0, help="Trial duration; 0 is unlimited")
     parser.add_argument("--output", type=Path, default=None, help="JSONL report (metadata only)")
+    parser.add_argument("--trained-candidate", type=Path, default=None,
+                        help="Optional standalone trained NumPy model; shadow-only comparison")
     args = parser.parse_args()
     if not (1 <= args.msds_port <= 65535):
         parser.error("Invalid MSDS API port")
@@ -233,6 +279,7 @@ def main():
                 "and ensure /status reports audio.neural_shadow_pcm.enabled=True."
             )
         kws = create_spotter(ROOT / "neural-kws-models")
+        trained = prepare_trained_candidate(args.trained_candidate) if args.trained_candidate else None
         ffmpeg = ffmpeg_executable() if args.source == "rtsp" else None
     except Exception as exc:
         print(f"[NEURAL SHADOW] Cannot start: {exc}", file=sys.stderr)
@@ -249,6 +296,9 @@ def main():
     print("[NEURAL SHADOW] Monitoring seven English keywords, CPU mode.")
     print("[NEURAL SHADOW] Logs contain labels/DTW metadata only; no raw audio.")
     print("[NEURAL SHADOW] Output:", output)
+    if trained:
+        print("[NEURAL SHADOW] Additional noise-trained MLP enabled for SHADOW logs only.")
+        print("[NEURAL SHADOW] Its predictions never enter active MSDS emergency validation.")
     print("[NEURAL SHADOW] Ctrl+C stops the experiment.")
     started = time.monotonic()
     last_detection: dict[str, float] = {}
@@ -272,9 +322,28 @@ def main():
                 return 2
 
             stream = kws.create_stream()
+            if trained:
+                trained[3].reset()  # Drop any stale speech on camera reconnect.
 
             def ingest(block: bytes):
                 nonlocal stream
+                # A separately TRAINED supervised MLP sees only VAD-bounded
+                # utterances from this same audio source. It never calls DTW
+                # enrollment, event, or emergency endpoints.
+                if trained:
+                    from train_noise_augmented_kws import feature_vector, predict_one
+                    weights, _, extractor, segmenter = trained
+                    for segment in segmenter.feed(block):
+                        try:
+                            samples = np_from_pcm(segment)
+                            feat = feature_vector(samples, extractor)
+                            word, confidence, margin = predict_one(feat, weights)
+                        except (ValueError, RuntimeError) as exc:
+                            print(f"[NOISE TRAINED SHADOW] Skipped invalid segment: {exc}",
+                                  flush=True)
+                            continue
+                        record_trained_detection(log, word, confidence, margin,
+                                                 args.camera, base)
                 stream, words = consume_pcm_chunk(kws, stream, block)
                 for word in words:
                     now = time.monotonic()
