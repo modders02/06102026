@@ -13,7 +13,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from audit_noise_kws_v4_crops import (
-    COLUMNS, append_review, load_reviews, render_summary, wav_bytes,
+    COLUMNS, append_review, load_reviews, play_original_then_crop, render_summary, wav_bytes,
 )
 from train_noise_augmented_kws import SAMPLE_RATE
 
@@ -41,6 +41,31 @@ class V4ManualCropAuditTests(unittest.TestCase):
                     wav_bytes(invalid)
         with self.assertRaisesRegex(ValueError, "sample rate"):
             wav_bytes(np.ones(10, np.float32), sample_rate=10)
+
+    def test_winsound_memory_playback_is_ordered_and_synchronous_by_default(self):
+        # Python winsound has no SND_SYNC constant. SND_MEMORY alone is sync;
+        # importantly, SND_ASYNC must not be supplied for memory playback.
+        class FakeWinSound:
+            SND_MEMORY = 4
+            SND_ASYNC = 1
+
+            def __init__(self):
+                self.played = []
+
+            def PlaySound(self, blob, flags):
+                self.played.append((blob, flags))
+
+        fake = FakeWinSound()
+        original = wav_bytes(np.ones(1600, dtype=np.float32) * 0.1)
+        crop = wav_bytes(np.ones(800, dtype=np.float32) * 0.2)
+        play_original_then_crop(fake, original, crop)
+        self.assertEqual(
+            fake.played,
+            [(original, fake.SND_MEMORY), (crop, fake.SND_MEMORY)],
+        )
+        self.assertEqual(
+            [flags & fake.SND_ASYNC for _, flags in fake.played], [0, 0]
+        )
 
     def test_private_csv_writes_only_metadata_and_is_resumeable(self):
         with tempfile.TemporaryDirectory() as temp:
