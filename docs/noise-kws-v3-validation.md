@@ -148,3 +148,52 @@ on the outcome or report it as an unbiased independent test.
 4. An energy/Log-Mel feature audit does not validate pronunciation or labels.
 5. V3 cannot be promoted automatically into alert/Camera Alert/Event History
    paths. No branch writes deployed DTW templates.
+
+
+## When V3 stops at epoch 1 or rejects every validation keyword
+
+For example, session validation may yield raw training loss falling from ~1.61
+to ~0.19 while validation macro cross-entropy rises from ~3.15 to ~5.47,
+with the best checkpoint at epoch 1 and 0/35 keywords accepted. A reported
+0/10 unknown false positives in this situation is NOT evidence of accuracy:
+the model predicts UNKNOWN for all 45 evaluation examples.
+
+Do NOT rerun for more epochs, lower acceptance threshold, or promote to alerts.
+Investigate whether the raw classifier actually recognizes words before the
+fixed 0.80/0.15 acceptance gate, and whether the microphone/room conditions
+changed between sessions. The saved V3 model can be diagnosed without
+retraining or accessing the previously used 31 legacy holdout WAVs:
+
+    git pull --ff-only origin experiment/noise-kws-v3-validation-20261031
+    .\local-server\diagnose_noise_kws_v3.cmd
+
+Optional per-file labels, probabilities, reasons, and trimmed durations:
+
+    .\local-server\diagnose_noise_kws_v3.cmd --show-files
+
+Local report:
+
+    local-server/neural-kws-data/artifacts/noise_augmented_shadow_v3.diagnostic.json
+
+Inspect summary.training versus summary.validation:
+- raw_top_positive_accuracy: how often the top-scoring class matches the
+  spoken word BEFORE safety gating (NOT alert recall).
+- fixed_gate_positive_recall: recognized accepted words with safety gating.
+- decision_reasons: top_class_unknown, below_fixed_threshold,
+  below_fixed_margin or accepted.
+- per_label: confusion plus per-word RMS and post-energy-trim duration.
+- fire_validation: all five FIRE session-validation WAVs with top-three
+  predicted labels and acoustic metadata.
+- validation_errors: error-specific rows; no raw audio is copied.
+
+If raw-top accuracy is near zero, threshold relaxation would be actively
+misleading; investigate word content, feature separation and session audio
+characteristics. If raw-top is high but gated recall low, the ranking is
+often correct but confidence is unreliable; still do not tune the threshold
+using the same validation data without new prospective evaluation. Near-0
+unknown false-positive rate from always rejecting is not useful.
+The script verifies that the saved training split matches the current
+manifest and refuses mismatched splits.
+
+All output remains private, and metadata may include local WAV filenames.
+Never commit this JSON, private CSV, or source WAVs.
