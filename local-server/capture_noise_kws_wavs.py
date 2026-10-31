@@ -12,10 +12,11 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import time
 import uuid
 import wave
 from urllib.error import HTTPError, URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from neural_kws_trial import (
     CHUNK_BYTES, DEFAULT_MSDS_PORT, make_bridge_request,
@@ -68,6 +69,57 @@ def capture_wav(response, destination_path: Path, seconds: float) -> tuple[int, 
     return len(pcm), hashlib.sha256(pcm).hexdigest()
 
 
+def capture_one_take(base: str, camera_id: str, folder: Path, seconds: float,
+                     opener=urlopen, sleep=time.sleep) -> tuple[Path, int, str]:
+    """Record one WAV and explicitly release its subscriber immediately.
+
+    The ASGI streaming generator can remain alive briefly after an HTTP client
+    reads exactly 1.8 seconds of a continuous response. A capability-protected
+    release is deterministic; limited 409 retries cover shutdown races or old
+    in-flight clients. Never restart the camera or evict an unrelated listener.
+    """
+    request = make_bridge_request(base, camera_id)
+    for attempt in range(6):
+        try:
+            with opener(request, timeout=12) as stream:
+                lease = stream.headers.get("X-MSDS-Shadow-Lease", "")
+                if not lease:
+                    raise RuntimeError(
+                        "PCM capture backend is outdated: missing lease header. "
+                        "Pull the new experimental branch and restart the camera bridge."
+                    )
+                try:
+                    if stream.headers.get("X-MSDS-PCM-Format") != "s16le-16000-mono":
+                        raise RuntimeError("Unexpected audio format from camera bridge")
+                    print(f"[Noise capture] RECORDING NOW for {seconds:.1f} seconds...", flush=True)
+                    path = folder / make_capture_filename()
+                    byte_count, digest = capture_wav(stream, path, seconds)
+                    return path, byte_count, digest
+                finally:
+                    # Close only OUR lease. Old StreamingResponse generator
+                    # cleanup may run asynchronously after this call.
+                    release = Request(
+                        f"{base}/cameras/{camera_id}/experimental-neural-pcm/release",
+                        headers={"X-MSDS-Shadow-Client": "neural-kws-trial",
+                                 "X-MSDS-Shadow-Lease": lease},
+                        method="POST",
+                    )
+                    try:
+                        with opener(release, timeout=4) as reply:
+                            reply.read()
+                    except (HTTPError, URLError, OSError, TimeoutError) as exc:
+                        print(f"[Noise capture] Lease release acknowledgement missing: {exc}",
+                              file=sys.stderr, flush=True)
+        except HTTPError as exc:
+            if exc.code != 409 or attempt == 5:
+                raise
+            wait = min(0.5 * (attempt + 1), 2.0)
+            print(f"[Noise capture] Previous audio listener still closing; "
+                  f"retrying in {wait:.1f}s ({attempt + 1}/5).", flush=True)
+            sleep(wait)
+    raise RuntimeError("Unable to acquire PCM subscription")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Capture labeled CCTV WAVs without touching trained templates.")
     parser.add_argument("--label", required=True, choices=LABELS)
@@ -117,17 +169,14 @@ def main() -> int:
             if answer.strip().lower() == "q":
                 print("[Noise capture] Stopped without further recordings.")
                 break
-            request = make_bridge_request(base, args.camera)
             try:
-                with urlopen(request, timeout=12) as stream:
-                    if stream.headers.get("X-MSDS-PCM-Format") != "s16le-16000-mono":
-                        raise RuntimeError("Unexpected audio format from camera bridge")
-                    print(f"[Noise capture] RECORDING NOW for {args.seconds:.1f} seconds...", flush=True)
-                    path = folder / make_capture_filename()
-                    byte_count, digest = capture_wav(stream, path, args.seconds)
+                path, byte_count, digest = capture_one_take(
+                    base, args.camera, folder, args.seconds
+                )
                 print(f"[Noise capture] Saved: {path.name}, bytes={byte_count}, sha256={digest[:12]}")
             except HTTPError as exc:
-                print(f"[Noise capture] HTTP {exc.code}. Check that no neural shadow listener is already using the tap.",
+                print(f"[Noise capture] HTTP {exc.code}. If this persists, stop the neural "
+                      "shadow listener or restart the experimental camera backend.",
                       file=sys.stderr)
                 return 3
             except (OSError, URLError, RuntimeError, ValueError) as exc:
