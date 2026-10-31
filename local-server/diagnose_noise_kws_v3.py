@@ -132,6 +132,88 @@ def summarize(items: list[dict], split_name: str) -> dict:
     }
 
 
+
+def acoustic_signature(samples: np.ndarray, extracted: np.ndarray,
+                       weights: dict) -> dict:
+    """Amplitude and feature-distribution proxies; NOT speech transcription.
+
+    300 ms windows show whether audio energy concentrates in speech-like
+    intervals or fills the whole clip. Continuous sound could be speech,
+    fan, room hum or camera artifacts: listen to the WAV before labeling.
+    """
+    samples = np.asarray(samples, dtype=np.float32)
+    if not len(samples) or extracted.shape != weights["mean"].shape:
+        raise ValueError("Invalid acoustic sample/feature shape")
+    window = max(1, int(SAMPLE_RATE * 0.3))
+    first = samples[:window]
+    mid_start = max(0, (len(samples) - window) // 2)
+    middle = samples[mid_start:mid_start + window]
+    last = samples[-window:]
+    def energy(values):
+        return float(np.sqrt(np.mean(values * values, dtype=np.float64) + 1e-12))
+    first_rms, middle_rms, last_rms = map(energy, (first, middle, last))
+    windows = [
+        energy(samples[pos:pos + window])
+        for pos in range(0, len(samples), window)
+    ]
+    dynamic_db = 20 * np.log10((max(windows) + 1e-9) / (min(windows) + 1e-9))
+    normalized = (extracted - weights["mean"]) / weights["scale"]
+    return {
+        "first_300ms_rms": round(first_rms, 6),
+        "middle_300ms_rms": round(middle_rms, 6),
+        "last_300ms_rms": round(last_rms, 6),
+        "rms_dynamic_range_db": round(float(dynamic_db), 4),
+        "near_clipped_fraction": round(float(np.mean(np.abs(samples) >= 0.98)), 6),
+        "logmel_vector_mean": round(float(np.mean(extracted)), 5),
+        "logmel_vector_std": round(float(np.std(extracted)), 5),
+        "normalized_feature_distance": round(
+            float(np.sqrt(np.mean(normalized * normalized))), 4
+        ),
+    }
+
+
+def session_acoustic_comparison(training: list[dict],
+                                validation: list[dict]) -> dict:
+    """Only observational statistics, never thresholds or model selection."""
+    keys = (
+        "rms", "energy_trimmed_duration_s", "trimmed_fraction",
+        "first_300ms_rms", "middle_300ms_rms", "last_300ms_rms",
+        "rms_dynamic_range_db", "near_clipped_fraction",
+        "logmel_vector_mean", "logmel_vector_std",
+        "normalized_feature_distance",
+    )
+    def stats(items):
+        return {name: _median([x[name] for x in items]) for name in keys}
+    by_label = {}
+    for label in LABELS:
+        train_items = [x for x in training if x["expected"] == label]
+        val_items = [x for x in validation if x["expected"] == label]
+        by_label[label] = {
+            "train": stats(train_items),
+            "validation": stats(val_items),
+        }
+    train_summary = stats(training)
+    val_summary = stats(validation)
+    train_rms = train_summary["rms"]
+    val_rms = val_summary["rms"]
+    return {
+        "train_medians": train_summary,
+        "validation_medians": val_summary,
+        "validation_to_training_median_rms_ratio": (
+            round(val_rms / train_rms, 4)
+            if train_rms is not None and val_rms is not None and train_rms > 0
+            else None
+        ),
+        "per_label": by_label,
+        "interpretation": (
+            "These are acoustic proxies, not verified spoken labels or "
+            "proof of cause. Inspect original WAV playback for missing or "
+            "truncated words, constant noise and session differences. "
+            "Do not tune fixed safety thresholds using this validation."
+        ),
+    }
+
+
 def diagnose_original_files(root: Path, rows: list[dict], split_name: str,
                             engine, weights: dict) -> list[dict]:
     results = []
@@ -155,6 +237,7 @@ def diagnose_original_files(root: Path, rows: list[dict], split_name: str,
             "rms": round(float(np.sqrt(np.mean(samples * samples) + 1e-12)), 6),
             "peak": round(float(np.max(np.abs(samples))), 6),
         })
+        result.update(acoustic_signature(samples, x, weights))
         results.append(result)
     return results
 
@@ -203,6 +286,7 @@ def diagnose(root: Path, manifest: Path, model: Path, *,
         "training": summarize(training_items, "training_originals"),
         "validation": summarize(validation_items, "session_validation"),
     }
+    acoustic = session_acoustic_comparison(training_items, validation_items)
     return {
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "candidate": str(model),
@@ -213,6 +297,7 @@ def diagnose(root: Path, manifest: Path, model: Path, *,
             "accept_margin": ACCEPT_MARGIN,
         },
         "summary": summary,
+        "acoustic_session_comparison": acoustic,
         "validation_per_file": validation_items,
         "training_per_file": training_items,
         "validation_errors": [
@@ -258,6 +343,12 @@ def main() -> int:
         "candidate": str(model),
         "training": summary["training"],
         "validation": summary["validation"],
+        "acoustic_session_comparison": {
+            "train_medians": result["acoustic_session_comparison"]["train_medians"],
+            "validation_medians": result["acoustic_session_comparison"]["validation_medians"],
+            "validation_to_training_median_rms_ratio": result["acoustic_session_comparison"]["validation_to_training_median_rms_ratio"],
+            "interpretation": result["acoustic_session_comparison"]["interpretation"],
+        },
         "warning": result["warning"],
     }
     print(json.dumps(compact, indent=2))
