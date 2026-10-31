@@ -449,7 +449,8 @@ def load_model(path: Path) -> tuple[dict, dict]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Train an isolated noise-augmented English KWS MLP.")
     parser.add_argument("--data", type=Path, default=HERE / "neural-kws-data")
-    parser.add_argument("--check", action="store_true", help="Inspect dataset requirements without training")
+    parser.add_argument("--check", action="store_true",
+                        help="Validate counts, real WAV quality and extracted features without training")
     parser.add_argument("--epochs", type=int, default=60)
     parser.add_argument("--variants", type=int, default=6, help="Noise/room variants per training WAV")
     parser.add_argument("--seed", type=int, default=42)
@@ -458,14 +459,22 @@ def main() -> int:
         parser.error("epochs must be 1-500; variants must be 1-30")
     root = args.data.resolve()
     report = inventory(root)
+    # Use a private, empty feature-only model directory. Active DTW data is
+    # never loaded, modified or replaced by the training/audit commands.
+    extractor = CustomKeywordEngine(data_dir=str(root / "_feature-only-no-enrollments"))
+    audit = audit_dataset(root, extractor)
+    report["audio_audit"] = audit
+    report["ready"] = bool(report["ready"] and audit["passed"])
     print(json.dumps(report, indent=2))
     if args.check:
         return 0 if report["ready"] else 2
     if not report["ready"]:
-        print("[Noise train] Missing real labeled source WAVs; no model trained.", file=sys.stderr)
+        print(
+            "[Noise train] Missing recordings or unusable source WAV features. "
+            "Review audio_audit.issues above and re-record only affected files.",
+            file=sys.stderr,
+        )
         return 2
-    # Empty directory redirects feature extractor away from active DTW storage.
-    extractor = CustomKeywordEngine(data_dir=str(root / "_feature-only-no-enrollments"))
     rng = np.random.default_rng(args.seed)
     try:
         x, y, test_x, test_y, manifest = encode_dataset(root, extractor, rng, args.variants)
