@@ -298,6 +298,50 @@ def load_v3(path: Path) -> tuple[dict, dict]:
     return weights, metadata
 
 
+def diagnose_validation_files(root: Path, rows: list[dict],
+                              extractor: CustomKeywordEngine, weights: dict) -> dict:
+    """File-level training-only validation errors and acoustic trim diagnostics.
+
+    Especially useful for FIRE -> UNKNOWN vs FIRE -> AMBULANCE confusion.
+    Probabilities describe this research model only, not calibrated risk.
+    """
+    from train_noise_augmented_kws import infer_probs, predict_one
+
+    results = []
+    for item in rows:
+        source = root / item["relative_path"]
+        samples = read_audio(source, extractor)
+        feature = feature_vector(samples, extractor)
+        raw_prob = infer_probs(feature[None, :], weights)[0]
+        prediction, best_prob, margin = predict_one(feature, weights)
+        raw_index = int(np.argmax(raw_prob))
+        trimmed = extractor._trim_energy(samples)
+        results.append({
+            "file": item["relative_path"],
+            "actual": item["label"],
+            "predicted": prediction,
+            "correct": prediction == item["label"],
+            "raw_top_class": LABELS[raw_index],
+            "top_probability": round(best_prob, 5),
+            "margin": round(margin, 5),
+            "duration_s": round(len(samples) / SAMPLE_RATE, 3),
+            "energy_trimmed_duration_s": round(len(trimmed) / SAMPLE_RATE, 3),
+            "trimmed_fraction": round(len(trimmed) / max(1, len(samples)), 4),
+            "rms": round(float(np.sqrt(np.mean(samples * samples) + 1e-12)), 5),
+            "peak": round(float(np.max(np.abs(samples))), 5),
+            "note": "Operator must verify true spoken word; no content verified automatically.",
+        })
+    return {
+        "validation_file_errors": [
+            item for item in results if not item["correct"]
+        ],
+        "fire_validation_files": [
+            item for item in results if item["actual"] == "fire"
+        ],
+        "total_validation_files": len(results),
+    }
+
+
 def exploratory_legacy_holdout(root: Path, extractor: CustomKeywordEngine,
                                 weights: dict) -> dict:
     x, y = [], []
@@ -384,6 +428,7 @@ def main() -> int:
             patience=args.patience,
         )
         val_metrics = evaluate_holdout(vx, vy, weights)
+        val_diagnostics = diagnose_validation_files(root, validation, extractor, weights)
         legacy = (
             exploratory_legacy_holdout(root, extractor, weights)
             if args.exploratory_legacy_holdout else None
@@ -407,6 +452,7 @@ def main() -> int:
         "model_metadata": metadata,
         "group_split": split_report, "dataset": data_summary,
         "fit": fit, "training_only_validation": val_metrics,
+        "validation_file_diagnostics": val_diagnostics,
         "legacy_holdout_exploratory_only": legacy,
         "old_model_files_overwritten": False,
         "active_dtw_templates_modified": False,
