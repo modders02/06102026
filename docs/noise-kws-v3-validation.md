@@ -197,3 +197,54 @@ manifest and refuses mismatched splits.
 
 All output remains private, and metadata may include local WAV filenames.
 Never commit this JSON, private CSV, or source WAVs.
+
+
+## V3 failure review after the first one-speaker session split
+
+Observed offline: raw 43/74 correct keyword hypotheses on original
+training WAVs (58.11%), but only 1/35 on separate session validation
+WAVs (2.86%). With the fixed acceptance gate: 4/74 training words
+(5.41%) and 0/35 validation words accepted. The five FIRE validation
+WAVs had zero correct raw top-word hypotheses. The best epoch was 1:
+the session shift is severe, and adding more training epochs is not
+a defensible fix.
+
+The read-only diagnostic also reports observational session acoustic
+signatures: median total RMS, first/middle/last 300-ms RMS, RMS dynamic
+range, near-clipped sample fraction, log-Mel vector mean/standard
+deviation, energy-trimmed duration and feature distance to the saved
+training-augmentation mean. They are proxies: no automatic check
+determines whether the human actually said the expected word.
+
+    git pull --ff-only origin experiment/noise-kws-v3-validation-20261031
+    .\local-server\diagnose_noise_kws_v3.cmd
+
+The metadata-only report contains acoustic_session_comparison with
+train_medians, validation_medians and per_label comparisons. In
+PowerShell:
+
+    $r = Get-Content ".\local-server\neural-kws-data\artifacts\noise_augmented_shadow_v3.diagnostic.json" -Raw | ConvertFrom-Json
+    $r.acoustic_session_comparison | Select-Object validation_to_training_median_rms_ratio
+    $r.acoustic_session_comparison.train_medians
+    $r.acoustic_session_comparison.validation_medians
+    $r.acoustic_session_comparison.per_label.fire
+
+Manually listen to representative local WAVs from BOTH sessions
+before inferring a signal-processing fix. Windows PowerShell example
+(run locally, don't upload raw voice data):
+
+    $root = ".\local-server\neural-kws-data"
+    $old = Join-Path $root "train\fire\20261031T021504Z-271c4c28635c.wav"
+    $new = Join-Path $root "train\fire\20261031T042028Z-612ea7af4765.wav"
+    $player = New-Object System.Media.SoundPlayer
+    $player.SoundLocation = (Resolve-Path $old).Path
+    $player.PlaySync()
+    $player.SoundLocation = (Resolve-Path $new).Path
+    $player.PlaySync()
+
+Listen for the correct utterance, clipping, delayed onset, microphone
+dropouts, and fan/TV/room noise across the sessions. If speech is not
+audibly clear, review capture-timing and microphone placement before
+any feature or model changes. Do not relabel an unverified file,
+lower the emergency acceptance threshold or move prior holdouts into
+training. Keep stable DTW and production alert pathways untouched.
