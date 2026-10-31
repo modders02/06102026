@@ -113,7 +113,7 @@ class V3RefinementTests(unittest.TestCase):
             paths, fingerprint = enumerate_evaluation_wavs(root, test, original_hashes)
             self.assertEqual(len(paths), 8)
             self.assertEqual(len(fingerprint), 64)
-            with self.assertRaisesRegex(ValueError, "original training"):
+            with self.assertRaisesRegex(ValueError, "original V3 training root"):
                 enumerate_evaluation_wavs(root, root, original_hashes)
             with self.assertRaisesRegex(ValueError, "original training"):
                 enumerate_evaluation_wavs(root, root / "holdout", original_hashes)
