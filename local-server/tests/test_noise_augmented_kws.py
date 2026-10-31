@@ -23,6 +23,7 @@ from train_noise_augmented_kws import (
     load_model, noise_window, predict_one, read_audio, save_model, train_mlp,
     audit_dataset, build_variant,
 )
+from diagnose_noise_augmented_kws import diagnose_files, explain_decision
 from msds.kws_engine import CustomKeywordEngine
 from msds.neural_shadow_pcm import ShadowPCMFeed, PCMGapError, collect_pcm_take
 
@@ -91,6 +92,47 @@ class NoiseAugmentedKWSTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "noise/impact.wav"):
                     build_variant(one_second, [], np.random.default_rng(5), engine,
                                   "noise/impact.wav", background=True, max_attempts=2)
+
+    def test_noise_candidate_diagnostics_are_read_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            extractor = CustomKeywordEngine(data_dir=str(root / "unused-only"))
+            rng = np.random.default_rng(42)
+            x = rng.normal(size=(48, DIM)).astype(np.float32)
+            y = np.tile(np.arange(len(LABELS)), 6)
+            weights = train_mlp(x, y, epochs=2, seed=42)
+            t = np.arange(SAMPLE_RATE, dtype=np.float32) / SAMPLE_RATE
+            wav = root / "train" / "help" / "consented-take.wav"
+            write_wav(wav, 0.25 * np.sin(2 * np.pi * 325 * t))
+            before = wav.read_bytes()
+            result = diagnose_files(root, "train", weights, extractor)
+            self.assertEqual(result["total"], 1)
+            self.assertEqual(result["per_label"]["help"]["files"], 1)
+            row = result["file_predictions"][0]
+            self.assertEqual(row["file"], "train/help/consented-take.wav")
+            self.assertEqual(row["actual"], "help")
+            self.assertIn(row["predicted"], LABELS)
+            self.assertEqual(len(row["top_three"]), 3)
+            self.assertIn(row["decision_reason"], (
+                "accepted", "top_class_unknown",
+                "below_fixed_threshold", "below_fixed_margin",
+            ))
+            self.assertGreater(row["rms"], 0)
+            self.assertEqual(wav.read_bytes(), before)
+            with self.assertRaises(ValueError):
+                diagnose_files(root, "invalid", weights, extractor)
+
+    def test_diagnostics_distinguish_rejection_from_wrong_word(self):
+        # Proper probabilities: eight labels and total mass 1.
+        accepted = np.array([0.91, 0.02, 0.02, 0.01, 0.01,
+                             0.01, 0.01, 0.01], np.float32)
+        self.assertEqual(explain_decision(accepted), "accepted")
+        below = np.array([0.40, 0.20, 0.15, 0.10, 0.05,
+                          0.05, 0.03, 0.02], np.float32)
+        self.assertEqual(explain_decision(below), "below_fixed_threshold")
+        unknown = np.array([0.02, 0.02, 0.02, 0.02, 0.02,
+                            0.02, 0.02, 0.86], np.float32)
+        self.assertEqual(explain_decision(unknown), "top_class_unknown")
 
     def test_augmentation_is_reproducible_and_does_not_modify_original(self):
         sr = SAMPLE_RATE
