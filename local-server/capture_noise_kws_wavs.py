@@ -27,7 +27,7 @@ from prepare_neural_kws import KEYWORDS, ROOT
 
 SAMPLE_RATE = 16_000
 DEFAULT_DATA = ROOT / "neural-kws-data"
-LABELS = (*KEYWORDS, "unknown", "noise")
+LABELS = (*KEYWORDS, "unknown", "hard_negative", "noise")
 
 
 def destination(root: Path, label: str, split: str) -> Path:
@@ -138,6 +138,8 @@ def main() -> int:
         parser.error("--seconds must be 0.5-30")
     if args.label != "noise" and not 0.5 <= args.seconds <= 2.5:
         parser.error("Keyword/unknown speech clips must be 0.5-2.5 seconds")
+    if args.label == "hard_negative" and args.split != "train":
+        parser.error("Hard-negative samples are training-only; use --split train.")
     if args.label == "noise" and args.split != "train":
         parser.error("Background noise sources are training-only; use --split train.")
     if not 1 <= args.msds_port <= 65535:
@@ -163,6 +165,8 @@ def main() -> int:
     print("[Noise capture] Keep the neural shadow LISTENER STOPPED while recording: one tap subscriber per camera.")
     if args.label == "unknown":
         print("[Noise capture] Speak natural non-keyword phrases; never say the seven emergency keywords.")
+    if args.label == "hard_negative":
+        print("[Noise capture] Speak near-miss words/ordinary phrases but never the seven actual keywords.")
     if args.label == "noise":
         print("[Noise capture] Record real fan, air-conditioner or traffic noise WITHOUT keyword speech.")
     saved = 0
