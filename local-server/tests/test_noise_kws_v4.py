@@ -17,6 +17,7 @@ from noise_kws_v4_model import (
 )
 from train_noise_augmented_kws import LABELS, SAMPLE_RATE
 from train_noise_kws_v4 import score_validation
+from evaluate_noise_kws_v4 import resolve_test_root
 
 
 class FakeLogMelEngine:
@@ -141,6 +142,22 @@ class V4OfflineTests(unittest.TestCase):
             result["validation_per_file"][1]["decision_reason"],
             "top_class_unknown",
         )
+
+    def test_independent_test_directory_must_not_reuse_training_or_holdout(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "private"
+            self.assertEqual(
+                resolve_test_root(root, root / "independent-v4-test"),
+                (root / "independent-v4-test").resolve()
+            )
+            for forbidden in (
+                root, root / "train" / "help",
+                root / "holdout", root / "staging" / "verified",
+                root / "capture-pilot" / "train",
+            ):
+                with self.subTest(forbidden=forbidden):
+                    with self.assertRaisesRegex(ValueError, "training|conflicts"):
+                        resolve_test_root(root, forbidden)
 
 
 if __name__ == "__main__":
