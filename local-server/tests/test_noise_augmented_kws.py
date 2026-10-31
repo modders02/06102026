@@ -21,6 +21,7 @@ from train_noise_augmented_kws import (
     ACCEPT_THRESHOLD, DIM, LABELS, SAMPLE_RATE, augment_audio, check_disjoint,
     encode_dataset, evaluate_holdout, feature_vector, infer_probs, inventory,
     load_model, noise_window, predict_one, read_audio, save_model, train_mlp,
+    audit_dataset, build_variant,
 )
 from msds.kws_engine import CustomKeywordEngine
 from msds.neural_shadow_pcm import ShadowPCMFeed, PCMGapError, collect_pcm_take
@@ -50,6 +51,46 @@ class NoiseAugmentedKWSTests(unittest.TestCase):
             b.write_bytes(b"same wav data")
             with self.assertRaisesRegex(ValueError, "Duplicate WAV"):
                 check_disjoint({"help": [a]}, {"help": [b]}, [])
+
+    def test_audio_audit_identifies_short_transient_by_actual_filename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            engine = CustomKeywordEngine(data_dir=str(root / "unused-feature-directory"))
+            bad = np.zeros(int(1.8 * SAMPLE_RATE), dtype=np.float32)
+            tone = np.arange(640, dtype=np.float32) / SAMPLE_RATE
+            bad[7000:7640] = 0.35 * np.sin(2 * np.pi * 400 * tone)
+            path = root / "train" / "help" / "only-short-click.wav"
+            write_wav(path, bad)
+            outcome = audit_dataset(root, engine)
+            self.assertFalse(outcome["passed"])
+            self.assertEqual(outcome["recordings_scanned"], 1)
+            self.assertIn("train/help/only-short-click.wav", outcome["issues"][0]["file"])
+            self.assertIn("No valid speech features detected", outcome["issues"][0]["reason"])
+            self.assertTrue(path.is_file())  # Audit never deletes raw audio.
+
+    def test_invalid_synthetic_window_retries_not_real_wavs(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = CustomKeywordEngine(data_dir=str(Path(tmp) / "feature-only"))
+            # Actual noise WAV may have a single brief loud transient. One
+            # randomly selected window is not representative of the whole file.
+            one_second = np.full(SAMPLE_RATE, 0.02, dtype=np.float32)
+            with patch("train_noise_augmented_kws.feature_vector", side_effect=[
+                ValueError("No valid speech features detected (log-Mel frames=6)"),
+                np.ones(DIM, dtype=np.float32),
+            ]) as mock_features:
+                vector, retries = build_variant(
+                    one_second, [], np.random.default_rng(5), engine,
+                    "noise/fan.wav negative crop", background=True,
+                )
+            self.assertEqual(retries, 1)
+            self.assertEqual(mock_features.call_count, 2)
+            self.assertEqual(vector.shape, (DIM,))
+            with patch("train_noise_augmented_kws.feature_vector",
+                       side_effect=ValueError("No valid speech features detected")):
+                with self.assertRaisesRegex(ValueError, "noise/impact.wav"):
+                    build_variant(one_second, [], np.random.default_rng(5), engine,
+                                  "noise/impact.wav", background=True, max_attempts=2)
 
     def test_augmentation_is_reproducible_and_does_not_modify_original(self):
         sr = SAMPLE_RATE
