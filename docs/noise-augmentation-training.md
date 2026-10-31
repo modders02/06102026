@@ -172,6 +172,56 @@ Generated files (Git-ignored, no audio uploaded):
 The model is kept in SHADOW mode even when its report is excellent.
 The pretrained sherpa-onnx Zipformer remains unchanged.
 
+## 3A. Diagnose poor holdout generalization without changing alert thresholds
+
+If training loss becomes tiny while heldout positive recall is poor, the
+classifier is likely memorizing the limited training recordings. For example,
+a 2026-10-31 experimental run trained on only 5-9 source takes per keyword
+and achieved 4 correct predictions out of 21 heldout positive takes. Its
+unknown false-positive result was 1/10. That candidate is NOT deployment-ready.
+
+Inspect file-level confidence and rejection reasons in the **training split**
+without retraining, adjusting thresholds, or touching enrolled DTW templates:
+
+    .\local-server\diagnose_noise_augmented_kws.cmd --split train
+
+Optionally display individual source WAV names and the current candidate's
+top prediction probabilities:
+
+    .\local-server\diagnose_noise_augmented_kws.cmd --split train --show-files
+
+The report is saved as a local metadata-only JSON file:
+
+    local-server/neural-kws-data/artifacts/noise_diagnostic_report.json
+
+The diagnostic reasons distinguish: top_class_unknown, below_fixed_threshold,
+below_fixed_margin, and accepted. The current acceptance threshold is 0.80.
+Do not lower that threshold simply to increase recall on the existing
+holdout: that could increase unsafe false alarms.
+
+A read-only inspection of prior held-out misses is available with:
+
+    .\local-server\diagnose_noise_augmented_kws.cmd --split holdout --show-files
+
+**Research methodology:** if you use this holdout inspection to redesign
+the model or change parameters, those 31 recordings are now an exploratory
+development set rather than an untouched final test. Collect a NEW speaker-
+or session-disjoint final evaluation set after any design revisions. Exact
+SHA256 duplicate checks do not detect speaker/session leakage.
+
+Before another training iteration, record substantially MORE real positive
+and negative utterances and more distinct consenting speakers. Suggested
+starting target: 20-30+ actual source recordings per class, from different
+recording sessions/rooms/distances, plus varied hard negatives. Keep a
+speaker/session-grouped validation split INSIDE the training corpus for
+model selection and early stopping. Synthetic augmentations of one source
+must stay in that source's split.
+
+Evaluate heldout **noisy** originals and a long negative-speech/background
+stream, and report per-keyword recall and false alarms/hour with confidence
+intervals; three heldout takes per word are too few for reliable estimates.
+No synthetic improvements substitute for unseen speaker performance.
+
 ## 4. Compare trained model, pretrained Zipformer, and DTW
 
 With the same experimental camera bridge running, stop the WAV recorder.
