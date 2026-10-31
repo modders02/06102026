@@ -1,0 +1,4 @@
+# Research-only OFFLINE English ASR trial; never install into MSDS .venv.
+# Optional model weights download only with explicit --allow-download.
+faster-whisper==1.2.1
+numpy>=1.26,<3
