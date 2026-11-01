@@ -148,3 +148,48 @@ investigate localization on NEW development recordings, freeze any
 changes, and evaluate a NEW sealed multi-speaker test set.
 
 This is experimental diagnostics only; no deployment from this outcome.
+
+
+## Update after UNKNOWN-suspicious review: potential dataset contamination
+
+The 5 of 20 originally UNKNOWN-labeled clips whose raw classifier top-1
+was an emergency keyword were **ALL marked Y** by the operator for an
+audible emergency keyword in the ORIGINAL full WAV. Four of the five
+V4.1 selected-segment answers were marked Y; the fifth was accidentally
+saved EMPTY because Python's empty string is a substring of any string.
+This is a review UI bug; its missing answer MUST NOT be inferred to be Y.
+
+**Therefore, if UNKNOWN means no emergency keyword present, those five
+negative class labels are not trustworthy.** They may be mislabeled, or
+may contain emergency words in a sentence with context; an independent
+reviewer should note exactly WHICH keyword and semantic context was
+heard. Do not silently move files to positive train classes or alter
+original evaluation data. The other 15 UNKNOWN files have not yet
+received complete manual content review. Previously published 0/20
+negative false positive figures are only a reflection of folder labels,
+not validated background false-alarm performance.
+
+The current branch FIXES the empty input acceptance bug, refusing empty
+or multi-letter input and rejecting incomplete existing review CSVs.
+It provides an EXPLICIT opt-in interactive repair that replays just
+those WAVs with blank saved judgments. The original CSV is preserved
+as a byte-for-byte timestamped .bak file, and all nonblank values are
+kept intact. No raw WAV, class label, model or threshold is changed.
+
+PowerShell, after git pull --ff-only:
+
+    $testData = Join-Path (Get-Location).Path "local-server\neural-kws-data\independent-v41-test-20261101"
+    .\local-server\audit_noise_kws_v41_playback.cmd --test-data "$testData" --repair-invalid-review
+
+Listen and explicitly answer the replay question. If uncertain, enter
+U (not an empty line), or Q to abort without modifying the CSV.
+
+Next, review all 20 UNKNOWN WAVs, skipping the five already reviewed:
+
+    .\local-server\audit_noise_kws_v41_playback.cmd --test-data "$testData" --group unknown-all
+
+This may expose additional contaminated labels and can no longer be
+called a sealed final test. Record which spoken words actually occurred,
+using a separate human review log; do not retrain or tune on this
+reviewed cohort. Collect verified new negatives and positives from
+different consenting speakers and test sessions before model selection.
