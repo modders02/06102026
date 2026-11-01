@@ -6,6 +6,8 @@ import hashlib
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
+from unittest.mock import patch
 import unittest
 
 import numpy as np
@@ -14,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from audit_noise_kws_v41_playback import (
     COLUMNS, GROUPS, append_review, ask_rating, audio_diagnostics,
-    load_reviews, recording_file, select_rows,
+    load_reviews, recording_file, repair_missing_reviews, select_rows,
 )
 from train_noise_augmented_kws import SAMPLE_RATE
 
@@ -41,6 +43,7 @@ class V41PlaybackReviewTests(unittest.TestCase):
         self.assertEqual(len(select_rows(entries, "wrong-top")), 2)
         self.assertEqual(len(select_rows(entries, "correct-rejected")), 1)
         self.assertEqual(len(select_rows(entries, "unknown-suspicious")), 1)
+        self.assertEqual(len(select_rows(entries, "unknown-all")), 2)
         self.assertEqual(len(select_rows(entries, "accepted-control")), 1)
         self.assertEqual(len(select_rows(entries, "all")), len(entries))
         with self.assertRaisesRegex(ValueError, "Unknown review group"):
@@ -114,10 +117,83 @@ class V41PlaybackReviewTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Duplicate"):
                 load_reviews(report)
 
+    def test_blank_saved_answer_rejects_normal_loading_but_can_be_flagged_for_repair(self):
+        with tempfile.TemporaryDirectory() as rootstr:
+            path = Path(rootstr) / "review.csv"
+            item = {
+                "file": "train/unknown/unknown-synthetic.wav",
+                "sha256": "b" * 64,
+                "expected": "unknown",
+                "review_group": "unknown-suspicious",
+                "original_seconds": "1.0",
+                "selected_start_s": "0.0",
+                "selected_end_s": "0.6",
+                "selected_seconds": "0.6",
+                "original_expected_word_audible": "Y",
+                "selected_expected_word_complete": "",
+                "quality": "C",
+            }
+            append_review(path, item)
+            with self.assertRaisesRegex(ValueError, "repair-invalid-review"):
+                load_reviews(path)
+            self.assertEqual(
+                load_reviews(path, allow_missing=True)[item["file"]]
+                ["selected_expected_word_complete"], ""
+            )
+
+    def test_repair_replays_missing_answer_and_backs_up_original(self):
+        with tempfile.TemporaryDirectory() as rootstr:
+            root = Path(rootstr)
+            test = root / "new-recordings"
+            recorded = row("unknown", "fire", "unknown")
+            wav = test / recorded["file"]
+            wav.parent.mkdir(parents=True)
+            wav.write_bytes(b"synthetic-original-audio-contents")
+            source_hash = hashlib.sha256(wav.read_bytes()).hexdigest()
+            csv_path = root / "artifacts" / "reviews.csv"
+            item = {
+                "file": recorded["file"],
+                "sha256": source_hash,
+                "expected": "unknown",
+                "review_group": "unknown-suspicious",
+                "original_seconds": "1.0",
+                "selected_start_s": "0.0",
+                "selected_end_s": "0.6",
+                "selected_seconds": "0.6",
+                "original_expected_word_audible": "Y",
+                "selected_expected_word_complete": "",
+                "quality": "C",
+            }
+            append_review(csv_path, item)
+            original_csv = csv_path.read_bytes()
+            originals = {recorded["file"]: recorded}
+            mock_winsound = SimpleNamespace(SND_MEMORY=1, PlaySound=lambda *_: None)
+            with (
+                patch.dict(sys.modules, {"winsound": mock_winsound}),
+                patch("audit_noise_kws_v41_playback.get_feature_engine", return_value=object()),
+                patch("audit_noise_kws_v41_playback.read_audio",
+                      return_value=np.ones(SAMPLE_RATE, dtype=np.float32) * 0.03),
+                patch("audit_noise_kws_v41_playback.feature_for_audio",
+                      return_value=(np.zeros((48, 32), np.float32),
+                                    {"start_s": 0.0, "end_s": 0.6})),
+                patch("audit_noise_kws_v41_playback.wav_bytes", return_value=b"fake-wav"),
+                patch("builtins.input", side_effect=["", "Y"]),
+            ):
+                self.assertEqual(repair_missing_reviews(
+                    csv_path, load_reviews(csv_path, allow_missing=True),
+                    originals, test, root), 0)
+            fixed = load_reviews(csv_path)[recorded["file"]]
+            self.assertEqual(fixed["selected_expected_word_complete"], "Y")
+            self.assertEqual(fixed["original_expected_word_audible"], "Y")
+            self.assertEqual(fixed["quality"], "C")
+            backups = list(csv_path.parent.glob("reviews.csv.before-repair-*.bak"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_bytes(), original_csv)
+            self.assertEqual(hashlib.sha256(wav.read_bytes()).hexdigest(), source_hash)
+
     def test_ratings_replay_without_writing(self):
-        from unittest.mock import patch
         replayed = []
-        with patch("builtins.input", side_effect=["R", "maybe", "Y"]):
+        with patch("builtins.input", side_effect=["", "YN", "R", "maybe", "Y"]):
             rating = ask_rating("Did you hear the word?", "YNU", lambda: replayed.append(1))
         self.assertEqual(rating, "Y")
         self.assertEqual(len(replayed), 1)
