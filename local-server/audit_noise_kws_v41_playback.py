@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from datetime import datetime, timezone
 import csv
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import sys
 
@@ -38,7 +40,7 @@ COLUMNS = (
 )
 GROUPS = (
     "wrong-top", "correct-rejected", "unknown-suspicious",
-    "accepted-control", "all",
+    "accepted-control", "unknown-all", "all",
 )
 
 
@@ -62,6 +64,8 @@ def select_rows(entries: list[dict], group: str) -> list[dict]:
     if group == "accepted-control":
         return [r for r in entries if r["expected"] != "unknown"
                 and r["accepted_class"] == r["expected"]]
+    if group == "unknown-all":
+        return [r for r in entries if r["expected"] == "unknown"]
     return list(entries)
 
 
@@ -86,7 +90,7 @@ def recording_file(test_root: Path, item: dict) -> tuple[Path, str]:
     return path, hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def load_reviews(path: Path) -> dict[str, dict]:
+def load_reviews(path: Path, *, allow_missing: bool = False) -> dict[str, dict]:
     if not path.exists():
         return {}
     with path.open("r", newline="", encoding="utf-8-sig") as f:
@@ -96,10 +100,15 @@ def load_reviews(path: Path) -> dict[str, dict]:
         rows = list(reader)
     if len({r["file"] for r in rows}) != len(rows):
         raise ValueError("Duplicate prior manual reviews")
-    if any(r["original_expected_word_audible"] not in ("Y", "N", "U")
-           or r["selected_expected_word_complete"] not in ("Y", "N", "U")
-           or r["quality"] not in ("C", "S", "N", "U") for r in rows):
-        raise ValueError("Invalid prior manual-review decision")
+    yes_no = ("Y", "N", "U") + (("",) if allow_missing else ())
+    quality = ("C", "S", "N", "U") + (("",) if allow_missing else ())
+    if any(r["original_expected_word_audible"] not in yes_no
+           or r["selected_expected_word_complete"] not in yes_no
+           or r["quality"] not in quality for r in rows):
+        raise ValueError(
+            "Invalid prior manual-review decision. If a saved response is blank, "
+            "use --repair-invalid-review; never assume the missing answer."
+        )
     return {r["file"]: r for r in rows}
 
 
@@ -140,7 +149,7 @@ def ask_rating(prompt: str, allowed: str, replay) -> str:
         ans = input(prompt).strip().upper()
         if ans == "R":
             replay()
-        elif ans == "Q" or ans in allowed:
+        elif ans == "Q" or ans in tuple(allowed):
             return ans
         else:
             print(f"Choose one of {', '.join(allowed)} or R=replay, Q=quit.")
@@ -151,17 +160,135 @@ def summarize_review(reviews: dict[str, dict], selected_files: set[str]) -> None
     original = Counter(x["original_expected_word_audible"] for x in subset)
     extracted = Counter(x["selected_expected_word_complete"] for x in subset)
     quality = Counter(x["quality"] for x in subset)
+    unknown = [x for x in subset if x.get("expected") == "unknown"]
+    unknown_with_keyword = sum(x["original_expected_word_audible"] == "Y" for x in unknown)
     print(json.dumps({
         "reviewed_in_selection": len(subset),
         "audible_expected_word_in_full": dict(original),
         "complete_expected_word_in_v41_segment": dict(extracted),
         "quality": dict(quality),
+        "unknown_recordings_reviewed": len(unknown),
+        "unknown_recordings_marked_with_emergency_keyword": unknown_with_keyword,
+        "unknown_recordings_marked_without_emergency_keyword": sum(
+            x["original_expected_word_audible"] == "N" for x in unknown
+        ),
+        "unknown_recordings_uncertain": sum(
+            x["original_expected_word_audible"] == "U" for x in unknown
+        ),
+        "dataset_label_warning": (
+            "One or more UNKNOWN-labeled recordings contain a keyword by manual "
+            "review. They cannot be treated as verified keyword-negative clips; "
+            "do not interpret 0/20 as an observed false-alarm rate."
+            if unknown_with_keyword else None
+        ),
         "note": (
             "For UNKNOWN clips, Y means an emergency keyword was heard. "
             "These are subjective operator labels, not independent truth. "
             "Do not tune model or acceptance gate against this reviewed cohort."
         ),
     }, indent=2))
+
+
+def repair_missing_reviews(output: Path, reviews: dict[str, dict],
+                           original_rows: dict[str, dict], test_root: Path,
+                           root: Path) -> int:
+    """Explicit opt-in recovery of legacy blank responses, after local replay.
+
+    Preserve all existing nonblank judgments and original byte-exact CSV
+    backup. No automatic guess, no model retraining, no label changes.
+    """
+    missing = [
+        (name, row) for name, row in reviews.items()
+        if any(not row[field] for field in (
+            "original_expected_word_audible",
+            "selected_expected_word_complete", "quality",
+        ))
+    ]
+    if not missing:
+        print("[V4.1 repair] No blank answers remain; nothing changed.")
+        return 0
+    if not output.is_file() or output.is_symlink():
+        raise ValueError("Refusing to repair missing or symlink review CSV")
+    try:
+        import winsound
+    except ImportError as exc:
+        raise RuntimeError("Interactive repair requires Windows winsound") from exc
+
+    original_csv = output.read_bytes()
+    repaired = {name: dict(row) for name, row in reviews.items()}
+    extractor = get_feature_engine(root)
+    for index, (name, prior) in enumerate(missing, 1):
+        expected_row = original_rows.get(name)
+        if expected_row is None:
+            raise ValueError(f"Legacy review has no match in frozen report: {name}")
+        file, sha = recording_file(test_root, expected_row)
+        if prior["sha256"] != sha or prior["expected"] != expected_row["expected"]:
+            raise ValueError(f"Legacy review mismatch with original test WAV: {name}")
+        audio = read_audio(file, extractor)
+        _, bounds = feature_for_audio(audio, extractor)
+        selected, _ = audio_diagnostics(audio, bounds["start_s"], bounds["end_s"])
+        if (abs(bounds["start_s"] - float(prior["selected_start_s"])) > 0.02
+                or abs(bounds["end_s"] - float(prior["selected_end_s"])) > 0.02):
+            raise ValueError(f"Stored V4.1 segment bounds differ from current frozen code: {name}")
+        full_wav, segment_wav = wav_bytes(audio), wav_bytes(selected)
+
+        def replay():
+            print("[V4.1 repair] ORIGINAL full WAV...")
+            winsound.PlaySound(full_wav, winsound.SND_MEMORY)
+            print("[V4.1 repair] V4.1 SELECTED SEGMENT...")
+            winsound.PlaySound(segment_wav, winsound.SND_MEMORY)
+
+        print(f"\n[V4.1 repair] {index}/{len(missing)} {name}")
+        replay()
+        updated = repaired[name]
+        if not updated["original_expected_word_audible"]:
+            prompt = ("Any of the SEVEN emergency words audible in FULL UNKNOWN WAV? "
+                      if prior["expected"] == "unknown" else
+                      "Does FULL WAV contain the COMPLETE EXPECTED word? ")
+            val = ask_rating(prompt + "[Y/N/U/R/Q] ", "YNU", replay)
+            if val == "Q":
+                print("[V4.1 repair] Cancelled; original CSV unchanged.")
+                return 1
+            updated["original_expected_word_audible"] = val
+        if not updated["selected_expected_word_complete"]:
+            prompt = ("Any emergency keyword audible in V4.1 SEGMENT? "
+                      if prior["expected"] == "unknown" else
+                      "Does V4.1 SEGMENT preserve COMPLETE expected word? ")
+            val = ask_rating(prompt + "[Y/N/U/R/Q] ", "YNU", replay)
+            if val == "Q":
+                print("[V4.1 repair] Cancelled; original CSV unchanged.")
+                return 1
+            updated["selected_expected_word_complete"] = val
+        if not updated["quality"]:
+            val = ask_rating("Audio quality C=clear S=soft N=noisy U=uncertain [C/S/N/U/R/Q] ",
+                             "CSNU", replay)
+            if val == "Q":
+                print("[V4.1 repair] Cancelled; original CSV unchanged.")
+                return 1
+            updated["quality"] = val
+
+    if output.read_bytes() != original_csv:
+        raise ValueError("Review CSV changed during repair: refusing to overwrite it")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    backup = output.with_name(output.name + f".before-repair-{stamp}.bak")
+    temp = output.with_name(output.name + f".repair-{stamp}.tmp")
+    with backup.open("xb") as handle:
+        handle.write(original_csv)
+    try:
+        with temp.open("x", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=COLUMNS, lineterminator="\n")
+            writer.writeheader()
+            for row in repaired.values():
+                writer.writerow(row)
+        load_reviews(temp)
+        os.replace(temp, output)
+    finally:
+        temp.unlink(missing_ok=True)
+    print(f"[V4.1 repair] Completed {len(missing)} corrected row(s).")
+    print(f"[V4.1 repair] Original CSV byte-exact backup: {backup}")
+    print(f"[V4.1 repair] Corrected private CSV: {output}")
+    print("[V4.1 repair] No WAV, model, alert or expected-label changed.")
+    return 0
 
 
 def main() -> int:
@@ -174,7 +301,11 @@ def main() -> int:
     parser.add_argument("--group", choices=GROUPS, default="wrong-top")
     parser.add_argument("--check", action="store_true",
                         help="Verify inputs and list clips without playing")
+    parser.add_argument("--repair-invalid-review", action="store_true",
+                        help="Interactively correct blank saved judgments with backup")
     args = parser.parse_args()
+    if args.check and args.repair_invalid_review:
+        parser.error("Use --check or --repair-invalid-review, not both")
     root = args.data.resolve()
     test_root = resolve_test_root(root, args.test_data.resolve())
     candidate = (args.candidate or root / "artifacts" / V41_NAME).resolve()
@@ -190,7 +321,7 @@ def main() -> int:
         selected = select_rows(entries, args.group)
         if not selected:
             raise ValueError("No WAVs match this review group")
-        reviews = load_reviews(output)
+        reviews = load_reviews(output, allow_missing=args.repair_invalid_review)
         # Verify every prior review, even if today's review group differs.
         reference = {r["file"]: r for r in entries}
         for rel, prior in reviews.items():
@@ -199,6 +330,8 @@ def main() -> int:
             f, sha = recording_file(test_root, reference[rel])
             if prior["sha256"] != sha:
                 raise ValueError(f"Previously reviewed WAV contents changed: {f}")
+        if args.repair_invalid_review:
+            return repair_missing_reviews(output, reviews, reference, test_root, root)
         files = [(row, *recording_file(test_root, row)) for row in selected]
         if len({row["file"] for row, _, _ in files}) != len(files):
             raise ValueError("Duplicate WAV paths in saved V4.1 report")
@@ -256,7 +389,7 @@ def main() -> int:
             )
             if quality == "Q":
                 break
-            append_review(output, {
+            review = {
                 "file": row["file"], "sha256": digest,
                 "expected": row["expected"], "review_group": args.group,
                 "original_seconds": str(acoustics["full_seconds"]),
@@ -266,13 +399,9 @@ def main() -> int:
                 "original_expected_word_audible": original,
                 "selected_expected_word_complete": selected_word,
                 "quality": quality,
-            })
-            reviews[row["file"]] = {
-                **reviews.get(row["file"], {}),
-                "original_expected_word_audible": original,
-                "selected_expected_word_complete": selected_word,
-                "quality": quality,
             }
+            append_review(output, review)
+            reviews[row["file"]] = review
             print("[V4.1 listen] Private review saved. No original audio written or changed.")
         summarize_review(reviews, {row["file"] for row, _, _ in files})
         print(f"[V4.1 listen] Private review CSV: {output}")
