@@ -92,3 +92,59 @@ Do not integrate V4.1 into real alert routing unless prospective
 operational acceptance criteria are met. stable_branch_271026, production
 manual-DTW templates, Camera Alerts, Event History and notifications
 stay untouched.
+
+
+## Next: review the 19 incorrect raw predictions by listening
+
+The observed error distribution is not just the safety gate: EMERGENCY
+was incorrectly classified in **5/5** recordings, AMBULANCE in 4/5,
+INTRUDER and POLICE in 3/5 each, HELP and DANGER in 2/5 each.
+All 12 correct-but-rejected positive predictions failed the original
+0.80 threshold (not the 0.15 margin), but five UNKNOWN recordings
+also ranked an emergency word highest before the fixed gate rejected
+them. Do NOT loosen thresholds on this already-studied cohort.
+
+We must distinguish an **audible complete expected word** from
+a **wrong/missing/truncated V4.1-selected segment**, and both from
+a genuine classifier failure. The following tool plays audio locally
+on Windows using winsound memory buffers. It NEVER writes new WAVs
+or changes the source/model. It writes only a Git-ignored CSV of
+operator judgments, keyed by SHA256 to prevent stale review reuse.
+
+    $testData = Join-Path (Get-Location).Path "local-server\neural-kws-data\independent-v41-test-20261101"
+    .\local-server\audit_noise_kws_v41_playback.cmd --test-data "$testData" --group wrong-top --check
+    .\local-server\audit_noise_kws_v41_playback.cmd --test-data "$testData" --group wrong-top
+
+For each of 19 recordings, the tool plays the ORIGINAL and the V4.1
+selected audio. Confirm what is actually heard:
+- Original expected word audibly complete? Y/N/U
+- V4.1 segment retains the COMPLETE expected word? Y/N/U
+- Audio clarity C=clear, S=soft, N=noisy/distorted, U=uncertain
+- R replays both clips; Q quits, keeping previously saved reviews.
+  Run the same command again to resume without duplicate review rows.
+
+Also audit the 12 correctly ranked but gate-rejected examples and the
+five UNKNOWN files whose raw top classes were emergency words:
+
+    .\local-server\audit_noise_kws_v41_playback.cmd --test-data "$testData" --group correct-rejected
+    .\local-server\audit_noise_kws_v41_playback.cmd --test-data "$testData" --group unknown-suspicious
+
+For UNKNOWN, Y in either spoken-word question means any of the
+seven emergency keywords was audible, not that the label is correct.
+A separate accepted-control group reviews the four correctly accepted
+positive recordings. The "all" group may review the complete 55.
+
+Private CSV location:
+
+    local-server\neural-kws-data\artifacts\noise_temporal_context_v41.manual-audio-review.csv
+
+Interpret human results conservatively. A full, clear expected word
+preserved in the selected audio but still incorrectly ranked suggests
+a genuine model/domain-generalization failure. If the full recording
+does not contain the expected word, fix the training/development
+collection protocol separately; never relabel this 55-WAV test set
+and reuse it for an unbiased final claim. If V4.1 truncates the word,
+investigate localization on NEW development recordings, freeze any
+changes, and evaluate a NEW sealed multi-speaker test set.
+
+This is experimental diagnostics only; no deployment from this outcome.
