@@ -193,3 +193,73 @@ called a sealed final test. Record which spoken words actually occurred,
 using a separate human review log; do not retrain or tune on this
 reviewed cohort. Collect verified new negatives and positives from
 different consenting speakers and test sessions before model selection.
+
+
+## Final completed 20/20 UNKNOWN review and consolidated 55-WAV audit
+
+The operator completed all **20 UNKNOWN** reviews after explicitly repairing the
+one blank segment response (the fifth suspicious UNKNOWN recorded Y in the
+full source but N in the selected V4.1 segment). The manual results:
+
+- **5/20** UNKNOWN-labeled full WAVs had at least one of the seven
+  emergency words according to the operator. Four retained an audible
+  keyword in the V4.1 segment; one did not.
+- **15/20** UNKNOWN-labeled WAVs had NO keyword heard by the operator;
+  all 15 were rated *noisy/distorted*. The five that contained keywords
+  were rated *clear*. This is a potential recording-condition confound,
+  not proof of causation.
+- Previously, the operator inspected 19 wrong-top positive WAVs:
+  17 complete/clear and 2 with missing expected word/noisy original.
+- The 12 correct-top-but-gate-rejected positives were all complete/clear.
+- The 4 correctly accepted original positive examples have not had
+  manual listening review yet. Total reviewed **51/55**.
+
+These review observations mean the previous 0/20 UNKNOWN-false-positive
+metric under folder labels must NOT be advertised as a verified safety
+false-alarm rate. Neither the 5 suspect labels nor the 2 questionable
+positive recordings may be automatically relabeled or excluded to
+inflate accuracy, and the 55-recording dataset is now deeply examined
+and cannot serve as a new, sealed test.
+
+Use the new read-only metadata-only combined report to consolidate
+all manual observations with frozen model predictions:
+
+    git pull --ff-only
+    $testData = Join-Path (Get-Location).Path "local-server\neural-kws-data\independent-v41-test-20261101"
+    .\local-server\audit_noise_kws_v41_dataset_quality.cmd --test-data "$testData" --check
+    .\local-server\audit_noise_kws_v41_dataset_quality.cmd --test-data "$testData"
+
+The first prints a preview only. The second creates a WRITE-ONCE,
+Git-ignored JSON in local-server/neural-kws-data/artifacts named:
+
+    noise_temporal_context_v41.dataset-quality-audit.json
+
+It cross-checks each manually reviewed file's stored SHA256 with the
+currently local WAV file, the original fixed V4.1 metadata with the
+saved benchmark JSON, and each reviewed expected label. It reports
+how many recordings were manually clear, noisy, suspicious, omitted,
+and still unreviewed; retains original folder labels and classification;
+and REFUSES to recompute a post-hoc "clean" test accuracy/FPR.
+
+To finish reviewing the four remaining correctly accepted examples:
+
+    .\local-server\audit_noise_kws_v41_playback.cmd --test-data "$testData" --group accepted-control
+
+Because output is write-once, choose whether to complete this OPTIONAL
+listening control review before running the non-check dataset-quality
+audit, to produce one consistent timestamped final quality summary.
+If a report already exists, leave it intact and use the --check preview
+for the newly updated CSV.
+
+**Next development protocol, not a retest of these recordings:**
+independently verify word and linguistic context, speaker ID/session ID
+and consent. Assemble entirely new speaker-disjoint DEV recordings with
+balanced positive keywords, quiet and noisy UNKNOWN words that do not
+include any trigger keyword, room speech, far-field microphone changes,
+and both hard-negative speech and environmental noise. Use these NEW
+development materials to choose any changes in CNN representation,
+augmentation, calibration or rejection thresholds, then lock all model
+choices before evaluating ANOTHER untouched multi-speaker final cohort.
+Also run continuous negatives and report false alerts per hour and
+latency, not just short WAV percentages. Keep the original V4.1
+weights, report, stable app, manual DTW KWS and alerts intact.
