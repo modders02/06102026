@@ -62,11 +62,9 @@ export function normalizeDistressFaceLabel(
   const normalized = (expression ?? '').trim().toLowerCase();
   if (normalized === 'angry' || normalized === 'anger') return 'Angry';
   if (normalized === 'sad' || normalized === 'sadness') return 'Sad';
-  if (
-    normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened'
-    || normalized === 'surprised' || normalized === 'surprise'
-    || normalized === 'shock' || normalized === 'shocked'
-  ) return 'Frightened';
+  if (normalized === 'fearful' || normalized === 'fear' || normalized === 'frightened') {
+    return 'Frightened';
+  }
   return null;
 }
 
