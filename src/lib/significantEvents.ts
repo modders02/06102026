@@ -1,5 +1,6 @@
 import type { DetectionEvent } from '@/types/multicam';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
+import { historyEmotionMeta, HISTORY_EXPRESSION_MIN_CONFIDENCE } from '@/lib/emotionEvents';
 
 type EventCandidate = Omit<DetectionEvent, 'id'> | DetectionEvent;
 
@@ -11,13 +12,18 @@ export const SIGNIFICANT_EVENT_COOLDOWN_MS = 45_000;
  * Camera HISTORY is independent of the audio/facial alert-validation state:
  * detector-confirmed visual fire/smoke and credible collapse can be worth
  * documenting even when the audio validation was rejected, absent or pending.
- * Only a true, separately validated multimodal trigger may use the word
- * "Verified". Routine people, neutral expression, raw speech and saliency
- * are not significant events. Existing fusion still exclusively controls
- * Camera Alerts, notifications and emergency recordings.
+ * Stable, confident facial-expression changes are also retained as
+ * informational history observations. They are never Camera Alerts and are
+ * not diagnoses of mood or distress. Routine people/objects, raw speech and
+ * saliency are not significant events. Existing fusion still exclusively
+ * controls Camera Alerts, notifications and emergency recordings.
  */
 export function isSignificantHistoryEvent(event: EventCandidate): boolean {
   if (!event || !Number.isFinite(event.confidence)) return false;
+  if (event.type === 'emotion') {
+    return event.confidence >= HISTORY_EXPRESSION_MIN_CONFIDENCE
+      && historyEmotionMeta(event.label) !== null;
+  }
   if (event.type === 'multimodal-distress') {
     // Archived alerts have priorityScenario=false even though their original
     // accepted evidence remains valid. Do not discard that evidence.
