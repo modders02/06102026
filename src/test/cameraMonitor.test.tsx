@@ -474,7 +474,7 @@ describe('camera snapshots and page-scoped playback', () => {
     ['neutral', 'Neutral', false, ''],
     ['disgusted', 'Disgust', false, ''],
   ] as const)('records %s as a non-alert emotion event', async (expression, label, distressDetected, distressLabel) => {
-    mocked.analyzeFace.mockImplementationOnce(async () => {
+    mocked.analyzeFace.mockImplementation(async () => {
       const severeCarryover = ['sad', 'neutral', 'disgusted'].includes(expression);
       mocked.distress = { hasFace: true, expression, probability: 0.94, distressScore: severeCarryover ? 94 : 0, distressLevel: severeCarryover ? 'severe' : 'none' };
     });
@@ -1370,7 +1370,7 @@ describe('camera snapshots and page-scoped playback', () => {
 
   it('does not alert on Sad + screaming', async () => {
     mocked.getAudioEvents.mockResolvedValueOnce({ events: [screamAudioEvent], status: null });
-    mocked.analyzeFace.mockImplementationOnce(async () => {
+    mocked.analyzeFace.mockImplementation(async () => {
       mocked.distress = { hasFace: true, expression: 'sad', probability: 0.94, distressScore: 90, distressLevel: 'severe' };
     });
     const slot = { ...makeSlot(1), ip: '192.168.1.1', connected: true };
