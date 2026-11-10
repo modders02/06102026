@@ -140,6 +140,32 @@ describe('live validation and significant event history', () => {
     expect(screen.queryByText(/Last checked/)).not.toBeInTheDocument();
   });
 
+  it('shows Happy and other stable facial expressions in Event History without creating Camera Alerts', () => {
+    mocks.events = [
+      { id: 'happy', cameraId: 'validation-history', cameraName: 'Kitchen camera',
+        location: 'Kitchen', type: 'emotion', label: 'Happy', confidence: 0.94,
+        timestamp: '2026-10-15T00:58:00Z' },
+      { id: 'surprised', cameraId: 'validation-history', cameraName: 'Kitchen camera',
+        location: 'Kitchen', type: 'emotion', label: 'Surprised', confidence: 0.91,
+        timestamp: '2026-10-15T00:57:00Z' },
+      { id: 'neutral', cameraId: 'validation-history', cameraName: 'Kitchen camera',
+        location: 'Kitchen', type: 'emotion', label: 'Neutral', confidence: 0.88,
+        timestamp: '2026-10-15T00:56:00Z' },
+    ];
+    render(<MemoryRouter><DashboardEvents /></MemoryRouter>);
+
+    const history = screen.getByRole('region', { name: 'Event history' });
+    expect(history).toHaveTextContent('Happy');
+    expect(history).toHaveTextContent('Surprised');
+    expect(history).toHaveTextContent('Neutral');
+    expect(within(history).getByText('3')).toBeInTheDocument();
+
+    const alerts = screen.getByRole('region', { name: 'Camera alerts' });
+    expect(alerts).toHaveTextContent('No camera alerts yet.');
+    expect(alerts).not.toHaveTextContent('Happy');
+    expect(alerts).not.toHaveTextContent('Surprised');
+  });
+
   it('shows a significant confirmed smoke incident without showing its rejected audio validation', () => {
     mocks.events = [{
       id: 'recorded-check', cameraId: 'validation-history', cameraName: 'Kitchen camera',
