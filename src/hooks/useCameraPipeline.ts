@@ -18,7 +18,7 @@ import { createFireState, detectFire } from '@/lib/fireDetection';
 import { describeAudioStatus, getAudioEvents, getCameraSnapshot } from '@/lib/multiCamServer';
 import { useFaceDistress } from '@/hooks/useFaceDistress';
 import type { FinalSpeechResult } from '@/hooks/useSpeechRecognition';
-import { historyEmotionMeta } from '@/lib/emotionEvents';
+import { createEmotionHistoryTracker, historyEmotionMeta, observeEmotionHistory } from '@/lib/emotionEvents';
 import { isPriorityCameraAlert } from '@/lib/priorityScenario';
 import {
   FIRE_FUSION_WINDOW_MS,
@@ -185,6 +185,7 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   const attentionAlertKeyRef = useRef<string | null>(null);
 
   const cooldownRef = useRef<Record<string, number>>({});
+  const emotionHistoryRef = useRef(createEmotionHistoryTracker());
   const retryRef = useRef(0);
   const runtimeRef = useRef<CameraRuntime>(emptyRuntime(camera.id));
 
@@ -374,7 +375,8 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
         || type === 'fire'
         || type === 'smoke'
         || type === 'motion-anomaly'
-        || type === 'attention-alert';
+        || type === 'attention-alert'
+        || type === 'emotion'; // Stable expression transitions are deduplicated by emotionHistoryRef.
       const cooldownMs = edgeDeduped ? 0 : (settings.alertCooldownMs ?? 3000);
       if (cooldownMs > 0 && cooldownRef.current[key] && now - cooldownRef.current[key] < cooldownMs) return;
       if (cooldownMs > 0) cooldownRef.current[key] = now;
@@ -1041,7 +1043,10 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
   // Expressions alone never alert. Each accepted word must match its configured
   // expression; Sad is available only to the ambulance pairing.
   useEffect(() => {
-    if (!camera.enabled || !camera.aiEnabled || faceAnalysisRevisionRef.current !== analysisRevisionRef.current) return;
+    if (!camera.enabled || !camera.aiEnabled || faceAnalysisRevisionRef.current !== analysisRevisionRef.current) {
+      emotionHistoryRef.current = createEmotionHistoryTracker();
+      return;
+    }
     const d = face.distress;
     const emotion = historyEmotionMeta(d.expression);
     const fusionExpression = d.hasFace && isMultimodalDistressExpression(d.expression);
@@ -1078,8 +1083,17 @@ export function useCameraPipeline({ camera, settings, onEvent, managedVideo = fa
       });
     }
 
-    if (d.hasFace && emotion && d.probability >= DISTRESS_FACE_MIN_CONFIDENCE) {
-      emit('emotion', emotion.label, d.probability);
+    const historyObservation = observeEmotionHistory(
+      emotionHistoryRef.current,
+      d.expression,
+      d.probability,
+      d.hasFace,
+    );
+    emotionHistoryRef.current = historyObservation.state;
+    if (historyObservation.event) {
+      // Stable expression changes are informational history only. They never
+      // enter the accepted audio + camera emergency fusion path.
+      emit('emotion', historyObservation.event.label, d.probability);
     }
 
     if (fusionExpression && distressFace) {
