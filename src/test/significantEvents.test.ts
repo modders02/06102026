@@ -26,14 +26,23 @@ const verifiedFire = evt('fire', {
     emotion: 'visual fire', reason: 'Accepted word and camera fire region' },
 });
 
-describe('incident-only Event History significance policy', () => {
-  it('does not log routine footage or emotion labels, regardless of model confidence', () => {
-    for (const type of ['object', 'human', 'emotion', 'saliency', 'attention-alert',
+describe('significant Event History policy', () => {
+  it('does not log routine footage, invalid emotion labels, or weak expression guesses', () => {
+    for (const type of ['object', 'human', 'saliency', 'attention-alert',
       'face-distress', 'audio-distress'] as const) {
       expect(isSignificantHistoryEvent(evt(type, { confidence: 1, label: 'Neutral' }))).toBe(false);
     }
     expect(isSignificantHistoryEvent(evt('object', { label: 'person', confidence: 0.99 }))).toBe(false);
     expect(isSignificantHistoryEvent(evt('audio-distress', { label: 'Wake word: "help"' }))).toBe(false);
+  });
+  it('records every supported facial expression as informational history, never as an alert', () => {
+    for (const label of ['Happy', 'Sad', 'Angry', 'Frightened', 'Surprised', 'Shock', 'Neutral', 'Disgust']) {
+      const emotion = evt('emotion', { label, confidence: 0.80 });
+      expect(isSignificantHistoryEvent(emotion)).toBe(true);
+      expect(isPriorityCameraAlert(emotion)).toBe(false);
+    }
+    expect(isSignificantHistoryEvent(evt('emotion', { label: 'Unknown', confidence: 0.99 }))).toBe(false);
+    expect(isSignificantHistoryEvent(evt('emotion', { label: 'Happy', confidence: 0.40 }))).toBe(false);
   });
   it('retains exact accepted audio+visual evidence and archived alert history', () => {
     expect(isSignificantHistoryEvent(verifiedHelp)).toBe(true);
