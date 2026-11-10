@@ -18,10 +18,6 @@ describe('multimodal distress fusion', () => {
     ['fearful', 'Frightened'],
     ['fear', 'Frightened'],
     ['frightened', 'Frightened'],
-    ['surprised', 'Frightened'],
-    ['surprise', 'Frightened'],
-    ['shock', 'Frightened'],
-    ['shocked', 'Frightened'],
     ['sad', 'Sad'],
     ['sadness', 'Sad'],
   ] as const)('accepts a reliable %s face', (expression, label) => {
@@ -32,11 +28,15 @@ describe('multimodal distress fusion', () => {
     });
   });
 
-  it('rejects weak or non-target facial expressions', () => {
+  it('rejects weak, non-distress, and surprised facial expressions', () => {
     expect(makeDistressFaceSignal('angry', DISTRESS_FACE_MIN_CONFIDENCE - 0.01, 1000)).toBeNull();
     expect(makeDistressFaceSignal('happy', 0.99, 1000)).toBeNull();
     expect(makeDistressFaceSignal('neutral', 0.99, 1000)).toBeNull();
     expect(makeDistressFaceSignal('disgusted', 0.99, 1000)).toBeNull();
+    for (const expression of ['surprised', 'surprise', 'shock', 'shocked']) {
+      expect(makeDistressFaceSignal(expression, 0.99, 1000)).toBeNull();
+      expect(isKeywordFaceCompatible('help', expression)).toBe(false);
+    }
   });
 
   it.each([
@@ -72,8 +72,6 @@ describe('multimodal distress fusion', () => {
     ['angry', 'Angry'],
     ['fearful', 'Frightened'],
     ['frightened', 'Frightened'],
-    ['surprised', 'Frightened'],
-    ['shock', 'Frightened'],
   ] as const)('verifies accepted help with %s', (expression, label) => {
     const face = makeDistressFaceSignal(expression, 0.92, 5000)!;
     const help = makeDistressSpeechSignal('help', 0.95, 7000)!;
@@ -114,7 +112,7 @@ describe('multimodal distress fusion', () => {
 
   it.each(Object.keys(KEYWORD_FACE_PAIRINGS))('rejects incompatible and missing facial evidence for %s', keyword => {
     const speech = makeDistressSpeechSignal(keyword, 0.96, 1200);
-    for (const expression of ['Angry', 'Frightened', 'Sad', 'Happy', 'Neutral', 'Disgust']) {
+    for (const expression of ['Angry', 'Frightened', 'Sad', 'Happy', 'Neutral', 'Disgust', 'Surprised', 'Shock']) {
       if (!isKeywordFaceCompatible(keyword, expression)) {
         expect(fuseDistressSignals(makeDistressFaceSignal(expression, 0.94, 1000), speech)).toBeNull();
       }
